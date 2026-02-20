@@ -556,6 +556,50 @@ body,
   text-shadow: 0 12px 24px rgba(0,0,0,0.45);
 }
 
+.glass-cta--hero .glass-cta__inner {
+  height: 56px;
+  border-color: rgba(255, 219, 150, 0.68);
+  background:
+    radial-gradient(
+      160px 100px at var(--rx, 50%) var(--ry, 50%),
+      rgba(255,255,255,0.28),
+      transparent 70%
+    ),
+    linear-gradient(102deg, rgba(255, 179, 58, 0.96) 0%, rgba(252, 141, 46, 0.95) 52%, rgba(134, 82, 255, 0.92) 100%);
+  box-shadow:
+    0 20px 42px rgba(39, 19, 7, 0.46),
+    0 0 0 1px rgba(255, 255, 255, 0.14) inset,
+    0 0 34px rgba(255, 171, 72, 0.34);
+}
+
+.glass-cta--hero .glass-cta__rim {
+  background: linear-gradient(
+    180deg,
+    rgba(255,255,255,0.34),
+    rgba(255,255,255,0.1) 45%,
+    rgba(255,255,255,0.04)
+  );
+  opacity: 0.78;
+}
+
+.glass-cta--hero .glass-cta__text {
+  color: rgba(255, 255, 255, 0.99);
+  font-weight: 700;
+  letter-spacing: 0.24px;
+  text-shadow: 0 10px 20px rgba(28, 16, 8, 0.34);
+}
+
+.glass-cta--hero .glass-cta__icon img {
+  filter: drop-shadow(0 8px 14px rgba(44, 18, 6, 0.38));
+}
+
+.glass-cta--hero .glass-cta__spark {
+  opacity: 0.82;
+  background:
+    radial-gradient(140px 54px at 22% 50%, rgba(255, 255, 255, 0.16), transparent 78%),
+    radial-gradient(170px 66px at 78% 50%, rgba(255, 255, 255, 0.10), transparent 78%);
+}
+
 .glass-cta.is-error .glass-cta__inner {
   animation: cta-error 520ms ease;
   border-color: rgba(255, 90, 120, 0);

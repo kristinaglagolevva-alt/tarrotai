@@ -1493,6 +1493,7 @@ useEffect(() => {
   // карты результата (пока mock)
   const [threeCards, setThreeCards] = useState<ThreeCardResult[]>([])
   const [threeDayKey, setThreeDayKey] = useState<string>('') // дата расклада (как в карте дня)
+  const [threeShowMeaning, setThreeShowMeaning] = useState(false)
 
 
   // ✅ ВАЖНО: порядок = какая карта (0/1/2) стоит в каком слоте (лев/центр/прав)
@@ -1512,9 +1513,20 @@ useEffect(() => {
 
   // чтобы “финиш” (возврат к 123 и readyToOpen) сработал ровно 1 раз
   const threeFinishingRef = useRef(false)
+  const threeMeaningTimerRef = useRef<number | null>(null)
+  const threeRequestSeqRef = useRef(0)
 
   const THREE_SHAKE_THRESHOLD = 8.8
   const THREE_SHAKE_STEP_BASE = 0.085
+
+  useEffect(() => {
+    return () => {
+      if (threeMeaningTimerRef.current) {
+        window.clearTimeout(threeMeaningTimerRef.current)
+        threeMeaningTimerRef.current = null
+      }
+    }
+  }, [])
 
   /* =============================================================================================
     [20.3] РАСКЛАД "ПРОШЛОЕ • НАСТОЯЩЕЕ • БУДУЩЕЕ": 3 ЭКРАНА (SETUP → SHUFFLE → RESULT)
@@ -2074,10 +2086,16 @@ useEffect(() => {
   }
 
   const resetThreeCardsState = () => {
+    if (threeMeaningTimerRef.current) {
+      window.clearTimeout(threeMeaningTimerRef.current)
+      threeMeaningTimerRef.current = null
+    }
+
     setThreeScreen('setup')
     setThreeShakeEnabled(false)
     setThreeShuffleProgress(0)
     setThreeReadyToOpen(false)
+    setThreeShowMeaning(false)
 
     setThreeCards([])
     setThreeOrder([0, 1, 2])
@@ -2087,6 +2105,7 @@ useEffect(() => {
     setThreeLoading(false)
 
     threeFinishingRef.current = false
+    threeRequestSeqRef.current += 1
     threeLastSwapAtRef.current = 0
 
     threeLastAccelRef.current = null
@@ -2126,6 +2145,7 @@ useEffect(() => {
     // Reset description and mark as loading while we fetch from the backend
     setThreeDesc('')
     setThreeLoading(true)
+    setThreeShowMeaning(false)
     // дата расклада (Europe/Vilnius) — используем уже существующий helper
     setThreeDayKey(getVilniusDayKey())
     // переходим на экран перемешивания
@@ -2143,8 +2163,11 @@ useEffect(() => {
       hapticPulse(0.35)
     } catch {}
 
-    // подгружаем реальные карты: fallback на мок при ошибках
+    // Запрос запускаем сразу в момент начала шейка (до открытия карт), чтобы сократить ожидание результата.
+    const requestSeq = threeRequestSeqRef.current + 1
+    threeRequestSeqRef.current = requestSeq
     buildThreeCardsReal().then((cards) => {
+      if (threeRequestSeqRef.current !== requestSeq) return
       setThreeCards(cards)
       setThreeLoading(false)
     })
@@ -2164,6 +2187,7 @@ useEffect(() => {
   const finishThreeShuffle = () => {
     if (threeFinishingRef.current) return
     threeFinishingRef.current = true
+    setThreeShowMeaning(false)
 
     // ✅ по итогу карты “на своих местах” (возвращаемся к 123) и даём время доехать анимации
     setThreeShakeEnabled(false)
@@ -2178,6 +2202,12 @@ useEffect(() => {
         try {
           hapticPulse(0.7)
         } catch {}
+
+        // Сначала визуально раскрываем карты, потом показываем текст интерпретации.
+        if (threeMeaningTimerRef.current) window.clearTimeout(threeMeaningTimerRef.current)
+        threeMeaningTimerRef.current = window.setTimeout(() => {
+          setThreeShowMeaning(true)
+        }, 520)
       }, 180)
     }, 420)
   }
@@ -4453,32 +4483,38 @@ useEffect(() => {
 
                           <div style={{ height: 10 }} />
 
-                          {/* Loading indicator while waiting for backend */}
-                          {threeLoading && (
-                            <p style={{ opacity: 0.8, marginTop: 10 }}>
-                              Идет получение ответа от сервера...
-                            </p>
+                          {!threeShowMeaning ? (
+                            <p style={{ opacity: 0.8, marginTop: 10 }}>Карты раскрываются…</p>
+                          ) : (
+                            <>
+                              {/* Loading indicator while waiting for backend */}
+                              {threeLoading && (
+                                <p style={{ opacity: 0.8, marginTop: 10 }}>
+                                  Идёт анализ расклада...
+                                </p>
+                              )}
+
+                              {/* Description from backend */}
+                              {!!threeDesc && (
+                                <div style={{ marginTop: 10 }}>
+                                  <MarkdownText text={threeDesc} />
+                                  <div style={{ height: 10 }} />
+                                </div>
+                              )}
+
+                              {threeCards.map((c, idx) => (
+                                <div key={`${c.role}-${idx}`} style={{ marginTop: idx === 0 ? 0 : 14 }}>
+                                  <p style={{ marginTop: 0, marginBottom: 8 }}>
+                                    <b>
+                                      {c.role}: {c.name}
+                                    </b>
+                                  </p>
+
+                                  <MarkdownText text={c.text || ''} />
+                                </div>
+                              ))}
+                            </>
                           )}
-
-                          {/* Description from backend */}
-                          {!!threeDesc && (
-                            <div style={{ marginTop: 10 }}>
-                              <MarkdownText text={threeDesc} />
-                              <div style={{ height: 10 }} />
-                            </div>
-                          )}
-
-                          {threeCards.map((c, idx) => (
-                            <div key={`${c.role}-${idx}`} style={{ marginTop: idx === 0 ? 0 : 14 }}>
-                              <p style={{ marginTop: 0, marginBottom: 8 }}>
-                                <b>
-                                  {c.role}: {c.name}
-                                </b>
-                              </p>
-
-                              <MarkdownText text={c.text || ''} />
-                            </div>
-                          ))}
                         </div>
                       </div>
                     </div>

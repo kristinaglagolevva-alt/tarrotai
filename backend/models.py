@@ -10,6 +10,7 @@ from sqlalchemy import (
     Integer,
     JSON,
     Text,
+    UniqueConstraint,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -26,6 +27,8 @@ class User(Base):
     first_name: Mapped[Optional[str]] = mapped_column(String(128))
     last_name: Mapped[Optional[str]] = mapped_column(String(128))
     photo_url: Mapped[Optional[str]] = mapped_column(String(512))
+    subscription_until: Mapped[Optional[DateTime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    paid_readings_balance: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
 
     created_at: Mapped[DateTime] = mapped_column(
         DateTime(timezone=True),
@@ -38,6 +41,11 @@ class User(Base):
     )
 
     readings: Mapped[List["Reading"]] = relationship(
+        back_populates="user",
+        cascade="all, delete-orphan",
+    )
+
+    payment_transactions: Mapped[List["PaymentTransaction"]] = relationship(
         back_populates="user",
         cascade="all, delete-orphan",
     )
@@ -101,3 +109,33 @@ class Reading(Base):
     )
 
     user: Mapped["User"] = relationship(back_populates="readings")
+
+
+class PaymentTransaction(Base):
+    __tablename__ = "payment_transactions"
+    __table_args__ = (
+        UniqueConstraint("telegram_payment_charge_id", name="uq_payment_transactions_tg_charge"),
+        UniqueConstraint("provider_payment_charge_id", name="uq_payment_transactions_provider_charge"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+
+    invoice_payload: Mapped[str] = mapped_column(String(128), default="", index=True)
+    product_code: Mapped[str] = mapped_column(String(64), index=True)
+    kind: Mapped[str] = mapped_column(String(32), default="credits")
+
+    amount: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    currency: Mapped[str] = mapped_column(String(8), default="RUB")
+    credits_delta: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    subscription_days: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+
+    telegram_payment_charge_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    provider_payment_charge_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+
+    created_at: Mapped[DateTime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+    )
+
+    user: Mapped["User"] = relationship(back_populates="payment_transactions")

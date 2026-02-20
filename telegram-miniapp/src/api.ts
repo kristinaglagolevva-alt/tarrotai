@@ -35,6 +35,23 @@ export async function getMe(token: string): Promise<any> {
   })
 }
 
+export type BillingStatusDto = {
+  free_limit: number
+  month_used: number
+  free_left: number
+  paid_readings_balance: number
+  subscription_until?: string | null
+  has_active_subscription?: boolean
+  can_create_reading?: boolean
+}
+
+export async function getBillingStatus(token: string): Promise<BillingStatusDto> {
+  return apiJson(`${API_BASE}/billing/status`, {
+    method: 'GET',
+    headers: { Authorization: `Bearer ${token}` },
+  })
+}
+
 /**
  * Telegram auth.
  * Можно вызывать без аргументов: возьмём initData из window.Telegram.WebApp.

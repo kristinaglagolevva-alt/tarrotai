@@ -4,7 +4,16 @@
 
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import './App.css'
-import { telegramAuth, getMe, getCardOfDayToday, createCardOfDay, getCardOfDayHistory, analyzeSpreadPhoto, createReading } from './api'
+import {
+  telegramAuth,
+  getMe,
+  getBillingStatus,
+  getCardOfDayToday,
+  createCardOfDay,
+  getCardOfDayHistory,
+  analyzeSpreadPhoto,
+  createReading,
+} from './api'
 
 
 
@@ -585,6 +594,19 @@ function PremiumFlipCard({
 
 type Stage = 'question' | 'spread'
 type View = 'home' | 'card_day_prep' | 'three_cards_prep' | 'past_present_future_prep' | 'decision_prep' | 'photo_analysis'
+type BillingStatus = {
+  free_limit: number
+  month_used: number
+  free_left: number
+  paid_readings_balance: number
+  subscription_until?: string | null
+  has_active_subscription?: boolean
+  can_create_reading?: boolean
+}
+
+const BOT_USERNAME =
+  ((import.meta as any).env?.VITE_BOT_USERNAME as string | undefined)?.trim() || 'Tarot_AI_Bot'
+const BOT_PAYMENT_URL = `https://t.me/${BOT_USERNAME}?start=menu`
 
 export default function App() {
   /* =============================================================================================
@@ -606,6 +628,7 @@ const [token, setToken] = useState<string | null>(() => {
 })
 
 const [user, setUser] = useState<any>(null)
+const [billing, setBilling] = useState<BillingStatus | null>(null)
 const [authStatus, setAuthStatus] = useState<AuthStatus>('loading')
 const [authError, setAuthError] = useState<string>('')
 
@@ -632,8 +655,13 @@ useEffect(() => {
     if (token) {
       try {
         const me = await getMe(token)
+        let billingOut: BillingStatus | null = null
+        try {
+          billingOut = await getBillingStatus(token)
+        } catch {}
         safe(() => {
           setUser(me)
+          setBilling(billingOut)
           setAuthStatus('ready')
         })
         return
@@ -645,6 +673,7 @@ useEffect(() => {
         safe(() => {
           setToken(null)
           setUser(null)
+          setBilling(null)
         })
       }
     }
@@ -660,6 +689,10 @@ useEffect(() => {
       }
 
       const res = await telegramAuth()
+      let billingOut: BillingStatus | null = null
+      try {
+        billingOut = await getBillingStatus(res.token)
+      } catch {}
 
       try {
         localStorage.setItem('jwt', res.token)
@@ -668,6 +701,7 @@ useEffect(() => {
       safe(() => {
         setToken(res.token)
         setUser(res.user)
+        setBilling(billingOut)
         setAuthStatus('ready')
       })
     } catch (e) {
@@ -679,6 +713,7 @@ useEffect(() => {
       safe(() => {
         setToken(null)
         setUser(null)
+        setBilling(null)
         setAuthStatus('error')
         setAuthError('Не удалось авторизоваться. Перезапустите мини‑приложение в Telegram.')
       })
@@ -694,6 +729,56 @@ useEffect(() => {
 }, [token])/* =============================================================================================
      [9] БАЗОВОЕ СОСТОЯНИЕ UI
   ============================================================================================= */
+
+  const refreshBilling = async (jwt: string | null | undefined = token) => {
+    if (!jwt) {
+      setBilling(null)
+      return
+    }
+    try {
+      const out = await getBillingStatus(jwt)
+      setBilling(out)
+    } catch {}
+  }
+
+  const readBackendErrorDetail = (raw: string): any => {
+    const text = String(raw || '').trim()
+    if (!text) return null
+    const fromColon = text.indexOf(': {')
+    const fromBrace = text.indexOf('{')
+    const idx = fromColon >= 0 ? fromColon + 2 : fromBrace
+    if (idx < 0) return null
+    try {
+      return JSON.parse(text.slice(idx))
+    } catch {
+      return null
+    }
+  }
+
+  const readingLimitMessage =
+    `Бесплатный лимит раскладов за месяц исчерпан.\n\n` +
+    `Оплатите пакет/подписку в боте: ${BOT_PAYMENT_URL}`
+
+  const formatRuDate = (value?: string | null) => {
+    if (!value) return '—'
+    const d = new Date(value)
+    if (!Number.isFinite(d.getTime())) return '—'
+    return d.toLocaleDateString('ru-RU')
+  }
+
+  const mapReadingError = (raw: string) => {
+    const msg = String(raw || '').trim()
+    const parsed = readBackendErrorDetail(msg)
+    const detail = parsed?.detail
+
+    if (detail?.code === 'READING_LIMIT_EXCEEDED' || /READING_LIMIT_EXCEEDED|402/i.test(msg)) {
+      return readingLimitMessage
+    }
+    if (/401|403/i.test(msg)) return 'Сессия устарела. Перезапустите мини-приложение и попробуйте снова.'
+    if (/503|service unavailable/i.test(msg)) return 'AI-сервис временно недоступен. Повторите через минуту.'
+    if (typeof detail === 'string' && detail.trim()) return detail.trim()
+    return msg || 'Не удалось получить ответ от сервера.'
+  }
 
   const [needsMotionPermission, setNeedsMotionPermission] = useState(false)
   const [pressed, setPressed] = useState(false)
@@ -1983,6 +2068,11 @@ useEffect(() => {
   const mapPhotoError = (raw: string) => {
     const msg = (raw || '').trim()
     if (!msg) return 'Не удалось получить ответ от AI.'
+    const parsed = readBackendErrorDetail(msg)
+    const detail = parsed?.detail
+    if (detail?.code === 'READING_LIMIT_EXCEEDED' || /READING_LIMIT_EXCEEDED|402/i.test(msg)) {
+      return readingLimitMessage
+    }
     if (/401|403/i.test(msg)) return 'Сессия устарела. Перезапустите мини-приложение и попробуйте снова.'
     if (/413|too large/i.test(msg)) return 'Фото слишком большое. Выберите более лёгкое изображение.'
     if (/415|unsupported/i.test(msg)) return 'Формат фото не поддерживается. Лучше использовать JPG или PNG.'
@@ -1990,6 +2080,7 @@ useEffect(() => {
     if (/load failed|failed to fetch|networkerror/i.test(msg)) {
       return 'Не удалось отправить фото на сервер. Проверьте интернет и попробуйте ещё раз.'
     }
+    if (typeof detail === 'string' && detail.trim()) return detail.trim()
     return msg
   }
 
@@ -2040,9 +2131,11 @@ useEffect(() => {
         cards: (out as any)?.cards || [],
       })
       setPhotoStatus('done')
+      void refreshBilling(token)
     } catch (err: any) {
       setPhotoStatus('error')
       setPhotoError(mapPhotoError(String(err?.message || '')))
+      void refreshBilling(token)
     }
   }
 
@@ -2169,6 +2262,12 @@ useEffect(() => {
     buildThreeCardsReal().then((cards) => {
       if (threeRequestSeqRef.current !== requestSeq) return
       setThreeCards(cards)
+      setThreeLoading(false)
+    }).catch((err: any) => {
+      if (threeRequestSeqRef.current !== requestSeq) return
+      console.warn('[reading] three_cards failed:', err)
+      setThreeCards([])
+      setThreeDesc(mapReadingError(String(err?.message || err || '')))
       setThreeLoading(false)
     })
   }
@@ -2385,6 +2484,11 @@ useEffect(() => {
     // подгружаем реальные карты: fallback на мок при ошибках
     buildPpfCardsReal().then((cards) => {
       setPpfCards(cards)
+      setPpfLoading(false)
+    }).catch((err: any) => {
+      console.warn('[reading] ppf failed:', err)
+      setPpfCards([])
+      setPpfDesc(mapReadingError(String(err?.message || err || '')))
       setPpfLoading(false)
     })
   }
@@ -2615,37 +2719,33 @@ useEffect(() => {
     if (!token) {
       return buildThreeCardsMock()
     }
-    try {
-      const params = {
-        spread_type: 'three_cards' as const,
-        topic: topic,
-        question: threeQuestion.trim(),
-        consider_reversed: true,
-      }
-      const reading: any = await createReading(token, params)
-      // Save the description from the backend so we can display it in the UI
-      setThreeDesc(String(reading?.description ?? ''))
-      const roles = ['Карта 1', 'Карта 2', 'Карта 3']
-      return (reading.cards || []).slice(0, 3).map((c: any, i: number) => {
-        const idx = Number(c.card_index ?? 0)
-        const url = FRONT_CARD_URLS[idx] || backCardImg
-        const isReversed = Boolean(c?.is_reversed)
-        const baseName = String(c.card_name || cardNameFromUrl(url))
-        const name = isReversed ? `${baseName} (перевёрнутая)` : baseName
-        const text = String(c.meaning || '').trim() || ''
-        return {
-          idx,
-          url,
-          name,
-          role: roles[i] || `Карта ${i + 1}`,
-          text,
-          isReversed,
-        }
-      })
-    } catch (e) {
-      console.warn('[reading] three_cards fallback to mock:', e)
-      return buildThreeCardsMock()
+    const params = {
+      spread_type: 'three_cards' as const,
+      topic: topic,
+      question: threeQuestion.trim(),
+      consider_reversed: true,
     }
+    const reading: any = await createReading(token, params)
+    void refreshBilling(token)
+    // Save the description from the backend so we can display it in the UI
+    setThreeDesc(String(reading?.description ?? ''))
+    const roles = ['Карта 1', 'Карта 2', 'Карта 3']
+    return (reading.cards || []).slice(0, 3).map((c: any, i: number) => {
+      const idx = Number(c.card_index ?? 0)
+      const url = FRONT_CARD_URLS[idx] || backCardImg
+      const isReversed = Boolean(c?.is_reversed)
+      const baseName = String(c.card_name || cardNameFromUrl(url))
+      const name = isReversed ? `${baseName} (перевёрнутая)` : baseName
+      const text = String(c.meaning || '').trim() || ''
+      return {
+        idx,
+        url,
+        name,
+        role: roles[i] || `Карта ${i + 1}`,
+        text,
+        isReversed,
+      }
+    })
   }
 
   // Build Past-Present-Future reading with real LLM meanings
@@ -2653,44 +2753,40 @@ useEffect(() => {
     if (!token) {
       return buildPpfCardsMock()
     }
-    try {
-      const params = {
-        spread_type: 'ppf' as const,
-        topic: topic,
-        question: ppfQuestion.trim(),
-        consider_reversed: true,
-      }
-      const reading: any = await createReading(token, params)
-      // Save description returned from the backend
-      setPpfDesc(String(reading?.description ?? ''))
-      const roles = ['Прошлое', 'Настоящее', 'Будущее']
-      const focusLine =
-        ppfFocus === 'past'
-          ? 'Фокус: прошлое — что привело к ситуации?'
-          : ppfFocus === 'present'
-          ? 'Фокус: настоящее — что происходит прямо сейчас?'
-          : 'Фокус: будущее — куда ведёт текущая динамика?'
-      return (reading.cards || []).slice(0, 3).map((c: any, i: number) => {
-        const idx = Number(c.card_index ?? 0)
-        const url = FRONT_CARD_URLS[idx] || backCardImg
-        const isReversed = Boolean(c?.is_reversed)
-        const baseName = String(c.card_name || cardNameFromUrl(url))
-        const name = isReversed ? `${baseName} (перевёрнутая)` : baseName
-        const meaning = String(c.meaning || '').trim() || ''
-        const text = `${focusLine}\n\n${meaning}`
-        return {
-          idx,
-          url,
-          name,
-          role: roles[i] || '',
-          text,
-          isReversed,
-        }
-      })
-    } catch (e) {
-      console.warn('[reading] past_present_future fallback to mock:', e)
-      return buildPpfCardsMock()
+    const params = {
+      spread_type: 'ppf' as const,
+      topic: topic,
+      question: ppfQuestion.trim(),
+      consider_reversed: true,
     }
+    const reading: any = await createReading(token, params)
+    void refreshBilling(token)
+    // Save description returned from the backend
+    setPpfDesc(String(reading?.description ?? ''))
+    const roles = ['Прошлое', 'Настоящее', 'Будущее']
+    const focusLine =
+      ppfFocus === 'past'
+        ? 'Фокус: прошлое — что привело к ситуации?'
+        : ppfFocus === 'present'
+        ? 'Фокус: настоящее — что происходит прямо сейчас?'
+        : 'Фокус: будущее — куда ведёт текущая динамика?'
+    return (reading.cards || []).slice(0, 3).map((c: any, i: number) => {
+      const idx = Number(c.card_index ?? 0)
+      const url = FRONT_CARD_URLS[idx] || backCardImg
+      const isReversed = Boolean(c?.is_reversed)
+      const baseName = String(c.card_name || cardNameFromUrl(url))
+      const name = isReversed ? `${baseName} (перевёрнутая)` : baseName
+      const meaning = String(c.meaning || '').trim() || ''
+      const text = `${focusLine}\n\n${meaning}`
+      return {
+        idx,
+        url,
+        name,
+        role: roles[i] || '',
+        text,
+        isReversed,
+      }
+    })
   }
 
   // Build Decision reading with real LLM meanings
@@ -2698,37 +2794,33 @@ useEffect(() => {
     if (!token) {
       return buildDecisionCardsMock()
     }
-    try {
-      const params = {
-        spread_type: 'decision' as const,
-        topic: topic,
-        question: decisionQuestion.trim(),
-        consider_reversed: true,
-      }
-      const reading: any = await createReading(token, params)
-      // Save description returned from the backend
-      setDecisionDesc(String(reading?.description ?? ''))
-      const roles = ['Вариант A', 'Вариант B']
-      return (reading.cards || []).slice(0, 2).map((c: any, i: number) => {
-        const idx = Number(c.card_index ?? 0)
-        const url = FRONT_CARD_URLS[idx] || backCardImg
-        const isReversed = Boolean(c?.is_reversed)
-        const baseName = String(c.card_name || cardNameFromUrl(url))
-        const name = isReversed ? `${baseName} (перевёрнутая)` : baseName
-        const text = String(c.meaning || '').trim() || ''
-        return {
-          idx,
-          url,
-          name,
-          role: roles[i] || '',
-          text,
-          isReversed,
-        }
-      })
-    } catch (e) {
-      console.warn('[reading] decision fallback to mock:', e)
-      return buildDecisionCardsMock()
+    const params = {
+      spread_type: 'decision' as const,
+      topic: topic,
+      question: decisionQuestion.trim(),
+      consider_reversed: true,
     }
+    const reading: any = await createReading(token, params)
+    void refreshBilling(token)
+    // Save description returned from the backend
+    setDecisionDesc(String(reading?.description ?? ''))
+    const roles = ['Вариант A', 'Вариант B']
+    return (reading.cards || []).slice(0, 2).map((c: any, i: number) => {
+      const idx = Number(c.card_index ?? 0)
+      const url = FRONT_CARD_URLS[idx] || backCardImg
+      const isReversed = Boolean(c?.is_reversed)
+      const baseName = String(c.card_name || cardNameFromUrl(url))
+      const name = isReversed ? `${baseName} (перевёрнутая)` : baseName
+      const text = String(c.meaning || '').trim() || ''
+      return {
+        idx,
+        url,
+        name,
+        role: roles[i] || '',
+        text,
+        isReversed,
+      }
+    })
   }
 
   const resetDecisionState = () => {
@@ -2803,6 +2895,11 @@ useEffect(() => {
     // подгружаем реальные карты: fallback на мок при ошибках
     buildDecisionCardsReal().then((cards) => {
       setDecisionCards(cards)
+      setDecisionLoading(false)
+    }).catch((err: any) => {
+      console.warn('[reading] decision failed:', err)
+      setDecisionCards([])
+      setDecisionDesc(mapReadingError(String(err?.message || err || '')))
       setDecisionLoading(false)
     })
   }
@@ -3882,12 +3979,31 @@ useEffect(() => {
 
   <div style={{ marginTop: 14, display: 'grid', gap: 8 }}>
     <div style={{ fontSize: 12, opacity: 0.82, lineHeight: 1.35 }}>
-      Мы идентифицируем вас по данным Telegram. Всё открыто без подписки, но вы можете поддержать проект
-      оплатой в звёздах.
+      Мы идентифицируем вас по данным Telegram. Карта дня доступна 1 раз в сутки,
+      остальные расклады: {billing?.free_limit ?? 5} бесплатных в месяц, далее по оплате.
     </div>
 
     <div style={{ display: 'grid', gap: 6, marginTop: 2 }}>
-      <div style={{ fontSize: 12, opacity: 0.9 }}>Безлимит включён</div>
+      <div style={{ fontSize: 12, opacity: 0.9 }}>
+        Бесплатно в этом месяце: {Math.max(0, Number(billing?.free_left ?? 0))} из {billing?.free_limit ?? 5}
+      </div>
+      <div style={{ fontSize: 12, opacity: 0.9 }}>
+        Платный баланс: {Math.max(0, Number(billing?.paid_readings_balance ?? 0))} раскладов
+      </div>
+      <div style={{ fontSize: 12, opacity: 0.9 }}>
+        Подписка:{' '}
+        {billing?.has_active_subscription
+          ? `активна до ${formatRuDate(billing?.subscription_until)}`
+          : 'не активна'}
+      </div>
+      <a
+        href={BOT_PAYMENT_URL}
+        target="_blank"
+        rel="noreferrer"
+        style={{ fontSize: 12, opacity: 0.95, color: 'rgba(255,255,255,0.9)', textDecoration: 'underline' }}
+      >
+        Открыть бота для оплаты
+      </a>
       <div style={{ fontSize: 12, opacity: 0.9 }}>Telegram подключен</div>
     </div>
   </div>

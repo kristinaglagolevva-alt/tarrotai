@@ -20,11 +20,20 @@ from telegram.ext import (
     PreCheckoutQueryHandler,
     filters,
 )
+from sqlalchemy import select
+
+from db import SessionLocal
+from models import User, PaymentTransaction
 
 logger = logging.getLogger("telegram_bot")
 
 BOT_TOKEN = (os.environ.get("TELEGRAM_BOT_TOKEN") or "").strip()
-PROVIDER_TOKEN = (os.environ.get("TELEGRAM_PROVIDER_TOKEN") or "").strip()
+PROVIDER_TOKEN = (
+    os.environ.get("TELEGRAM_PROVIDER_TOKEN")
+    or os.environ.get("YOOKASSA_PROVIDER_TOKEN")
+    or os.environ.get("YOO_PROVIDER_TOKEN")
+    or ""
+).strip()
 
 APP_URL_RAW = (os.environ.get("TELEGRAM_APP_URL") or "").strip()  # например https://tarrotai.ru
 APP_BUTTON_TEXT = os.environ.get("TELEGRAM_APP_BUTTON_TEXT") or "Открыть приложение"
@@ -122,6 +131,98 @@ def _build_app_button() -> Optional[InlineKeyboardButton]:
 
     logger.warning("TELEGRAM_APP_URL is invalid (%s), skipping WebApp button", url)
     return None
+
+
+def _to_utc(dt: Optional[datetime]) -> Optional[datetime]:
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
+
+
+async def _activate_purchase_for_user(
+    *,
+    tg_user_id: int,
+    payload: str,
+    product: Dict[str, Any],
+    total_amount: int,
+    currency: str,
+    tg_charge_id: str,
+    provider_charge_id: str,
+) -> Dict[str, Any]:
+    """
+    Persist payment effect in DB so API limits can rely on real balances/subscription.
+    Idempotent by Telegram/provider charge IDs.
+    """
+    try:
+        async with SessionLocal() as db:
+            if tg_charge_id:
+                exists_tg = await db.execute(
+                    select(PaymentTransaction).where(PaymentTransaction.telegram_payment_charge_id == tg_charge_id)
+                )
+                if exists_tg.scalar_one_or_none():
+                    return {"applied": False, "duplicate": True}
+
+            if provider_charge_id:
+                exists_provider = await db.execute(
+                    select(PaymentTransaction).where(PaymentTransaction.provider_payment_charge_id == provider_charge_id)
+                )
+                if exists_provider.scalar_one_or_none():
+                    return {"applied": False, "duplicate": True}
+
+            user_res = await db.execute(select(User).where(User.telegram_id == int(tg_user_id)))
+            user = user_res.scalar_one_or_none()
+            if not user:
+                user = User(telegram_id=int(tg_user_id))
+                db.add(user)
+                await db.flush()
+
+            now = datetime.now(timezone.utc)
+            kind = str(product.get("kind") or "credits")
+
+            credits_delta = 0
+            sub_days = 0
+
+            if kind == "subscription":
+                sub_days = max(0, int(product.get("days") or 0))
+                base = now
+                current_until = _to_utc(user.subscription_until)
+                if current_until and current_until > base:
+                    base = current_until
+                user.subscription_until = base + timedelta(days=sub_days)
+            else:
+                credits_delta = max(0, int(product.get("credits") or 0))
+                user.paid_readings_balance = int(user.paid_readings_balance or 0) + credits_delta
+
+            tx = PaymentTransaction(
+                user_id=int(user.id),
+                invoice_payload=str(payload or ""),
+                product_code=str(product.get("code") or ""),
+                kind=kind,
+                amount=int(total_amount or 0),
+                currency=str(currency or "RUB"),
+                credits_delta=int(credits_delta),
+                subscription_days=int(sub_days),
+                telegram_payment_charge_id=str(tg_charge_id or "") or None,
+                provider_payment_charge_id=str(provider_charge_id or "") or None,
+            )
+            db.add(tx)
+            await db.commit()
+            await db.refresh(user)
+
+            return {
+                "applied": True,
+                "duplicate": False,
+                "kind": kind,
+                "credits_added": int(credits_delta),
+                "balance": int(user.paid_readings_balance or 0),
+                "subscription_until": _to_utc(user.subscription_until),
+                "subscription_days": int(sub_days),
+            }
+    except Exception as exc:
+        logger.exception("Failed to persist payment effect for tg_user=%s: %s", tg_user_id, exc)
+        return {"applied": False, "duplicate": False, "error": str(exc)}
 
 
 async def _safe_answer_query(query) -> None:
@@ -269,20 +370,40 @@ async def precheckout_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
     await query.answer(ok=True)
 
 
-def _format_subscription_confirmation(product: Dict[str, Any]) -> str:
-    days = int(product.get("days") or 0)
-    expires_at = (datetime.now(timezone.utc) + timedelta(days=days)).astimezone(timezone.utc)
-    expires_text = expires_at.strftime("%d.%m.%Y")
+def _product_code_from_payload(payload: str) -> str:
+    raw = str(payload or "").strip()
+    if not raw.startswith("order:"):
+        return ""
+    parts = raw.split(":")
+    if len(parts) < 2:
+        return ""
+    return str(parts[1] or "").strip()
+
+
+def _format_subscription_confirmation(
+    product: Dict[str, Any],
+    *,
+    active_until: Optional[datetime] = None,
+    days_added: int = 0,
+) -> str:
+    until = _to_utc(active_until)
+    if until:
+        expires_text = until.strftime("%d.%m.%Y")
+        return (
+            f"Готово! Подписка «{product.get('menu_label') or product.get('title') or product['code']}» активна. "
+            f"Доступ действует до {expires_text}."
+        )
     return (
         f"Готово! Подписка «{product.get('menu_label') or product.get('title') or product['code']}» активна. "
-        f"Доступ действует до {expires_text}."
+        f"Добавлено {max(0, int(days_added or 0))} дней."
     )
 
 
-def _format_credits_confirmation(product: Dict[str, Any]) -> str:
-    credits = int(product.get("credits") or 0)
+def _format_credits_confirmation(*, credits_added: int, balance: int) -> str:
+    added = max(0, int(credits_added or 0))
+    bal = max(0, int(balance or 0))
     return (
-        f"Оплата прошла успешно! На балансе {credits} платных раскладов. "
+        f"Оплата прошла успешно! Начислено {added} платных раскладов, текущий баланс: {bal}. "
         f"Открой приложение или мини-апп AI Tarot и начни расклады."
     )
 
@@ -296,27 +417,57 @@ async def successful_payment_handler(update: Update, context: ContextTypes.DEFAU
     payload = payment.invoice_payload
     order = ORDERS.get(payload)
 
-    # Даже если order нет (редко), просто подтвердим оплату
-    if not order:
-        await message.reply_text("Платёж подтверждён! Открой приложение AI Tarot и начни расклады.")
-        return
-
-    if order.get("status") != "paid":
+    if order and order.get("status") != "paid":
         order["status"] = "paid"
         order["paid_at"] = datetime.now(timezone.utc).isoformat()
         order["telegram_payment_charge_id"] = payment.telegram_payment_charge_id
         order["provider_payment_charge_id"] = payment.provider_payment_charge_id
 
-    product = _get_product(order.get("product_code") or "")
-    if product:
-        if product.get("kind") == "subscription":
-            text = _format_subscription_confirmation(product)
-        elif product.get("kind") == "credits":
-            text = _format_credits_confirmation(product)
-        else:
-            text = "Платёж подтверждён!"
+    product_code = ""
+    if order:
+        product_code = str(order.get("product_code") or "").strip()
+    if not product_code:
+        product_code = _product_code_from_payload(payload)
+
+    product = _get_product(product_code)
+    tg_user_id = getattr(message.from_user, "id", None) or (order or {}).get("tg_user_id")
+
+    if not product or not tg_user_id:
+        await message.reply_text("Платёж подтверждён! Открой приложение AI Tarot и начни расклады.")
+        return
+
+    applied = await _activate_purchase_for_user(
+        tg_user_id=int(tg_user_id),
+        payload=payload,
+        product=product,
+        total_amount=int(payment.total_amount or 0),
+        currency=str(payment.currency or "RUB"),
+        tg_charge_id=str(payment.telegram_payment_charge_id or ""),
+        provider_charge_id=str(payment.provider_payment_charge_id or ""),
+    )
+
+    if applied.get("duplicate"):
+        await message.reply_text("Платёж уже был обработан ранее. Доступ в приложении уже активен.")
+        return
+
+    if not applied.get("applied"):
+        logger.error("Payment confirmed but DB apply failed: payload=%s result=%s", payload, applied)
+        await message.reply_text(
+            "Платёж подтверждён, но активация задержалась. Напишите в поддержку и укажите время платежа."
+        )
+        return
+
+    if str(applied.get("kind") or product.get("kind") or "") == "subscription":
+        text = _format_subscription_confirmation(
+            product,
+            active_until=applied.get("subscription_until"),
+            days_added=int(applied.get("subscription_days") or 0),
+        )
     else:
-        text = "Платёж подтверждён!"
+        text = _format_credits_confirmation(
+            credits_added=int(applied.get("credits_added") or 0),
+            balance=int(applied.get("balance") or 0),
+        )
 
     await message.reply_text(text)
 

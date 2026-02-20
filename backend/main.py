@@ -4,13 +4,13 @@ import asyncio
 import logging
 import os
 import random
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from typing import Optional, List, Literal
 
 from fastapi import FastAPI, Depends, HTTPException, Header, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
-from sqlalchemy import select, desc
+from sqlalchemy import select, desc, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from db import engine, get_db, Base
@@ -25,6 +25,8 @@ logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("api")
 
 app = FastAPI(title="Telegram Mini App API")
+
+FREE_READINGS_PER_MONTH = int(os.getenv("FREE_READINGS_PER_MONTH", "5"))
 
 
 # ============================ CORS ============================
@@ -112,6 +114,7 @@ async def on_startup() -> None:
     # БД
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        await _ensure_runtime_schema(conn)
 
     # Бот
     await _start_telegram_bot_background()
@@ -131,6 +134,97 @@ async def health() -> dict:
 # ============================ HELPERS ============================
 def _today_key() -> str:
     return date.today().isoformat()
+
+
+def _to_utc(dt: Optional[datetime]) -> Optional[datetime]:
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
+
+
+def _month_bounds_utc(now: datetime) -> tuple[datetime, datetime]:
+    first = datetime(now.year, now.month, 1, tzinfo=timezone.utc)
+    if now.month == 12:
+        nxt = datetime(now.year + 1, 1, 1, tzinfo=timezone.utc)
+    else:
+        nxt = datetime(now.year, now.month + 1, 1, tzinfo=timezone.utc)
+    return first, nxt
+
+
+async def _ensure_runtime_schema(conn) -> None:
+    """
+    Lightweight runtime migration for existing DBs without Alembic.
+    Safe for repeated startups.
+    """
+    statements = [
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS subscription_until TIMESTAMPTZ NULL;",
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS paid_readings_balance INTEGER NOT NULL DEFAULT 0;",
+        "CREATE INDEX IF NOT EXISTS ix_users_subscription_until ON users (subscription_until);",
+    ]
+    for stmt in statements:
+        try:
+            await conn.exec_driver_sql(stmt)
+        except Exception as e:
+            log.warning("schema check skipped for statement '%s': %s", stmt, repr(e))
+
+
+async def _consume_reading_quota_or_raise(
+    db: AsyncSession,
+    user_id: int,
+) -> dict:
+    """
+    Billing rules:
+      1) Daily card is separate and always available once per day (/card-of-day).
+      2) Other spreads: first FREE_READINGS_PER_MONTH per month are free.
+      3) After free quota: consume paid_readings_balance OR active subscription.
+    """
+    user_res = await db.execute(select(User).where(User.id == int(user_id)))
+    user = user_res.scalar_one_or_none()
+    if not user:
+        raise HTTPException(status_code=401, detail="User not found")
+
+    now = datetime.now(timezone.utc)
+    sub_until = _to_utc(user.subscription_until)
+    if sub_until and sub_until > now:
+        return {"mode": "subscription", "subscription_until": sub_until.isoformat()}
+
+    month_start, month_next = _month_bounds_utc(now)
+    used_q = await db.execute(
+        select(func.count(Reading.id)).where(
+            Reading.user_id == int(user_id),
+            Reading.created_at >= month_start,
+            Reading.created_at < month_next,
+        )
+    )
+    month_used = int(used_q.scalar() or 0)
+
+    if month_used < FREE_READINGS_PER_MONTH:
+        return {
+            "mode": "free",
+            "month_used": month_used,
+            "free_left_after": max(0, FREE_READINGS_PER_MONTH - (month_used + 1)),
+        }
+
+    balance = int(user.paid_readings_balance or 0)
+    if balance > 0:
+        user.paid_readings_balance = balance - 1
+        return {"mode": "credits", "balance_after": int(user.paid_readings_balance)}
+
+    raise HTTPException(
+        status_code=402,
+        detail={
+            "code": "READING_LIMIT_EXCEEDED",
+            "message": (
+                f"Бесплатный лимит ({FREE_READINGS_PER_MONTH} раскладов в месяц) исчерпан. "
+                "Оплатите пакет/подписку в боте и попробуйте снова."
+            ),
+            "free_limit": FREE_READINGS_PER_MONTH,
+            "month_used": month_used,
+            "paid_balance": balance,
+        },
+    )
 
 
 def _get_bearer_token(authorization: Optional[str]) -> str:
@@ -173,6 +267,19 @@ class MeOut(BaseModel):
     first_name: Optional[str] = None
     last_name: Optional[str] = None
     photo_url: Optional[str] = None
+    paid_readings_balance: int = 0
+    subscription_until: Optional[datetime] = None
+    has_active_subscription: bool = False
+
+
+class BillingStatusOut(BaseModel):
+    free_limit: int
+    month_used: int
+    free_left: int
+    paid_readings_balance: int
+    subscription_until: Optional[datetime] = None
+    has_active_subscription: bool = False
+    can_create_reading: bool = False
 
 
 class CardOfDayCreateIn(BaseModel):
@@ -292,6 +399,9 @@ async def auth_telegram(payload: dict, db: AsyncSession = Depends(get_db)):
 
 @app.get("/me", response_model=MeOut)
 async def me(current_user: User = Depends(get_current_user)):
+    now = datetime.now(timezone.utc)
+    sub_until = _to_utc(current_user.subscription_until)
+    has_sub = bool(sub_until and sub_until > now)
     return {
         "id": current_user.id,
         "telegram_id": current_user.telegram_id,
@@ -299,6 +409,42 @@ async def me(current_user: User = Depends(get_current_user)):
         "first_name": current_user.first_name,
         "last_name": current_user.last_name,
         "photo_url": current_user.photo_url,
+        "paid_readings_balance": int(current_user.paid_readings_balance or 0),
+        "subscription_until": sub_until,
+        "has_active_subscription": has_sub,
+    }
+
+
+@app.get("/billing/status", response_model=BillingStatusOut)
+async def billing_status(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    now = datetime.now(timezone.utc)
+    month_start, month_next = _month_bounds_utc(now)
+
+    used_q = await db.execute(
+        select(func.count(Reading.id)).where(
+            Reading.user_id == int(current_user.id),
+            Reading.created_at >= month_start,
+            Reading.created_at < month_next,
+        )
+    )
+    month_used = int(used_q.scalar() or 0)
+
+    sub_until = _to_utc(current_user.subscription_until)
+    has_sub = bool(sub_until and sub_until > now)
+    free_left = max(0, FREE_READINGS_PER_MONTH - month_used)
+    balance = int(current_user.paid_readings_balance or 0)
+
+    return {
+        "free_limit": FREE_READINGS_PER_MONTH,
+        "month_used": month_used,
+        "free_left": free_left,
+        "paid_readings_balance": balance,
+        "subscription_until": sub_until,
+        "has_active_subscription": has_sub,
+        "can_create_reading": bool(has_sub or free_left > 0 or balance > 0),
     }
 
 
@@ -464,6 +610,8 @@ async def create_reading(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    await _consume_reading_quota_or_raise(db, current_user.id)
+
     effective_deck = min(max(int(payload.deck_size), 1), DECK_SIZE)
     layout = _spread_layout(payload)
     k = max(1, len(layout))
@@ -610,6 +758,8 @@ async def photo_analysis(
         raise HTTPException(status_code=400, detail="Empty file")
     if len(data) > _MAX_UPLOAD_BYTES:
         raise HTTPException(status_code=413, detail="File too large (max 8MB)")
+
+    await _consume_reading_quota_or_raise(db, current_user.id)
 
     try:
         context = (extra_context or "").strip()

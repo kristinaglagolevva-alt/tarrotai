@@ -89,8 +89,6 @@ const majors = [
   'the world.jpg',
 ]
 
-const pip = (rank: string, suit: 'wands' | 'cups' | 'swords' | 'pentacles') => `${rank} of ${suit}.jpg`
-
 const minorsWands = [
   'ace of wands.jpg',
   'two of wands.jpg',
@@ -179,9 +177,6 @@ const SHUFFLE_FRONT_URLS = (() => {
   const sampled = src.filter((_, i) => i % step === 0).slice(0, 18)
   return sampled.length >= 12 ? sampled : src.slice(0, 18)
 })()
-
-// (опционально) для дебага
-const FRONT_CARD_PATHS = FRONT_CARD_ENTRIES.map(([p]) => p)
 
 /* =================================================================================================
    [3] ТИПЫ И ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
@@ -550,6 +545,7 @@ function PremiumFlipCard({
         ['--k' as any]: intensity.toFixed(3),
 
         ['--pflip-top' as any]: top,
+        ['--pflip-s' as any]: scale.toFixed(3),
       }}
       role={clickable ? 'button' : undefined}
       tabIndex={clickable ? 0 : undefined}
@@ -712,6 +708,9 @@ useEffect(() => {
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
   const chunksRef = useRef<BlobPart[]>([])
   const streamRef = useRef<MediaStream | null>(null)
+  const speechRecognitionRef = useRef<any>(null)
+  const speechSeedRef = useRef<string>('')
+  const speechFinalRef = useRef<string>('')
 
   const isIOS = useMemo(() => {
     const ua = navigator.userAgent || ''
@@ -1198,6 +1197,22 @@ useEffect(() => {
 
   const stopRecording = async () => {
     try {
+      const recognition = speechRecognitionRef.current
+      if (recognition) {
+        recognition.onresult = null
+        recognition.onerror = null
+        recognition.onend = null
+        recognition.stop?.()
+      }
+    } catch {
+      // ignore
+    } finally {
+      speechRecognitionRef.current = null
+      speechSeedRef.current = ''
+      speechFinalRef.current = ''
+    }
+
+    try {
       mediaRecorderRef.current?.stop()
       streamRef.current?.getTracks().forEach((t) => t.stop())
     } catch {
@@ -1206,14 +1221,63 @@ useEffect(() => {
       mediaRecorderRef.current = null
       streamRef.current = null
       chunksRef.current = []
+      setIsRecording(false)
     }
   }
 
   const toggleRecording = async () => {
     if (isRecording) {
-      setIsRecording(false)
       await stopRecording()
       return
+    }
+
+    const SpeechRecognitionCtor = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition
+    if (typeof SpeechRecognitionCtor === 'function') {
+      try {
+        speechSeedRef.current = question.trim()
+        speechFinalRef.current = ''
+
+        const recognition = new SpeechRecognitionCtor()
+        speechRecognitionRef.current = recognition
+        recognition.lang = 'ru-RU'
+        recognition.continuous = true
+        recognition.interimResults = true
+        recognition.maxAlternatives = 1
+
+        recognition.onresult = (event: any) => {
+          let interim = ''
+          for (let i = event.resultIndex; i < event.results.length; i++) {
+            const phrase = String(event.results[i]?.[0]?.transcript || '').trim()
+            if (!phrase) continue
+            if (event.results[i].isFinal) {
+              speechFinalRef.current = [speechFinalRef.current, phrase].filter(Boolean).join(' ').trim()
+            } else {
+              interim = [interim, phrase].filter(Boolean).join(' ').trim()
+            }
+          }
+
+          const full = [speechSeedRef.current, speechFinalRef.current, interim].filter(Boolean).join(' ').trim()
+          if (full) setQuestion(full)
+        }
+
+        recognition.onerror = async () => {
+          await stopRecording()
+        }
+
+        recognition.onend = () => {
+          speechRecognitionRef.current = null
+          const full = [speechSeedRef.current, speechFinalRef.current].filter(Boolean).join(' ').trim()
+          if (full) setQuestion(full)
+          setIsRecording(false)
+        }
+
+        recognition.start()
+        setIsRecording(true)
+        return
+      } catch (e) {
+        console.error('Speech recognition unavailable, fallback to MediaRecorder', e)
+        speechRecognitionRef.current = null
+      }
     }
 
     try {
@@ -1236,6 +1300,13 @@ useEffect(() => {
       await stopRecording()
     }
   }
+
+  useEffect(() => {
+    return () => {
+      void stopRecording()
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   /* =============================================================================================
      [19] CTA “PRESS” RIPPLE ORIGIN
@@ -1829,6 +1900,87 @@ useEffect(() => {
     setPhotoFile(file)
   }
 
+  const loadImageFromFile = (file: File) =>
+    new Promise<HTMLImageElement>((resolve, reject) => {
+      const url = URL.createObjectURL(file)
+      const img = new Image()
+      img.onload = () => {
+        URL.revokeObjectURL(url)
+        resolve(img)
+      }
+      img.onerror = () => {
+        URL.revokeObjectURL(url)
+        reject(new Error('Не удалось прочитать изображение.'))
+      }
+      img.src = url
+    })
+
+  const canvasToJpegBlob = (canvas: HTMLCanvasElement, quality: number) =>
+    new Promise<Blob | null>((resolve) => {
+      canvas.toBlob((blob) => resolve(blob), 'image/jpeg', quality)
+    })
+
+  const optimizePhotoForUpload = async (file: File, aggressive = false): Promise<File> => {
+    const SOFT_LIMIT = aggressive ? 700 * 1024 : 1024 * 1024
+    const maxSide = aggressive ? 1280 : 1680
+    const supported = /^image\/(jpeg|jpg|png|webp)$/i.test(file.type || '')
+
+    if (supported && file.size <= SOFT_LIMIT) return file
+
+    try {
+      const img = await loadImageFromFile(file)
+      const srcW = Math.max(1, img.naturalWidth || (img as any).width || 1)
+      const srcH = Math.max(1, img.naturalHeight || (img as any).height || 1)
+      const ratio = Math.min(1, maxSide / Math.max(srcW, srcH))
+      const width = Math.max(1, Math.round(srcW * ratio))
+      const height = Math.max(1, Math.round(srcH * ratio))
+
+      const canvas = document.createElement('canvas')
+      canvas.width = width
+      canvas.height = height
+      const ctx = canvas.getContext('2d', { alpha: false })
+      if (!ctx) return file
+
+      ctx.drawImage(img, 0, 0, width, height)
+
+      const qualities = aggressive ? [0.84, 0.76, 0.68, 0.58, 0.5] : [0.9, 0.82, 0.74, 0.66, 0.58]
+      let best: Blob | null = null
+
+      for (const q of qualities) {
+        const blob = await canvasToJpegBlob(canvas, q)
+        if (!blob) continue
+
+        if (!best || blob.size < best.size) best = blob
+        if (blob.size <= SOFT_LIMIT) {
+          best = blob
+          break
+        }
+      }
+
+      if (!best) return file
+      const base = (file.name || 'spread-photo').replace(/\.[a-z0-9]+$/i, '')
+      return new File([best], `${base || 'spread-photo'}.jpg`, {
+        type: 'image/jpeg',
+        lastModified: Date.now(),
+      })
+    } catch {
+      return file
+    }
+  }
+
+  const mapPhotoError = (raw: string) => {
+    const msg = (raw || '').trim()
+    if (!msg) return 'Не удалось получить ответ от AI.'
+    if (/401|403/i.test(msg)) return 'Сессия устарела. Перезапустите мини-приложение и попробуйте снова.'
+    if (/413|too large/i.test(msg)) return 'Фото слишком большое. Выберите более лёгкое изображение.'
+    if (/415|unsupported/i.test(msg)) return 'Формат фото не поддерживается. Лучше использовать JPG или PNG.'
+    if (/503|service unavailable/i.test(msg)) return 'AI-сервис временно недоступен. Повторите через минуту.'
+    if (/load failed|failed to fetch|networkerror/i.test(msg)) {
+      return 'Не удалось отправить фото на сервер. Проверьте интернет и попробуйте ещё раз.'
+    }
+    return msg
+  }
+
   const runPhotoAnalysis = async () => {
     if (photoStatus === 'uploading') return
 
@@ -1848,10 +2000,28 @@ useEffect(() => {
     setPhotoError('')
 
     try {
-      const out = await analyzeSpreadPhoto(token, photoFile, {
-        topic,
-        question: (question || '').trim(),
-      })
+      const sourceFile = photoFile
+      const preparedFile = await optimizePhotoForUpload(sourceFile, false)
+
+      let out: any = null
+      let lastErr: any = null
+      for (let attempt = 0; attempt < 2; attempt++) {
+        const fileForAttempt = attempt === 0 ? preparedFile : await optimizePhotoForUpload(sourceFile, true)
+        try {
+          out = await analyzeSpreadPhoto(token, fileForAttempt, {
+            topic,
+            question: (question || '').trim(),
+          })
+          break
+        } catch (err: any) {
+          lastErr = err
+          const text = String(err?.message || '')
+          const retryable = /load failed|failed to fetch|networkerror|503|502|504|gateway timeout/i.test(text)
+          if (attempt === 0 && retryable) continue
+          throw err
+        }
+      }
+      if (!out && lastErr) throw lastErr
 
       setPhotoResult({
         description: (out as any)?.description || '',
@@ -1860,17 +2030,9 @@ useEffect(() => {
       setPhotoStatus('done')
     } catch (err: any) {
       setPhotoStatus('error')
-      setPhotoError(err?.message || 'Не удалось получить ответ от AI.')
+      setPhotoError(mapPhotoError(String(err?.message || '')))
     }
   }
-
-  const resetPhotoAnalysis = () => {
-    setPhotoFile(null)
-    setPhotoResult(null)
-    setPhotoStatus('idle')
-    setPhotoError('')
-  }
-
 
   // ---------------------------------------------------------------------------------------------
   // [3 CARDS] routing + helpers (пока без бэка: рандом из FRONT_CARD_URLS)
@@ -3726,18 +3888,32 @@ useEffect(() => {
                 onChange={onPhotoInputChange}
               />
 
+              {!photoPreviewUrl ? (
+                <div className="photo-guide" aria-label="Советы для съёмки">
+                  <div className="photo-guide__title">Советы для точного анализа</div>
+                  <ul className="photo-guide__list">
+                    <li>Снимайте расклад сверху и целиком.</li>
+                    <li>Используйте ровный свет без бликов и теней.</li>
+                    <li>Оставьте небольшой отступ вокруг карт в кадре.</li>
+                  </ul>
+                </div>
+              ) : null}
+
               {photoPreviewUrl ? (
                 <div className="photo-preview" aria-label="Предпросмотр фото">
                   <img src={photoPreviewUrl} alt="Фото расклада" />
                 </div>
               ) : (
                 <div className="photo-placeholder" aria-label="Фото не выбрано">
+                  <div className="photo-placeholder__icon" aria-hidden="true">
+                    <img src={cameraIcon} alt="" />
+                  </div>
                   <div className="photo-placeholder__text">Выберите или сделайте фото расклада</div>
-                  <div className="photo-placeholder__sub">Постарайтесь, чтобы были видны все карты и их ориентация.</div>
+                  <div className="photo-placeholder__sub">После выбора фото этот экран останется в привычном вам виде.</div>
                 </div>
               )}
 
-              <div className="photo-actions">
+              <div className={`photo-actions ${photoPreviewUrl ? 'is-compact' : ''}`}>
                 <button
                   type="button"
                   className="glass-cta mini-cta"
@@ -3767,15 +3943,28 @@ useEffect(() => {
 
 
               {/* вопрос */}
-              <div className="ask-wrap">
-                <div className="ask-glass">
-                  <textarea
-                    className="ask-input"
-                    value={question}
-                    onChange={(e) => setQuestion(e.target.value)}
-                    placeholder="Вопрос (необязательно). Например: «Что мне важно понять в отношениях?»"
-                    rows={2}
-                  />
+              <div className="photo-question">
+                <div className="photo-question__title">Ваш вопрос</div>
+                <div className={`ask-wrap ${isRecording ? 'is-attn' : ''}`}>
+                  <div className="ask-glass">
+                    <textarea
+                      className="ask-input"
+                      value={question}
+                      onChange={(e) => setQuestion(e.target.value)}
+                      placeholder="Вопрос (необязательно). Например: «Что мне важно понять в отношениях?»"
+                      rows={3}
+                    />
+                    <button
+                      type="button"
+                      className={`ask-mic ${isRecording ? 'recording' : ''}`}
+                      onClick={toggleRecording}
+                      aria-label={isRecording ? 'Остановить запись' : 'Начать запись'}
+                      title={isRecording ? 'Остановить запись' : 'Записать голосом'}
+                    >
+                      <img className="ask-mic__icon" src={micIcon} alt="" aria-hidden="true" />
+                    </button>
+                  </div>
+                  <div className={`ask-hint ${isRecording ? 'is-visible' : ''}`}>Идёт запись… нажмите ещё раз, чтобы остановить</div>
                 </div>
               </div>
 

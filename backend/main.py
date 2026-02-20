@@ -584,6 +584,7 @@ async def photo_analysis(
     topic: str = Form(default="relations"),
     question: str = Form(default=""),
     extra_context: str = Form(default=""),
+    consider_reversed: bool = Form(default=True),
     force_llm: bool = Form(default=False),
 ):
     up = image or file
@@ -591,6 +592,16 @@ async def photo_analysis(
         raise HTTPException(status_code=400, detail="image/file is required")
 
     content_type = (up.content_type or "").lower()
+    if (not content_type or not content_type.startswith("image/")) and up.filename:
+        fn = str(up.filename).lower()
+        if fn.endswith(".png"):
+            content_type = "image/png"
+        elif fn.endswith(".webp"):
+            content_type = "image/webp"
+        elif fn.endswith(".heic") or fn.endswith(".heif"):
+            content_type = "image/heic"
+        else:
+            content_type = "image/jpeg"
     if not (content_type.startswith("image/")):
         raise HTTPException(status_code=400, detail=f"Unsupported content-type: {up.content_type}")
 
@@ -601,36 +612,46 @@ async def photo_analysis(
         raise HTTPException(status_code=413, detail="File too large (max 8MB)")
 
     try:
+        context = (extra_context or "").strip()
+        if not consider_reversed:
+            context = f"{context}\nИгнорируй перевёрнутые позиции, считай карты прямыми.".strip()
+
         description, cards = await generate_photo_analysis_llm(
             topic=topic,
             question=question,
             image_bytes=data,
             image_mime=content_type,
-            extra_context=extra_context,
+            extra_context=context,
             require_llm=force_llm,
         )
     except Exception as e:
         log.exception("LLM photo-analysis failed: %s", repr(e))
-        raise HTTPException(
-            status_code=503,
-            detail="LLM недоступна для анализа фото. Проверь OPENAI_API_KEY/OPENAI_MODEL (и что модель поддерживает vision). "
-                   "Если хочешь fallback — отправь force_llm=false.",
-        )
+        if force_llm:
+            raise HTTPException(
+                status_code=503,
+                detail="LLM недоступна для анализа фото. Проверь OPENAI_API_KEY/OPENAI_MODEL (и что модель поддерживает vision). "
+                       "Если хочешь fallback — отправь force_llm=false.",
+            )
+        description, cards = "", []
 
     description = (description or "").strip()
     if not description:
         description = "Не удалось распознать карты на фото. Попробуй сделать фото ближе, без бликов и с хорошим светом."
 
-    row = Reading(
-        user_id=current_user.id,
-        spread_type="photo_analysis",
-        topic=topic,
-        question=question,
-        cards=cards,
-        description=description,
-    )
-    db.add(row)
-    await db.commit()
+    try:
+        row = Reading(
+            user_id=current_user.id,
+            spread_type="photo_analysis",
+            topic=topic,
+            question=question,
+            cards=cards,
+            description=description,
+        )
+        db.add(row)
+        await db.commit()
+    except Exception as e:
+        await db.rollback()
+        log.exception("Failed to persist photo-analysis reading: %s", repr(e))
 
     return {
         "description": description,

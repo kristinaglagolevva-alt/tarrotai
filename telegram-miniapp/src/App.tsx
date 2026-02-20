@@ -10,7 +10,7 @@ import {
   getBillingStatus,
   getCardOfDayToday,
   createCardOfDay,
-  getCardOfDayHistory,
+  getUnifiedHistory,
   analyzeSpreadPhoto,
   createReading,
 } from './api'
@@ -1479,12 +1479,52 @@ useEffect(() => {
       setHistoryLoading(true)
       setHistoryError('')
       try {
-        const items = await getCardOfDayHistory(token)
+        const items: any[] = await getUnifiedHistory(token, 120)
         if (!mounted) return
 
-        const sorted = [...items].sort((a, b) => {
-          const ta = Date.parse(a.created_at || a.day_key || '')
-          const tb = Date.parse(b.created_at || b.day_key || '')
+        const mapped: HistoryListItem[] = (items || [])
+          .map((item: any) => {
+            if (item?.kind === 'card_of_day') {
+              const p = item?.payload || {}
+              return {
+                kind: 'card_of_day' as const,
+                day_key: String(p.day_key || ''),
+                topic: String(p.topic || ''),
+                question: String(p.question || ''),
+                card_index: Number(p.card_index ?? 0),
+                card_name: String(p.card_name || ''),
+                description: String(p.description || ''),
+                created_at: String(item?.created_at || ''),
+              }
+            }
+
+            if (item?.kind === 'reading') {
+              const p = item?.payload || {}
+              const cards = Array.isArray(p.cards) ? p.cards : []
+              const first = cards[0] || {}
+              const fallbackLabel = SPREAD_HISTORY_LABELS[String(p.spread_type || '')] || 'Расклад'
+              return {
+                kind: 'reading' as const,
+                created_at: String(item?.created_at || ''),
+                topic: String(p.topic || ''),
+                question: String(p.question || ''),
+                spread_type: String(p.spread_type || 'reading'),
+                description: String(p.description || ''),
+                cards_count: cards.length || 0,
+                card_index: Number(first.card_index ?? 0),
+                card_name: String(first.card_name || fallbackLabel),
+              }
+            }
+
+            return null
+          })
+          .filter((x): x is HistoryListItem => !!x)
+
+        const sorted = [...mapped].sort((a, b) => {
+          const aDayKey = a.kind === 'card_of_day' ? a.day_key : ''
+          const bDayKey = b.kind === 'card_of_day' ? b.day_key : ''
+          const ta = Date.parse(a.created_at || aDayKey || '')
+          const tb = Date.parse(b.created_at || bDayKey || '')
           return (isFinite(tb) ? tb : 0) - (isFinite(ta) ? ta : 0)
         })
 
@@ -1706,9 +1746,33 @@ useEffect(() => {
     created_at: string
   }
 
+  type ReadingHistoryItem = {
+    kind: 'reading'
+    created_at: string
+    topic: string
+    question: string
+    spread_type: string
+    description: string
+    cards_count: number
+    card_index: number
+    card_name: string
+  }
+
+  type HistoryListItem =
+    | ({ kind: 'card_of_day' } & CardHistoryItem)
+    | ReadingHistoryItem
+
+  const SPREAD_HISTORY_LABELS: Record<string, string> = {
+    three_cards: 'Расклад по 3 картам',
+    ppf: 'Прошлое • Настоящее • Будущее',
+    decision: 'Принятие решения',
+    custom: 'Пользовательский расклад',
+    photo_analysis: 'Анализ фото',
+  }
+
   const [historyLoading, setHistoryLoading] = useState(false)
   const [historyError, setHistoryError] = useState('')
-  const [history, setHistory] = useState<CardHistoryItem[]>([])
+  const [history, setHistory] = useState<HistoryListItem[]>([])
 
   const [shakeEnabled, setShakeEnabled] = useState(false)
   const [shakenOnce, setShakenOnce] = useState(false)
@@ -3869,9 +3933,16 @@ useEffect(() => {
                           const idx = clamp(it.card_index ?? 0, 0, 77)
                           const img = FRONT_CARD_URLS[idx] || backCardImg
                           const topicLabel = TOPICS.find((t) => t.id === (it.topic as any))?.label || it.topic
+                          const isCardDay = it.kind === 'card_of_day'
+                          const title = isCardDay
+                            ? (it.card_name || 'Карта дня')
+                            : (SPREAD_HISTORY_LABELS[it.spread_type] || 'Расклад')
+                          const subtitle = isCardDay
+                            ? `${topicLabel}${it.question ? ` • ${it.question}` : ''}`
+                            : `${topicLabel}${it.question ? ` • ${it.question}` : ''}`
                           const when = (() => {
                             const d = new Date(it.created_at)
-                            if (!isFinite(d.getTime())) return it.day_key
+                            if (!isFinite(d.getTime())) return isCardDay ? it.day_key : ''
                             return d.toLocaleString('ru-RU', {
                               day: '2-digit',
                               month: '2-digit',
@@ -3880,28 +3951,38 @@ useEffect(() => {
                               minute: '2-digit',
                             })
                           })()
+                          const metaPrefix = isCardDay
+                            ? 'Карта дня'
+                            : `${it.cards_count || 0} карт`
+
+                          const handleOpen = () => {
+                            if (!isCardDay) return
+                            openCardDayFromHistory(it)
+                          }
 
                           return (
                             <div
-                              key={`${it.day_key}:${it.card_index}:${it.created_at}`}
+                              key={`${it.kind}:${it.created_at}:${it.card_index}:${it.card_name}`}
                               className="spread-card spread-card--history"
-                              role="button"
-                              tabIndex={0}
-                              onClick={() => openCardDayFromHistory(it)}
-                              onKeyDown={(e) => e.key === 'Enter' && openCardDayFromHistory(it)}
-                              aria-label="Открыть карту дня из истории"
+                              role={isCardDay ? 'button' : 'article'}
+                              tabIndex={isCardDay ? 0 : -1}
+                              onClick={isCardDay ? handleOpen : undefined}
+                              onKeyDown={isCardDay ? (e) => e.key === 'Enter' && handleOpen() : undefined}
+                              aria-label={isCardDay ? 'Открыть карту дня из истории' : 'Элемент истории расклада'}
                             >
                               <div className="history-card-media" aria-hidden="true">
                                 <img className="history-card-image" src={img} alt="" />
                               </div>
 
                               <div className="spread-body">
-                                <div className="spread-title">{it.card_name || 'Карта дня'}</div>
+                                <div className="spread-title">{title}</div>
                                 <div className="spread-subtitle">
-                                  {topicLabel}
-                                  {it.question ? ` • ${it.question}` : ''}
+                                  {subtitle}
                                 </div>
-                                <div className="spread-meta">{when}</div>
+                                <div className="spread-meta">
+                                  {metaPrefix}
+                                  {when ? ` • ${when}` : ''}
+                                </div>
                               </div>
                             </div>
                           )

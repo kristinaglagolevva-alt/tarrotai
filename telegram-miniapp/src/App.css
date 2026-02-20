@@ -2253,6 +2253,10 @@ body,
   display: block;
 }
 
+.threecard img.is-reversed {
+  transform: rotate(180deg);
+}
+
 .threecards-row .threecard:nth-child(1) {
   transform: translateY(8px) rotate(-7deg);
 }

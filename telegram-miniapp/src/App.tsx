@@ -1434,7 +1434,7 @@ useEffect(() => {
   ]
 
   type ThreeCardPos = { x: number; y: number; r: number; s: number; z: number }
-  type ThreeCardResult = { idx: number; url: string; name: string; role: string; text: string }
+  type ThreeCardResult = { idx: number; url: string; name: string; role: string; text: string; isReversed?: boolean }
 
   // фиксированные 3 “слота” как на первом экране (места карт)
   const THREE_SLOTS: ThreeCardPos[] = [
@@ -1542,7 +1542,7 @@ useEffect(() => {
     { id: 'future', label: 'Будущее' },
   ]
 
-  type PpfCardResult = { idx: number; url: string; name: string; role: string; text: string }
+  type PpfCardResult = { idx: number; url: string; name: string; role: string; text: string; isReversed?: boolean }
 
   const [ppfScreen, setPpfScreen] = useState<PpfScreen>('setup')
   const [ppfQuestion, setPpfQuestion] = useState('')
@@ -2081,7 +2081,7 @@ useEffect(() => {
           ? 'Совет будет подтянут с бэкенда. Сейчас это mock.\n\nПодумайте: какой маленький шаг вы можете сделать уже сегодня?'
           : 'Интерпретация будет подтянута с бэкенда. Сейчас это mock.\n\nЗаметьте эмоции и ассоциации — это уже часть ответа.'
 
-      return { idx, url, name, role: roles[i], text }
+      return { idx, url, name, role: roles[i], text, isReversed: false }
     })
   }
 
@@ -2310,7 +2310,7 @@ useEffect(() => {
         'Интерпретация будет подтянута с бэкенда. Сейчас это mock.\n\n' +
         'Смотрите на символы, ощущения и первую ассоциацию — это часто самый точный ответ.'
 
-      return { idx, url, name, role: roles[i], text }
+      return { idx, url, name, role: roles[i], text, isReversed: false }
     })
   }
 
@@ -2499,7 +2499,7 @@ useEffect(() => {
     { id: 'b', label: 'Вариант B' },
   ]
 
-  type DecisionCardResult = { idx: number; url: string; name: string; role: string; text: string }
+  type DecisionCardResult = { idx: number; url: string; name: string; role: string; text: string; isReversed?: boolean }
 
   // 2 “слота” (как две карты на первом экране)
   const DECISION_SLOTS: ThreeCardPos[] = [
@@ -2600,7 +2600,7 @@ useEffect(() => {
       const text =
         'Интерпретация будет подтянута с бэкенда. Сейчас это mock.\n\nПодумайте, как этот образ соотносится с вашим вариантом и какие чувства он вызывает.'
 
-      return { idx, url, name, role: roles[i], text }
+      return { idx, url, name, role: roles[i], text, isReversed: false }
     })
   }
 
@@ -2629,8 +2629,9 @@ useEffect(() => {
       return (reading.cards || []).slice(0, 3).map((c: any, i: number) => {
         const idx = Number(c.card_index ?? 0)
         const url = FRONT_CARD_URLS[idx] || backCardImg
+        const isReversed = Boolean(c?.is_reversed)
         const baseName = String(c.card_name || cardNameFromUrl(url))
-        const name = c?.is_reversed ? `${baseName} (перевёрнутая)` : baseName
+        const name = isReversed ? `${baseName} (перевёрнутая)` : baseName
         const text = String(c.meaning || '').trim() || ''
         return {
           idx,
@@ -2638,6 +2639,7 @@ useEffect(() => {
           name,
           role: roles[i] || `Карта ${i + 1}`,
           text,
+          isReversed,
         }
       })
     } catch (e) {
@@ -2671,8 +2673,9 @@ useEffect(() => {
       return (reading.cards || []).slice(0, 3).map((c: any, i: number) => {
         const idx = Number(c.card_index ?? 0)
         const url = FRONT_CARD_URLS[idx] || backCardImg
+        const isReversed = Boolean(c?.is_reversed)
         const baseName = String(c.card_name || cardNameFromUrl(url))
-        const name = c?.is_reversed ? `${baseName} (перевёрнутая)` : baseName
+        const name = isReversed ? `${baseName} (перевёрнутая)` : baseName
         const meaning = String(c.meaning || '').trim() || ''
         const text = `${focusLine}\n\n${meaning}`
         return {
@@ -2681,6 +2684,7 @@ useEffect(() => {
           name,
           role: roles[i] || '',
           text,
+          isReversed,
         }
       })
     } catch (e) {
@@ -2708,8 +2712,9 @@ useEffect(() => {
       return (reading.cards || []).slice(0, 2).map((c: any, i: number) => {
         const idx = Number(c.card_index ?? 0)
         const url = FRONT_CARD_URLS[idx] || backCardImg
+        const isReversed = Boolean(c?.is_reversed)
         const baseName = String(c.card_name || cardNameFromUrl(url))
-        const name = c?.is_reversed ? `${baseName} (перевёрнутая)` : baseName
+        const name = isReversed ? `${baseName} (перевёрнутая)` : baseName
         const text = String(c.meaning || '').trim() || ''
         return {
           idx,
@@ -2717,6 +2722,7 @@ useEffect(() => {
           name,
           role: roles[i] || '',
           text,
+          isReversed,
         }
       })
     } catch (e) {
@@ -4453,7 +4459,7 @@ useEffect(() => {
                   <div className="threecards-row" aria-label="Три карты (результат)">
                     {(threeCards.length ? threeCards : []).map((c, i) => (
                       <div key={`${c.idx}-${i}`} className="threecard">
-                        <img src={c.url || backCardImg} alt={c.name} />
+                        <img className={c.isReversed ? 'is-reversed' : ''} src={c.url || backCardImg} alt={c.name} />
                       </div>
                     ))}
                   </div>
@@ -4677,7 +4683,7 @@ useEffect(() => {
                   <div className="threecards-row" aria-label="Три карты (результат)">
                     {(ppfCards.length ? ppfCards : []).map((c, i) => (
                       <div key={`${c.idx}-${i}`} className="threecard">
-                        <img src={c.url || backCardImg} alt={c.name} />
+                        <img className={c.isReversed ? 'is-reversed' : ''} src={c.url || backCardImg} alt={c.name} />
                       </div>
                     ))}
                   </div>
@@ -4897,7 +4903,7 @@ useEffect(() => {
                   <div className="threecards-row" aria-label="Две карты (результат)">
                     {(decisionCards.length ? decisionCards : []).map((c, i) => (
                       <div key={`${c.idx}-${i}`} className="threecard">
-                        <img src={c.url || backCardImg} alt={c.name} />
+                        <img className={c.isReversed ? 'is-reversed' : ''} src={c.url || backCardImg} alt={c.name} />
                       </div>
                     ))}
                   </div>

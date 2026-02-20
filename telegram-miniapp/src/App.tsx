@@ -785,6 +785,9 @@ useEffect(() => {
   const [pressed, setPressed] = useState(false)
 
   const [question, setQuestion] = useState('')
+  const [askInputFocused, setAskInputFocused] = useState(false)
+  const [keyboardInset, setKeyboardInset] = useState(0)
+  const focusSyncTRef = useRef<number | null>(null)
 
   /* =============================================================================================
      [10] ЗАПИСЬ ГОЛОСА
@@ -801,6 +804,62 @@ useEffect(() => {
   const isIOS = useMemo(() => {
     const ua = navigator.userAgent || ''
     return /iPad|iPhone|iPod/.test(ua)
+  }, [])
+
+  useEffect(() => {
+    const isAskInput = (target: EventTarget | null): target is HTMLElement => {
+      return !!target && target instanceof HTMLElement && target.classList.contains('ask-input')
+    }
+
+    const syncFromActive = () => {
+      const active = document.activeElement
+      setAskInputFocused(active instanceof HTMLElement && active.classList.contains('ask-input'))
+    }
+
+    const onFocusIn = (event: FocusEvent) => {
+      if (isAskInput(event.target)) {
+        setAskInputFocused(true)
+        return
+      }
+      syncFromActive()
+    }
+
+    const onFocusOut = () => {
+      if (focusSyncTRef.current) window.clearTimeout(focusSyncTRef.current)
+      focusSyncTRef.current = window.setTimeout(syncFromActive, 0)
+    }
+
+    document.addEventListener('focusin', onFocusIn)
+    document.addEventListener('focusout', onFocusOut)
+    syncFromActive()
+
+    return () => {
+      document.removeEventListener('focusin', onFocusIn)
+      document.removeEventListener('focusout', onFocusOut)
+      if (focusSyncTRef.current) window.clearTimeout(focusSyncTRef.current)
+    }
+  }, [])
+
+  useEffect(() => {
+    const vv = window.visualViewport
+
+    const syncInset = () => {
+      const raw = vv ? window.innerHeight - vv.height - vv.offsetTop : 0
+      setKeyboardInset(Math.max(0, Math.round(raw)))
+    }
+
+    syncInset()
+    vv?.addEventListener('resize', syncInset)
+    vv?.addEventListener('scroll', syncInset)
+    window.addEventListener('resize', syncInset)
+    window.addEventListener('orientationchange', syncInset)
+
+    return () => {
+      vv?.removeEventListener('resize', syncInset)
+      vv?.removeEventListener('scroll', syncInset)
+      window.removeEventListener('resize', syncInset)
+      window.removeEventListener('orientationchange', syncInset)
+    }
   }, [])
 
   /* =============================================================================================
@@ -962,8 +1021,10 @@ useEffect(() => {
     const spreadOk = !!spread
 
     if (!qOk || !spreadOk) {
-      pulseCtaRed()
-      if (!qOk) return flashStageBorder('question')
+      if (!qOk) {
+        pulseCtaRed()
+        return flashStageBorder('question')
+      }
       return flashStageBorder('spread')
     }
 
@@ -1414,6 +1475,7 @@ useEffect(() => {
   const onGlassPointerUp = () => setPressed(false)
 
   const shouldAttnSpreads = attnStage === 'spread' && !spread
+  const showKeyboardDone = askInputFocused
 
   /* =============================================================================================
      [20] “РОУТИНГ” + КАРТА ДНЯ + SHAKE (DAILY предвыбор)
@@ -3911,6 +3973,7 @@ useEffect(() => {
                         value={question}
                         onChange={(e) => setQuestion(e.target.value)}
                         placeholder="Что вас беспокоит? О чем хотели бы узнать?"
+                        enterKeyHint="done"
                         rows={2}
                       />
                       <button
@@ -3970,6 +4033,9 @@ useEffect(() => {
                   </div>
 
                   <h2 className="home-section-title">Выберите тип расклада</h2>
+                  <div className={`spread-soft-hint ${shouldAttnSpreads ? 'is-visible' : ''}`} aria-live="polite">
+                    Выберите тип расклада
+                  </div>
 
                   <div className={`spread-list ${shouldAttnSpreads ? 'is-attn' : ''}`} ref={spreadListRef}>
                     {SPREADS.map((s) => {
@@ -4000,7 +4066,7 @@ useEffect(() => {
                   <button
                     ref={btnRef}
                     type="button"
-                    className={`glass-cta glass-cta--hero ${pressed ? 'pressed' : ''} ${ctaError ? 'is-error' : ''}`}
+                    className={`glass-cta glass-cta--hero glass-cta--sticky ${pressed ? 'pressed' : ''} ${ctaError ? 'is-error' : ''}`}
                     onPointerDown={onGlassPointerDown}
                     onPointerUp={onGlassPointerUp}
                     onPointerCancel={onGlassPointerUp}
@@ -4350,6 +4416,7 @@ useEffect(() => {
                       value={question}
                       onChange={(e) => setQuestion(e.target.value)}
                       placeholder="Вопрос (необязательно). Например: «Что мне важно понять в отношениях?»"
+                      enterKeyHint="done"
                       rows={3}
                     />
                     <button
@@ -4549,6 +4616,7 @@ useEffect(() => {
                           value={question}
                           onChange={(e) => setQuestion(e.target.value)}
                           placeholder="Что вас беспокоит? О чем хотели бы узнать?"
+                          enterKeyHint="done"
                           rows={2}
                         />
                         <div className={`ask-mic ${isRecording ? 'recording' : ''}`} onClick={toggleRecording} role="button" tabIndex={0}>
@@ -4708,6 +4776,7 @@ useEffect(() => {
                           value={threeQuestion}
                           onChange={(e) => setThreeQuestion(e.target.value)}
                           placeholder="Ваш вопрос…"
+                          enterKeyHint="done"
                           rows={2}
                         />
                       </div>
@@ -4936,6 +5005,7 @@ useEffect(() => {
                           value={ppfQuestion}
                           onChange={(e) => setPpfQuestion(e.target.value)}
                           placeholder="Ваш вопрос…"
+                          enterKeyHint="done"
                           rows={2}
                         />
                       </div>
@@ -5147,6 +5217,7 @@ useEffect(() => {
                           value={decisionQuestion}
                           onChange={(e) => setDecisionQuestion(e.target.value)}
                           placeholder="Сформулируйте вопрос и мысленно обозначьте Вариант A и Вариант B…"
+                          enterKeyHint="done"
                           rows={2}
                         />
                       </div>
@@ -5340,6 +5411,20 @@ useEffect(() => {
           </>
         )}
       </div>
+
+      {showKeyboardDone && (
+        <button
+          type="button"
+          className="keyboard-done"
+          style={{ bottom: `calc(env(safe-area-inset-bottom, 0px) + ${Math.max(12, keyboardInset + 10)}px)` }}
+          onClick={() => {
+            const active = document.activeElement
+            if (active instanceof HTMLElement) active.blur()
+          }}
+        >
+          Готово
+        </button>
+      )}
     </div>
   )
 }

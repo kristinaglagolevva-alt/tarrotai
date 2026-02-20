@@ -180,7 +180,7 @@ class CardOfDayCreateIn(BaseModel):
     question: str = ""
     consider_reversed: bool = True
     deck_size: int = 78
-    force_llm: bool = True
+    force_llm: bool = False
 
 
 class CardOfDayOut(BaseModel):
@@ -221,7 +221,7 @@ class ReadingCreateIn(BaseModel):
     position_titles: List[str] = Field(default_factory=list)
 
     extra_context: str = ""
-    force_llm: bool = True
+    force_llm: bool = False
 
 
 class ReadingOut(BaseModel):
@@ -584,7 +584,7 @@ async def photo_analysis(
     topic: str = Form(default="relations"),
     question: str = Form(default=""),
     extra_context: str = Form(default=""),
-    force_llm: bool = Form(default=True),
+    force_llm: bool = Form(default=False),
 ):
     up = image or file
     if not up:

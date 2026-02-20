@@ -1002,7 +1002,6 @@ useEffect(() => {
       if (ctaErrTRef.current) window.clearTimeout(ctaErrTRef.current)
       if (attnTRef.current) window.clearTimeout(attnTRef.current)
       if (bumpTRef.current) window.clearTimeout(bumpTRef.current)
-      if (navBumpTRef.current) window.clearTimeout(navBumpTRef.current)
     }
   }, [])
 
@@ -1432,10 +1431,6 @@ useEffect(() => {
   const prevNavTabRef = useRef<NavTab>('main')
   const [navPrev, setNavPrev] = useState<NavTab>('main')
 
-  const [navIsBumping, setNavIsBumping] = useState(false)
-  const navBumpTRef = useRef<number | null>(null)
-  const [navBump, setNavBump] = useState(0)
-
   const NAV_INDEX = useMemo(() => {
     const map = new Map<NavTab, number>()
     ;(['main', 'history', 'profile'] as NavTab[]).forEach((t, i) => map.set(t, i))
@@ -1454,15 +1449,19 @@ useEffect(() => {
     setNavPrev(prevNavTabRef.current)
     prevNavTabRef.current = next
     setNavTab(next)
+  }
 
-    setNavBump((n) => n + 1)
+  const goToMainTab = () => {
+    if (navTab === 'main') return
+    onPickNav('main')
+  }
 
-    setNavIsBumping(false)
-    if (navBumpTRef.current) window.clearTimeout(navBumpTRef.current)
-    requestAnimationFrame(() => {
-      setNavIsBumping(true)
-      navBumpTRef.current = window.setTimeout(() => setNavIsBumping(false), 440)
-    })
+  const toggleHistoryTab = () => {
+    onPickNav(navTab === 'history' ? 'main' : 'history')
+  }
+
+  const toggleProfileTab = () => {
+    onPickNav(navTab === 'profile' ? 'main' : 'profile')
   }
   useEffect(() => {
     let mounted = true
@@ -3816,45 +3815,53 @@ useEffect(() => {
       <div className="content">
         {view === 'home' && (
           <>
-            <h1>AI Tarot</h1>
-            <p>Мудрость карт и искусственного интеллекта</p>
+            <div className="home-head">
+              <div
+                className={`home-head__brand ${navTab !== 'main' ? 'is-clickable' : ''}`}
+                role={navTab !== 'main' ? 'button' : undefined}
+                tabIndex={navTab !== 'main' ? 0 : -1}
+                onClick={goToMainTab}
+                onKeyDown={(e) => {
+                  if (navTab === 'main') return
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault()
+                    goToMainTab()
+                  }
+                }}
+                aria-label={navTab !== 'main' ? 'Вернуться на главную' : undefined}
+              >
+                <h1>AI Tarot</h1>
+                <p>Мудрость карт и искусственного интеллекта</p>
+              </div>
 
-            {/* NAV: Главная / История / Профиль */}
-            <div
-              className={`seg navseg ${navIsBumping ? 'is-bump' : ''}`}
-              data-bump={navBump}
-              style={{ ['--i' as any]: navActiveIndex }}
-              role="tablist"
-              aria-label="Навигация"
-            >
-              <div className="seg__pill" aria-hidden="true" />
-              <button
-                type="button"
-                className={`seg__btn ${navTab === 'main' ? 'is-active' : ''}`}
-                onClick={() => onPickNav('main')}
-                role="tab"
-                aria-selected={navTab === 'main'}
-              >
-                Главная
-              </button>
-              <button
-                type="button"
-                className={`seg__btn ${navTab === 'history' ? 'is-active' : ''}`}
-                onClick={() => onPickNav('history')}
-                role="tab"
-                aria-selected={navTab === 'history'}
-              >
-                История
-              </button>
-              <button
-                type="button"
-                className={`seg__btn ${navTab === 'profile' ? 'is-active' : ''}`}
-                onClick={() => onPickNav('profile')}
-                role="tab"
-                aria-selected={navTab === 'profile'}
-              >
-                Профиль
-              </button>
+              <div className="home-head__actions" aria-label="Навигация">
+                <button
+                  type="button"
+                  className={`home-head__action ${navTab === 'history' ? 'is-active' : ''}`}
+                  onClick={toggleHistoryTab}
+                  aria-label={navTab === 'history' ? 'Вернуться на главную' : 'Открыть историю'}
+                  title={navTab === 'history' ? 'На главную' : 'История'}
+                >
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20Z" fill="none" stroke="currentColor" strokeWidth="1.8" />
+                    <path d="M12 6v6l4 2" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                </button>
+
+                <button
+                  type="button"
+                  className={`home-head__action home-head__action--avatar ${navTab === 'profile' ? 'is-active' : ''}`}
+                  onClick={toggleProfileTab}
+                  aria-label={navTab === 'profile' ? 'Вернуться на главную' : 'Открыть профиль'}
+                  title={navTab === 'profile' ? 'На главную' : 'Профиль'}
+                >
+                  {user?.photo_url ? (
+                    <img src={user.photo_url} alt="" />
+                  ) : (
+                    <span>{(user?.first_name?.[0] || user?.username?.[0] || 'U').toUpperCase()}</span>
+                  )}
+                </button>
+              </div>
             </div>
 
             {/* PAGES: slide left/right */}

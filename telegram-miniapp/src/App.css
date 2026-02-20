@@ -2797,11 +2797,17 @@ body,
 }
 
 .seg__btn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  min-height: 0;
+  height: calc(100% - 6px);
+  display: grid;
+  place-items: center;
   line-height: 1;
-  padding-top: 0;
+  padding: 0 10px 1px;
+}
+
+.seg--threekind .seg__btn,
+.seg--ppf .seg__btn {
+  padding: 0 10px 1px;
 }
 
 .card-day {

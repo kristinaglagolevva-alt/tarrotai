@@ -3830,7 +3830,7 @@ useEffect(() => {
                 }}
                 aria-label={navTab !== 'main' ? 'Вернуться на главную' : undefined}
               >
-                <h1>AI Tarot</h1>
+                <h1>AI Taro</h1>
                 <p>Мудрость карт и искусственного интеллекта</p>
               </div>
 
@@ -4263,7 +4263,7 @@ useEffect(() => {
 
         {view === 'photo_analysis' && (
           <>
-            <h1>AI Tarot</h1>
+            <h1>AI Taro</h1>
             <p>AI анализ фото расклада</p>
 
             <div className="photo-page">
@@ -4471,7 +4471,7 @@ useEffect(() => {
 
         {view === 'card_day_prep' && (
           <>
-            <h1>AI Tarot</h1>
+            <h1>AI Taro</h1>
             <p ref={subtitleRef}>Мудрость карт и искусственного интеллекта</p>
             {cardDayLoading && (
               <div
@@ -4684,7 +4684,7 @@ useEffect(() => {
         )}
         {view === 'three_cards_prep' && (
           <>
-            <h1>AI Tarot</h1>
+            <h1>AI Taro</h1>
             <p>Расклад по 3 картам</p>
 
             <div className="threepage">
@@ -4913,7 +4913,7 @@ useEffect(() => {
         )}
         {view === 'past_present_future_prep' && (
           <>
-            <h1>AI Tarot</h1>
+            <h1>AI Taro</h1>
             <p>Прошлое • Настоящее • Будущее</p>
 
             <div className="threepage">
@@ -5124,7 +5124,7 @@ useEffect(() => {
 
         {view === 'decision_prep' && (
           <>
-            <h1>AI Tarot</h1>
+            <h1>AI Taro</h1>
             <p>Принятие решения</p>
 
             <div className="threepage">

@@ -2958,7 +2958,7 @@ body,
   justify-content: space-between;
   gap: 14px;
   margin-top: 0;
-  padding-top: calc(env(safe-area-inset-top, 0px) + 26px);
+  padding-top: calc(env(safe-area-inset-top, 0px) + 44px);
 }
 
 .home-head__brand {
@@ -2976,7 +2976,7 @@ body,
 }
 
 .home-head__brand p {
-  margin: 8px 0 0;
+  margin: 4px 0 0;
   text-align: left;
   max-width: 320px;
 }
@@ -2986,6 +2986,7 @@ body,
   align-items: center;
   gap: 8px;
   margin-top: 0;
+  margin-right: 8px;
 }
 
 .home-head__action {

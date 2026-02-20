@@ -2223,6 +2223,46 @@ useEffect(() => {
     return Array.from(set)
   }
 
+  const toForcedCards = (cards?: Array<{ idx: number; isReversed?: boolean }>) => {
+    if (!cards || !cards.length) return undefined
+    return cards.map((c) => ({
+      card_index: clamp(Number(c.idx || 0), 0, 77),
+      is_reversed: Boolean(c.isReversed),
+    }))
+  }
+
+  const warmupCardImages = (cards?: Array<{ url?: string }>) => {
+    if (!cards || !cards.length) return
+    cards.forEach((c) => {
+      const src = String(c?.url || '').trim()
+      if (!src) return
+      const im = new Image()
+      im.decoding = 'async'
+      im.src = src
+      try {
+        ;(im as any).decode?.().catch(() => {})
+      } catch {}
+    })
+  }
+
+  const buildThreeCardsPreview = (): ThreeCardResult[] => {
+    const roles = ['Карта 1', 'Карта 2', 'Карта 3']
+    const idxs = pickUniqueIndexes(3, FRONT_CARD_URLS.length || 78)
+    return idxs.map((idx, i) => {
+      const url = FRONT_CARD_URLS[idx] || backCardImg
+      const isReversed = Math.random() < 0.5
+      const baseName = cardNameFromUrl(url)
+      return {
+        idx,
+        url,
+        name: isReversed ? `${baseName} (перевёрнутая)` : baseName,
+        role: roles[i] || `Карта ${i + 1}`,
+        text: '',
+        isReversed,
+      }
+    })
+  }
+
   const buildThreeCardsMock = (): ThreeCardResult[] => {
     const roles = ['Карта 1', 'Карта 2', 'Карта 3']
     const idxs = pickUniqueIndexes(3, FRONT_CARD_URLS.length || 78)
@@ -2297,8 +2337,10 @@ useEffect(() => {
     threeShakeCooldownRef.current = 0
     threeLastPulseRef.current = 0
 
-    // обнулим старые карты: настоящие значения будут получены с бэка
-    setThreeCards([])
+    // Сразу показываем “выпавшие” карты локально, а текст дотягиваем с сервера.
+    const previewCards = buildThreeCardsPreview()
+    setThreeCards(previewCards)
+    warmupCardImages(previewCards)
     // Reset description and mark as loading while we fetch from the backend
     setThreeDesc('')
     setThreeLoading(true)
@@ -2323,14 +2365,14 @@ useEffect(() => {
     // Запрос запускаем сразу в момент начала шейка (до открытия карт), чтобы сократить ожидание результата.
     const requestSeq = threeRequestSeqRef.current + 1
     threeRequestSeqRef.current = requestSeq
-    buildThreeCardsReal().then((cards) => {
+    buildThreeCardsReal(previewCards).then((cards) => {
       if (threeRequestSeqRef.current !== requestSeq) return
       setThreeCards(cards)
       setThreeLoading(false)
     }).catch((err: any) => {
       if (threeRequestSeqRef.current !== requestSeq) return
       console.warn('[reading] three_cards failed:', err)
-      setThreeCards([])
+      setThreeCards(previewCards)
       setThreeDesc(mapReadingError(String(err?.message || err || '')))
       setThreeLoading(false)
     })
@@ -2477,6 +2519,24 @@ useEffect(() => {
     })
   }
 
+  const buildPpfCardsPreview = (): PpfCardResult[] => {
+    const roles = ['Прошлое', 'Настоящее', 'Будущее']
+    const idxs = pickUniqueIndexes(3, FRONT_CARD_URLS.length || 78)
+    return idxs.map((idx, i) => {
+      const url = FRONT_CARD_URLS[idx] || backCardImg
+      const isReversed = Math.random() < 0.5
+      const baseName = cardNameFromUrl(url)
+      return {
+        idx,
+        url,
+        name: isReversed ? `${baseName} (перевёрнутая)` : baseName,
+        role: roles[i] || '',
+        text: '',
+        isReversed,
+      }
+    })
+  }
+
   const resetPpfState = () => {
     setPpfScreen('setup')
     setPpfShakeEnabled(false)
@@ -2524,8 +2584,10 @@ useEffect(() => {
     ppfShakeCooldownRef.current = 0
     ppfLastPulseRef.current = 0
 
-    // обнулим старые карты: настоящие значения будут получены с бэка
-    setPpfCards([])
+    // Сразу показываем карты, чтобы не ждать сеть перед визуальным результатом.
+    const previewCards = buildPpfCardsPreview()
+    setPpfCards(previewCards)
+    warmupCardImages(previewCards)
     // Reset description and mark as loading while we fetch from the backend
     setPpfDesc('')
     setPpfLoading(true)
@@ -2546,12 +2608,12 @@ useEffect(() => {
     } catch {}
 
     // подгружаем реальные карты: fallback на мок при ошибках
-    buildPpfCardsReal().then((cards) => {
+    buildPpfCardsReal(previewCards).then((cards) => {
       setPpfCards(cards)
       setPpfLoading(false)
     }).catch((err: any) => {
       console.warn('[reading] ppf failed:', err)
-      setPpfCards([])
+      setPpfCards(previewCards)
       setPpfDesc(mapReadingError(String(err?.message || err || '')))
       setPpfLoading(false)
     })
@@ -2779,22 +2841,23 @@ useEffect(() => {
   // =================================================================================================
 
   // Build 3 cards reading with real LLM meanings
-  const buildThreeCardsReal = async (): Promise<ThreeCardResult[]> => {
+  const buildThreeCardsReal = async (previewCards?: ThreeCardResult[]): Promise<ThreeCardResult[]> => {
     if (!token) {
-      return buildThreeCardsMock()
+      return (previewCards && previewCards.length ? previewCards : buildThreeCardsMock())
     }
     const params = {
       spread_type: 'three_cards' as const,
       topic: topic,
       question: threeQuestion.trim(),
       consider_reversed: true,
+      forced_cards: toForcedCards(previewCards),
     }
     const reading: any = await createReading(token, params)
     void refreshBilling(token)
     // Save the description from the backend so we can display it in the UI
     setThreeDesc(String(reading?.description ?? ''))
     const roles = ['Карта 1', 'Карта 2', 'Карта 3']
-    return (reading.cards || []).slice(0, 3).map((c: any, i: number) => {
+    const mapped = (reading.cards || []).slice(0, 3).map((c: any, i: number) => {
       const idx = Number(c.card_index ?? 0)
       const url = FRONT_CARD_URLS[idx] || backCardImg
       const isReversed = Boolean(c?.is_reversed)
@@ -2810,18 +2873,21 @@ useEffect(() => {
         isReversed,
       }
     })
+    if (mapped.length) return mapped
+    return (previewCards && previewCards.length ? previewCards : buildThreeCardsMock())
   }
 
   // Build Past-Present-Future reading with real LLM meanings
-  const buildPpfCardsReal = async (): Promise<PpfCardResult[]> => {
+  const buildPpfCardsReal = async (previewCards?: PpfCardResult[]): Promise<PpfCardResult[]> => {
     if (!token) {
-      return buildPpfCardsMock()
+      return (previewCards && previewCards.length ? previewCards : buildPpfCardsMock())
     }
     const params = {
       spread_type: 'ppf' as const,
       topic: topic,
       question: ppfQuestion.trim(),
       consider_reversed: true,
+      forced_cards: toForcedCards(previewCards),
     }
     const reading: any = await createReading(token, params)
     void refreshBilling(token)
@@ -2834,7 +2900,7 @@ useEffect(() => {
         : ppfFocus === 'present'
         ? 'Фокус: настоящее — что происходит прямо сейчас?'
         : 'Фокус: будущее — куда ведёт текущая динамика?'
-    return (reading.cards || []).slice(0, 3).map((c: any, i: number) => {
+    const mapped = (reading.cards || []).slice(0, 3).map((c: any, i: number) => {
       const idx = Number(c.card_index ?? 0)
       const url = FRONT_CARD_URLS[idx] || backCardImg
       const isReversed = Boolean(c?.is_reversed)
@@ -2851,6 +2917,8 @@ useEffect(() => {
         isReversed,
       }
     })
+    if (mapped.length) return mapped
+    return (previewCards && previewCards.length ? previewCards : buildPpfCardsMock())
   }
 
   // Build Decision reading with real LLM meanings

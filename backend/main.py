@@ -312,6 +312,11 @@ class ReadingCard(BaseModel):
     meaning: str = ""
 
 
+class ForcedReadingCardIn(BaseModel):
+    card_index: int = Field(ge=0)
+    is_reversed: bool = False
+
+
 class ReadingCreateIn(BaseModel):
     spread_type: Literal["ppf", "three_cards", "decision", "custom"] = "three_cards"
     topic: str = "relations"
@@ -326,6 +331,7 @@ class ReadingCreateIn(BaseModel):
     # custom
     positions: List[str] = Field(default_factory=list)
     position_titles: List[str] = Field(default_factory=list)
+    forced_cards: List[ForcedReadingCardIn] = Field(default_factory=list)
 
     extra_context: str = ""
     force_llm: bool = False
@@ -619,24 +625,52 @@ async def create_reading(
     if k > effective_deck:
         raise HTTPException(status_code=400, detail="deck_size too small for this spread")
 
-    indices = random.sample(range(effective_deck), k)
-
     cards_for_store: List[dict] = []
-    for (pos, title), idx in zip(layout, indices):
-        card = get_card_by_index(idx)
-        is_reversed = bool(payload.consider_reversed and random.choice([True, False]))
-        meaning = card["reversed_meaning"] if is_reversed else card["upright_meaning"]
+    forced_cards = payload.forced_cards or []
 
-        cards_for_store.append(
-            {
-                "position": pos,
-                "title": title,
-                "card_index": int(idx),
-                "card_name": str(card["name"]),
-                "is_reversed": bool(is_reversed),
-                "meaning": str(meaning or ""),
-            }
-        )
+    use_forced = len(forced_cards) >= k
+    if use_forced:
+        used_indices: set[int] = set()
+        for fc in forced_cards[:k]:
+            idx = int(fc.card_index)
+            if idx < 0 or idx >= effective_deck:
+                raise HTTPException(status_code=400, detail="forced_cards contains invalid card_index")
+            if idx in used_indices:
+                raise HTTPException(status_code=400, detail="forced_cards contains duplicate card_index")
+            used_indices.add(idx)
+
+        for (pos, title), fc in zip(layout, forced_cards[:k]):
+            idx = int(fc.card_index)
+            card = get_card_by_index(idx)
+            is_reversed = bool(payload.consider_reversed and bool(fc.is_reversed))
+            meaning = card["reversed_meaning"] if is_reversed else card["upright_meaning"]
+            cards_for_store.append(
+                {
+                    "position": pos,
+                    "title": title,
+                    "card_index": int(idx),
+                    "card_name": str(card["name"]),
+                    "is_reversed": bool(is_reversed),
+                    "meaning": str(meaning or ""),
+                }
+            )
+    else:
+        indices = random.sample(range(effective_deck), k)
+        for (pos, title), idx in zip(layout, indices):
+            card = get_card_by_index(idx)
+            is_reversed = bool(payload.consider_reversed and random.choice([True, False]))
+            meaning = card["reversed_meaning"] if is_reversed else card["upright_meaning"]
+
+            cards_for_store.append(
+                {
+                    "position": pos,
+                    "title": title,
+                    "card_index": int(idx),
+                    "card_name": str(card["name"]),
+                    "is_reversed": bool(is_reversed),
+                    "meaning": str(meaning or ""),
+                }
+            )
 
     extra_context = (payload.extra_context or "").strip()
     if payload.spread_type == "decision":

@@ -158,6 +158,10 @@ export type ReadingCreateParams = {
   question: string
   consider_reversed?: boolean
   deck_size?: number
+  forced_cards?: Array<{
+    card_index: number
+    is_reversed?: boolean
+  }>
 
   // decision
   option_a?: string

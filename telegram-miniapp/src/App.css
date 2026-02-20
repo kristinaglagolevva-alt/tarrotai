@@ -2957,7 +2957,8 @@ body,
   align-items: flex-start;
   justify-content: space-between;
   gap: 14px;
-  margin-top: 2px;
+  margin-top: 0;
+  padding-top: calc(env(safe-area-inset-top, 0px) + 26px);
 }
 
 .home-head__brand {
@@ -2983,13 +2984,13 @@ body,
 .home-head__actions {
   display: flex;
   align-items: center;
-  gap: 10px;
-  margin-top: 2px;
+  gap: 8px;
+  margin-top: 0;
 }
 
 .home-head__action {
-  width: 50px;
-  height: 50px;
+  width: 42px;
+  height: 42px;
   border-radius: 999px;
   border: 1px solid rgba(178, 198, 255, 0.3);
   background:
@@ -3007,8 +3008,8 @@ body,
 }
 
 .home-head__action svg {
-  width: 24px;
-  height: 24px;
+  width: 20px;
+  height: 20px;
   display: block;
 }
 
@@ -3037,7 +3038,7 @@ body,
 }
 
 .home-head__action--avatar span {
-  font-size: 20px;
+  font-size: 17px;
   font-weight: 760;
   line-height: 1;
   color: rgba(248, 252, 255, 0.96);

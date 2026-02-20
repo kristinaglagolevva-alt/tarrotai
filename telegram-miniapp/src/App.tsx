@@ -1499,8 +1499,9 @@ useEffect(() => {
   const shakeCooldownRef = useRef(0)
 
   const HAPTIC_MIN_INTERVAL = 55 // ms
-  const SHAKE_THRESHOLD = 9.1
-  const SHAKE_STEP_BASE = 0.022
+  const SHAKE_THRESHOLD = 7.6
+  const SHAKE_STEP_BASE = 0.06
+  const SHAKE_STEP_POWER = 0.08
 
   // ---------------------------------------------------------------------------------------------
   // ✅ helpers: стабильный daily random (userId + YYYY-MM-DD) -> индекс
@@ -2277,6 +2278,28 @@ useEffect(() => {
   const DECISION_SHAKE_THRESHOLD = 8.8
   const DECISION_SHAKE_STEP_BASE = 0.11
 
+  // держим актуальный прогресс в refs, чтобы listeners не пересоздавались на каждый тик
+  const shuffleProgressRef = useRef(0)
+  const threeShuffleProgressRef = useRef(0)
+  const ppfShuffleProgressRef = useRef(0)
+  const decisionShuffleProgressRef = useRef(0)
+
+  useEffect(() => {
+    shuffleProgressRef.current = shuffleProgress
+  }, [shuffleProgress])
+
+  useEffect(() => {
+    threeShuffleProgressRef.current = threeShuffleProgress
+  }, [threeShuffleProgress])
+
+  useEffect(() => {
+    ppfShuffleProgressRef.current = ppfShuffleProgress
+  }, [ppfShuffleProgress])
+
+  useEffect(() => {
+    decisionShuffleProgressRef.current = decisionShuffleProgress
+  }, [decisionShuffleProgress])
+
   const buildDecisionCardsMock = (): DecisionCardResult[] => {
     const roles = ['Вариант A', 'Вариант B']
     const idxs = pickUniqueIndexes(2, FRONT_CARD_URLS.length || 78)
@@ -2629,11 +2652,12 @@ useEffect(() => {
 
         shuffleDecisionOnce(power)
 
-        const interval = Math.round(120 - clamp(decisionShuffleProgress, 0, 1) * 70)
+        const currentProgress = decisionShuffleProgressRef.current
+        const interval = Math.round(120 - clamp(currentProgress, 0, 1) * 70)
         if (now - decisionLastPulseRef.current > Math.max(HAPTIC_MIN_INTERVAL, interval)) {
           decisionLastPulseRef.current = now
           try {
-            hapticPulse(clamp(decisionShuffleProgress * 0.85 + power * 0.45, 0.12, 1))
+            hapticPulse(clamp(currentProgress * 0.85 + power * 0.45, 0.12, 1))
           } catch {}
         }
       }
@@ -2645,7 +2669,7 @@ useEffect(() => {
       window.removeEventListener('devicemotion', onMotion as any)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [view, decisionScreen, decisionShakeEnabled, decisionReadyToOpen, decisionShuffleProgress])
+  }, [view, decisionScreen, decisionShakeEnabled, decisionReadyToOpen])
 
 
   const enableShake = async () => {
@@ -2777,14 +2801,15 @@ useEffect(() => {
 
       if (delta > SHAKE_THRESHOLD) {
         // небольшой cooldown, чтобы не летело 200 событий/сек
-        shakeCooldownRef.current = now + 70
+        shakeCooldownRef.current = now + 55
 
         // сила импульса 0..1
-        const power = clamp((delta - SHAKE_THRESHOLD) / 18, 0, 1)
+        const power = clamp((delta - SHAKE_THRESHOLD) / 14, 0, 1)
 
         setShuffleProgress((p) => {
-          const step = SHAKE_STEP_BASE + power * 0.038
+          const step = SHAKE_STEP_BASE + power * SHAKE_STEP_POWER
           const next = clamp(p + step, 0, 1)
+          shuffleProgressRef.current = next
 
           // при достижении 1 — просим карту остановиться на рубашке
           if (next >= 1) {
@@ -2795,12 +2820,13 @@ useEffect(() => {
         })
 
         // haptics ramp: чем ближе к 1, тем сильнее и чаще
-        const interval = Math.round(120 - clamp(shuffleProgress, 0, 1) * 70) // 120..50ms
+        const currentProgress = shuffleProgressRef.current
+        const interval = Math.round(120 - clamp(currentProgress, 0, 1) * 70) // 120..50ms
         if (now - lastPulseRef.current > Math.max(HAPTIC_MIN_INTERVAL, interval)) {
           lastPulseRef.current = now
 
           // strength: мягко растёт + добавим power
-          const strength = clamp(shuffleProgress * 0.9 + power * 0.4, 0.12, 1)
+          const strength = clamp(currentProgress * 0.9 + power * 0.4, 0.12, 1)
           hapticPulse(strength)
         }
       }
@@ -2813,7 +2839,7 @@ useEffect(() => {
       window.removeEventListener('devicemotion', onMotion as any)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [view, shakeEnabled, shakenOnce, stopRequested, shuffleProgress])
+  }, [view, shakeEnabled, shakenOnce, stopRequested])
 
   /* =============================================================================================
    [21.1] SHAKE LISTENER — 3 КАРТЫ (отдельно от “карты дня”)
@@ -2858,11 +2884,12 @@ useEffect(() => {
         shuffleThreeOnce(power)
 
         // haptics
-        const interval = Math.round(120 - clamp(threeShuffleProgress, 0, 1) * 70)
+        const currentProgress = threeShuffleProgressRef.current
+        const interval = Math.round(120 - clamp(currentProgress, 0, 1) * 70)
         if (now - threeLastPulseRef.current > Math.max(HAPTIC_MIN_INTERVAL, interval)) {
           threeLastPulseRef.current = now
           try {
-            hapticPulse(clamp(threeShuffleProgress * 0.85 + power * 0.45, 0.12, 1))
+            hapticPulse(clamp(currentProgress * 0.85 + power * 0.45, 0.12, 1))
           } catch {}
         }
       }
@@ -2874,7 +2901,7 @@ useEffect(() => {
       window.removeEventListener('devicemotion', onMotion as any)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [view, threeScreen, threeShakeEnabled, threeReadyToOpen, threeShuffleProgress])
+  }, [view, threeScreen, threeShakeEnabled, threeReadyToOpen])
 
     /* =============================================================================================
    [21.2] SHAKE LISTENER — ПРОШЛОЕ/НАСТОЯЩЕЕ/БУДУЩЕЕ (отдельно от “карты дня” и three_cards)
@@ -2918,11 +2945,12 @@ useEffect(() => {
 
         shufflePpfOnce(power)
 
-        const interval = Math.round(120 - clamp(ppfShuffleProgress, 0, 1) * 70)
+        const currentProgress = ppfShuffleProgressRef.current
+        const interval = Math.round(120 - clamp(currentProgress, 0, 1) * 70)
         if (now - ppfLastPulseRef.current > Math.max(HAPTIC_MIN_INTERVAL, interval)) {
           ppfLastPulseRef.current = now
           try {
-            hapticPulse(clamp(ppfShuffleProgress * 0.85 + power * 0.45, 0.12, 1))
+            hapticPulse(clamp(currentProgress * 0.85 + power * 0.45, 0.12, 1))
           } catch {}
         }
       }
@@ -2934,7 +2962,7 @@ useEffect(() => {
       window.removeEventListener('devicemotion', onMotion as any)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [view, ppfScreen, ppfShakeEnabled, ppfReadyToOpen, ppfShuffleProgress])
+  }, [view, ppfScreen, ppfShakeEnabled, ppfReadyToOpen])
 
   /* =============================================================================================
      [22] POS: карта под spread-card (до reveal) и под подписью (после reveal)

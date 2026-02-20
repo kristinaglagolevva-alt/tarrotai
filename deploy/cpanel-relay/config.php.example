@@ -1,0 +1,9 @@
+<?php
+declare(strict_types=1);
+
+return [
+    // Put your real key on server-side only.
+    'openai_api_key' => 'sk-...',
+    // Shared secret between backend and relay endpoint.
+    'relay_token' => 'change-me',
+];

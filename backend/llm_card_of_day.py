@@ -16,6 +16,10 @@ def _env(name: str, default: str = "") -> str:
     return v.strip() if isinstance(v, str) else default
 
 
+def _relay_enabled() -> bool:
+    return bool(_env("OPENAI_RELAY_URL"))
+
+
 def _extract_text(resp: Any) -> str:
     # Responses API (new)
     try:
@@ -104,6 +108,41 @@ def fallback_spread_text(topic: str, question: str, spread_type: str, cards: Lis
 
 
 async def _call_openai(system_prompt: str, user_prompt: str, *, model: str, temperature: float, max_tokens: int) -> str:
+    relay_url = _env("OPENAI_RELAY_URL")
+    relay_token = _env("OPENAI_RELAY_TOKEN")
+    relay_err: Optional[Exception] = None
+    if relay_url:
+        try:
+            import httpx  # type: ignore
+
+            headers = {"Content-Type": "application/json"}
+            if relay_token:
+                headers["Authorization"] = f"Bearer {relay_token}"
+                headers["X-Relay-Token"] = relay_token
+
+            payload = {
+                "mode": "chat",
+                "model": model,
+                "temperature": temperature,
+                "max_tokens": max_tokens,
+                "system_prompt": system_prompt,
+                "user_prompt": user_prompt,
+            }
+
+            async with httpx.AsyncClient(timeout=120.0) as client:
+                resp = await client.post(relay_url, headers=headers, json=payload)
+                resp.raise_for_status()
+                data = resp.json()
+            text = str((data or {}).get("text") or "").strip()
+            if text:
+                return text
+            raise RuntimeError("Relay returned empty text")
+        except Exception as e:
+            relay_err = e
+            log.warning("relay chat failed: %s", repr(e))
+            if not _env("OPENAI_API_KEY"):
+                raise RuntimeError(f"Relay failed: {relay_err!r}")
+
     from openai import AsyncOpenAI  # type: ignore
 
     api_key = _env("OPENAI_API_KEY")
@@ -152,6 +191,43 @@ async def _call_openai_with_image(
     """
     Vision call: send image as data: URL to Responses API (preferred), fallback to chat.completions.
     """
+    relay_url = _env("OPENAI_RELAY_URL")
+    relay_token = _env("OPENAI_RELAY_TOKEN")
+    relay_err: Optional[Exception] = None
+    if relay_url:
+        try:
+            import httpx  # type: ignore
+
+            headers = {"Content-Type": "application/json"}
+            if relay_token:
+                headers["Authorization"] = f"Bearer {relay_token}"
+                headers["X-Relay-Token"] = relay_token
+
+            payload = {
+                "mode": "vision",
+                "model": model,
+                "temperature": temperature,
+                "max_tokens": max_tokens,
+                "system_prompt": system_prompt,
+                "user_prompt": user_prompt,
+                "image_mime": image_mime,
+                "image_base64": base64.b64encode(image_bytes).decode("ascii"),
+            }
+
+            async with httpx.AsyncClient(timeout=180.0) as client:
+                resp = await client.post(relay_url, headers=headers, json=payload)
+                resp.raise_for_status()
+                data = resp.json()
+            text = str((data or {}).get("text") or "").strip()
+            if text:
+                return text
+            raise RuntimeError("Relay returned empty text")
+        except Exception as e:
+            relay_err = e
+            log.warning("relay vision failed: %s", repr(e))
+            if not _env("OPENAI_API_KEY"):
+                raise RuntimeError(f"Relay failed: {relay_err!r}")
+
     from openai import AsyncOpenAI  # type: ignore
 
     api_key = _env("OPENAI_API_KEY")
@@ -211,11 +287,12 @@ async def generate_card_text_llm(
     require_llm: bool = True,
 ) -> str:
     api_key = _env("OPENAI_API_KEY")
+    has_relay = _relay_enabled()
     model = _env("OPENAI_MODEL", "gpt-4o-mini")
 
-    if not api_key:
+    if not api_key and not has_relay:
         if require_llm:
-            raise RuntimeError("OPENAI_API_KEY is missing")
+            raise RuntimeError("OPENAI_API_KEY is missing (and OPENAI_RELAY_URL is not set)")
         return fallback_text(topic, question, card, is_reversed)
 
     orient = "перевёрнутая" if is_reversed else "прямая"
@@ -277,11 +354,12 @@ async def generate_spread_text_llm(
     require_llm: bool = True,
 ) -> str:
     api_key = _env("OPENAI_API_KEY")
+    has_relay = _relay_enabled()
     model = _env("OPENAI_MODEL", "gpt-4o-mini")
 
-    if not api_key:
+    if not api_key and not has_relay:
         if require_llm:
-            raise RuntimeError("OPENAI_API_KEY is missing")
+            raise RuntimeError("OPENAI_API_KEY is missing (and OPENAI_RELAY_URL is not set)")
         return fallback_spread_text(topic, question, spread_type, cards)
 
     stitle = {
@@ -446,11 +524,12 @@ async def generate_photo_analysis_llm(
       { position, title, card_name, is_reversed, notes, card_index, meaning }
     """
     api_key = _env("OPENAI_API_KEY")
+    has_relay = _relay_enabled()
     model = _env("OPENAI_VISION_MODEL", _env("OPENAI_MODEL", "gpt-4o-mini"))
 
-    if not api_key:
+    if not api_key and not has_relay:
         if require_llm:
-            raise RuntimeError("OPENAI_API_KEY is missing")
+            raise RuntimeError("OPENAI_API_KEY is missing (and OPENAI_RELAY_URL is not set)")
         return ("", [])
 
     deck = _deck_names()

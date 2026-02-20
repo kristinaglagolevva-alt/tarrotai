@@ -1500,11 +1500,20 @@ useEffect(() => {
 
             if (item?.kind === 'reading') {
               const p = item?.payload || {}
-              const cards = Array.isArray(p.cards) ? p.cards : []
+              const cardsRaw = Array.isArray(p.cards) ? p.cards : []
+              const cards: HistoryReadingCard[] = cardsRaw.map((card: any) => ({
+                position: String(card?.position || ''),
+                title: String(card?.title || ''),
+                card_index: Number(card?.card_index ?? 0),
+                card_name: String(card?.card_name || ''),
+                is_reversed: Boolean(card?.is_reversed),
+                meaning: String(card?.meaning || ''),
+              }))
               const first = cards[0] || {}
               const fallbackLabel = SPREAD_HISTORY_LABELS[String(p.spread_type || '')] || 'Расклад'
               return {
                 kind: 'reading' as const,
+                reading_id: Number(p.id ?? 0),
                 created_at: String(item?.created_at || ''),
                 topic: String(p.topic || ''),
                 question: String(p.question || ''),
@@ -1513,6 +1522,7 @@ useEffect(() => {
                 cards_count: cards.length || 0,
                 card_index: Number(first.card_index ?? 0),
                 card_name: String(first.card_name || fallbackLabel),
+                cards,
               }
             }
 
@@ -1529,6 +1539,11 @@ useEffect(() => {
         })
 
         setHistory(sorted)
+        setOpenedReadingId((prev) => {
+          if (prev == null) return prev
+          const exists = sorted.some((x) => x.kind === 'reading' && x.reading_id === prev)
+          return exists ? prev : null
+        })
       } catch (e: any) {
         if (!mounted) return
         setHistoryError(e?.message ? String(e.message) : 'Не удалось загрузить историю')
@@ -1544,6 +1559,10 @@ useEffect(() => {
       mounted = false
     }
   }, [navTab, token])
+
+  useEffect(() => {
+    if (navTab !== 'history') setOpenedReadingId(null)
+  }, [navTab])
 
   /* =============================================================================================
     [20.2] РАСКЛАД "3 КАРТЫ": 3 ЭКРАНА (SETUP → SHUFFLE → RESULT)
@@ -1746,8 +1765,18 @@ useEffect(() => {
     created_at: string
   }
 
+  type HistoryReadingCard = {
+    position: string
+    title: string
+    card_index: number
+    card_name: string
+    is_reversed: boolean
+    meaning: string
+  }
+
   type ReadingHistoryItem = {
     kind: 'reading'
+    reading_id: number
     created_at: string
     topic: string
     question: string
@@ -1756,6 +1785,7 @@ useEffect(() => {
     cards_count: number
     card_index: number
     card_name: string
+    cards: HistoryReadingCard[]
   }
 
   type HistoryListItem =
@@ -1773,6 +1803,7 @@ useEffect(() => {
   const [historyLoading, setHistoryLoading] = useState(false)
   const [historyError, setHistoryError] = useState('')
   const [history, setHistory] = useState<HistoryListItem[]>([])
+  const [openedReadingId, setOpenedReadingId] = useState<number | null>(null)
 
   const [shakeEnabled, setShakeEnabled] = useState(false)
   const [shakenOnce, setShakenOnce] = useState(false)
@@ -4002,12 +4033,11 @@ useEffect(() => {
                           const img = FRONT_CARD_URLS[idx] || backCardImg
                           const topicLabel = TOPICS.find((t) => t.id === (it.topic as any))?.label || it.topic
                           const isCardDay = it.kind === 'card_of_day'
+                          const isReadingOpen = isCardDay ? false : openedReadingId === it.reading_id
                           const title = isCardDay
                             ? (it.card_name || 'Карта дня')
                             : (SPREAD_HISTORY_LABELS[it.spread_type] || 'Расклад')
-                          const subtitle = isCardDay
-                            ? `${topicLabel}${it.question ? ` • ${it.question}` : ''}`
-                            : `${topicLabel}${it.question ? ` • ${it.question}` : ''}`
+                          const subtitle = `${topicLabel}${it.question ? ` • ${it.question}` : ''}`
                           const when = (() => {
                             const d = new Date(it.created_at)
                             if (!isFinite(d.getTime())) return isCardDay ? it.day_key : ''
@@ -4022,37 +4052,94 @@ useEffect(() => {
                           const metaPrefix = isCardDay
                             ? 'Карта дня'
                             : `${it.cards_count || 0} карт`
+                          const itemKey = isCardDay
+                            ? `${it.kind}:${it.day_key || it.created_at}:${it.card_index}:${it.card_name}`
+                            : `${it.kind}:${it.reading_id}:${it.created_at}`
 
                           const handleOpen = () => {
-                            if (!isCardDay) return
-                            openCardDayFromHistory(it)
+                            if (isCardDay) {
+                              openCardDayFromHistory(it)
+                              return
+                            }
+                            setOpenedReadingId((prev) => (prev === it.reading_id ? null : it.reading_id))
                           }
 
                           return (
-                            <div
-                              key={`${it.kind}:${it.created_at}:${it.card_index}:${it.card_name}`}
-                              className="spread-card spread-card--history"
-                              role={isCardDay ? 'button' : 'article'}
-                              tabIndex={isCardDay ? 0 : -1}
-                              onClick={isCardDay ? handleOpen : undefined}
-                              onKeyDown={isCardDay ? (e) => e.key === 'Enter' && handleOpen() : undefined}
-                              aria-label={isCardDay ? 'Открыть карту дня из истории' : 'Элемент истории расклада'}
-                            >
-                              <div className="history-card-media" aria-hidden="true">
-                                <img className="history-card-image" src={img} alt="" />
+                            <Fragment key={itemKey}>
+                              <div
+                                className={`spread-card spread-card--history ${!isCardDay ? 'is-openable' : ''} ${isReadingOpen ? 'is-open' : ''}`}
+                                role="button"
+                                tabIndex={0}
+                                onClick={handleOpen}
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter' || e.key === ' ') {
+                                    e.preventDefault()
+                                    handleOpen()
+                                  }
+                                }}
+                                aria-expanded={!isCardDay ? isReadingOpen : undefined}
+                                aria-label={isCardDay ? 'Открыть карту дня из истории' : 'Открыть детали расклада из истории'}
+                              >
+                                <div className="history-card-media" aria-hidden="true">
+                                  <img className="history-card-image" src={img} alt="" />
+                                </div>
+
+                                <div className="spread-body">
+                                  <div className="spread-title">{title}</div>
+                                  <div className="spread-subtitle">
+                                    {subtitle}
+                                  </div>
+                                  <div className="spread-meta">
+                                    {metaPrefix}
+                                    {when ? ` • ${when}` : ''}
+                                  </div>
+                                </div>
+
+                                {!isCardDay && (
+                                  <div className="history-open-indicator">
+                                    {isReadingOpen ? 'Свернуть' : 'Открыть'}
+                                  </div>
+                                )}
                               </div>
 
-                              <div className="spread-body">
-                                <div className="spread-title">{title}</div>
-                                <div className="spread-subtitle">
-                                  {subtitle}
+                              {!isCardDay && isReadingOpen && (
+                                <div className="history-reading-detail">
+                                  <div className="history-reading-detail__head">
+                                    <div className="history-reading-detail__title">{title}</div>
+                                    <div className="history-reading-detail__meta">
+                                      {topicLabel}
+                                      {it.question ? ` • ${it.question}` : ''}
+                                      {when ? ` • ${when}` : ''}
+                                    </div>
+                                  </div>
+
+                                  <div className="history-reading-cards">
+                                    {it.cards.map((card, cardIdx) => {
+                                      const cardImage = FRONT_CARD_URLS[clamp(card.card_index ?? 0, 0, 77)] || backCardImg
+                                      const cardLabel = card.title || card.position || `Карта ${cardIdx + 1}`
+                                      return (
+                                        <div key={`${itemKey}:card:${cardIdx}`} className="history-reading-card">
+                                          <img
+                                            className={`history-reading-card__img ${card.is_reversed ? 'is-reversed' : ''}`}
+                                            src={cardImage}
+                                            alt={card.card_name || cardLabel}
+                                          />
+                                          <div className="history-reading-card__label">{cardLabel}</div>
+                                          <div className="history-reading-card__name">
+                                            {card.card_name || `Карта ${cardIdx + 1}`}
+                                            {card.is_reversed ? ' (перевёрнутая)' : ''}
+                                          </div>
+                                        </div>
+                                      )
+                                    })}
+                                  </div>
+
+                                  {!!it.description && (
+                                    <MarkdownText text={it.description} className="history-reading-md" />
+                                  )}
                                 </div>
-                                <div className="spread-meta">
-                                  {metaPrefix}
-                                  {when ? ` • ${when}` : ''}
-                                </div>
-                              </div>
-                            </div>
+                              )}
+                            </Fragment>
                           )
                         })}
                       </div>
@@ -4063,100 +4150,79 @@ useEffect(() => {
 
                 <div className="nav-page" data-page="profile">
 
-<div
-  className="card-day_2"
-  style={{
-    display: 'flex',
-    flexDirection: 'column',
-    cursor: 'default',
-    padding: 16,
-    borderRadius: 18,
-    background: 'rgba(255,255,255,0.06)',
-    border: '1px solid rgba(255,255,255,0.12)',
-    boxShadow: '0 18px 60px rgba(0,0,0,0.25)',
-  }}
->
-  <div style={{ display: 'flex', alignItems: 'center', gap: 14,flexDirection: 'column', }}>
-    <div
-      style={{
-        width: 96,
-        height: 96,
-        borderRadius: 999,
-        overflow: 'hidden',
-        background: 'rgba(255,255,255,0.10)',
-        border: '1px solid rgba(255,255,255,0.16)',
-        flex: '0 0 auto',
-      }}
-      aria-hidden={!user?.photo_url}
-    >
-      {user?.photo_url ? (
-        <img
-          src={user.photo_url}
-          alt=""
-          style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-        />
-      ) : (
-        <div
-          style={{
-            width: '100%',
-            height: '100%',
-            display: 'grid',
-            placeItems: 'center',
-            fontWeight: 700,
-            opacity: 0.85,
-          }}
-        >
-          {(user?.first_name?.[0] || user?.username?.[0] || 'U').toUpperCase()}
-        </div>
-      )}
-    </div>
+                  <div className="profile-card">
+                    <div className="profile-card__head">
+                      <div className="profile-card__avatar" aria-hidden={!user?.photo_url}>
+                        {user?.photo_url ? (
+                          <img
+                            src={user.photo_url}
+                            alt=""
+                            className="profile-card__avatar-image"
+                          />
+                        ) : (
+                          <div className="profile-card__avatar-fallback">
+                            {(user?.first_name?.[0] || user?.username?.[0] || 'U').toUpperCase()}
+                          </div>
+                        )}
+                      </div>
 
-    <div style={{ minWidth: 0 }}>
-      <div className="card-day__title" style={{ fontSize: 18, lineHeight: 1.15 }}>
-        {user?.first_name || user?.last_name
-          ? `${user?.first_name || ''}${user?.last_name ? ` ${user.last_name}` : ''}`.trim()
-          : 'Профиль'}
-      </div>
+                      <div className="profile-card__identity">
+                        <div className="profile-card__name">
+                          {user?.first_name || user?.last_name
+                            ? `${user?.first_name || ''}${user?.last_name ? ` ${user.last_name}` : ''}`.trim()
+                            : 'Профиль'}
+                        </div>
+                        <div className="profile-card__username">
+                          {user?.username ? `@${user.username}` : 'username не указан'}
+                        </div>
+                      </div>
+                    </div>
 
-      <div className="card-day__subtitle" style={{ marginTop: 4 }}>
-        <span style={{ opacity: 0.9 }}>
-          {user?.username ? `@${user.username}` : 'username не указан'}
-        </span>
-      </div>
-    </div>
-  </div>
+                    <p className="profile-card__note">
+                      Карта дня доступна 1 раз в сутки. Остальные расклады: {billing?.free_limit ?? 5} бесплатных в месяц, далее по оплате.
+                    </p>
 
-  <div style={{ marginTop: 14, display: 'grid', gap: 8 }}>
-    <div style={{ fontSize: 12, opacity: 0.82, lineHeight: 1.35 }}>
-      Мы идентифицируем вас по данным Telegram. Карта дня доступна 1 раз в сутки,
-      остальные расклады: {billing?.free_limit ?? 5} бесплатных в месяц, далее по оплате.
-    </div>
+                    <div className="profile-card__stats">
+                      <div className="profile-stat">
+                        <div className="profile-stat__label">Бесплатно в этом месяце</div>
+                        <div className="profile-stat__value">
+                          {Math.max(0, Number(billing?.free_left ?? 0))} из {billing?.free_limit ?? 5}
+                        </div>
+                      </div>
 
-    <div style={{ display: 'grid', gap: 6, marginTop: 2 }}>
-      <div style={{ fontSize: 12, opacity: 0.9 }}>
-        Бесплатно в этом месяце: {Math.max(0, Number(billing?.free_left ?? 0))} из {billing?.free_limit ?? 5}
-      </div>
-      <div style={{ fontSize: 12, opacity: 0.9 }}>
-        Платный баланс: {Math.max(0, Number(billing?.paid_readings_balance ?? 0))} раскладов
-      </div>
-      <div style={{ fontSize: 12, opacity: 0.9 }}>
-        Подписка:{' '}
-        {billing?.has_active_subscription
-          ? `активна до ${formatRuDate(billing?.subscription_until)}`
-          : 'не активна'}
-      </div>
-      <a
-        href={BOT_PAYMENT_URL}
-        target="_blank"
-        rel="noreferrer"
-        style={{ fontSize: 12, opacity: 0.95, color: 'rgba(255,255,255,0.9)', textDecoration: 'underline' }}
-      >
-        Открыть бота для оплаты
-      </a>
-      <div style={{ fontSize: 12, opacity: 0.9 }}>Telegram подключен</div>
-    </div>
-  </div>
-</div>
+                      <div className="profile-stat">
+                        <div className="profile-stat__label">Платный баланс</div>
+                        <div className="profile-stat__value">
+                          {Math.max(0, Number(billing?.paid_readings_balance ?? 0))} раскладов
+                        </div>
+                      </div>
+
+                      <div className="profile-stat">
+                        <div className="profile-stat__label">Подписка</div>
+                        <div className="profile-stat__value">
+                          {billing?.has_active_subscription
+                            ? `Активна до ${formatRuDate(billing?.subscription_until)}`
+                            : 'Не активна'}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="profile-card__badges">
+                      <span className="profile-pill profile-pill--ok">Telegram подключен</span>
+                      <span className={`profile-pill ${billing?.has_active_subscription ? 'profile-pill--sub' : 'profile-pill--muted'}`}>
+                        {billing?.has_active_subscription ? 'Подписка активна' : 'Подписки нет'}
+                      </span>
+                    </div>
+
+                    <a
+                      href={BOT_PAYMENT_URL}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="profile-card__cta"
+                    >
+                      Открыть бота для оплаты
+                    </a>
+                  </div>
                 </div>
               </div>
             </div>

@@ -24,3 +24,8 @@ dist/
 
 # Local preview artifacts
 preview-*.png
+
+# Local migration backups
+migration-backup/
+*.dump
+*.tgz

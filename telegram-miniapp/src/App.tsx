@@ -169,6 +169,17 @@ const FRONT_CARD_URLS = [
   ...minorsPentacles.map((n) => findBy('pentacles', n)),
 ].map((u) => u || '') // гарантируем длину
 
+const CLEAN_FRONT_CARD_URLS = FRONT_CARD_URLS.filter((u): u is string => !!u)
+
+// Для анимации перемешивания достаточно поднабора: меньше декодирований => меньше лагов.
+const SHUFFLE_FRONT_URLS = (() => {
+  const src = CLEAN_FRONT_CARD_URLS.length ? CLEAN_FRONT_CARD_URLS : [backCardImg]
+  if (src.length <= 18) return src
+  const step = Math.max(1, Math.floor(src.length / 18))
+  const sampled = src.filter((_, i) => i % step === 0).slice(0, 18)
+  return sampled.length >= 12 ? sampled : src.slice(0, 18)
+})()
+
 // (опционально) для дебага
 const FRONT_CARD_PATHS = FRONT_CARD_ENTRIES.map(([p]) => p)
 
@@ -653,6 +664,13 @@ useEffect(() => {
     decision: selectCardIcon,
   }
 
+  const SPREAD_THEME_CLASSES: Record<SpreadId, string> = {
+    card_of_day: 'spread-card--sun',
+    past_present_future: 'spread-card--violet',
+    three_cards: 'spread-card--indigo',
+    decision: 'spread-card--azure',
+  }
+
   /* =============================================================================================
      [13] CTA / ВНИМАНИЕ (ОШИБКА + ПОДСВЕТКА СЕКЦИЙ)
   ============================================================================================= */
@@ -669,20 +687,51 @@ useEffect(() => {
   ============================================================================================= */
 
   useEffect(() => {
-    const urls = FRONT_CARD_URLS.slice(0, 60)
+    const urls = CLEAN_FRONT_CARD_URLS
     const imgs: HTMLImageElement[] = []
+    let idleId: number | null = null
+    let timeoutId: number | null = null
+    let cancelled = false
 
-    for (const u of urls) {
-      const im = new Image()
-      im.src = u
-      imgs.push(im)
+    const warmup = () => {
+      const pack = [...urls, backCardImg]
+      for (const u of pack) {
+        if (!u) continue
+        const im = new Image()
+        im.decoding = 'async'
+        im.src = u
+        try {
+          ;(im as any).decode?.().catch(() => {})
+        } catch {}
+        imgs.push(im)
+      }
     }
 
-    const back = new Image()
-    back.src = backCardImg
-    imgs.push(back)
+    const ric = (window as any).requestIdleCallback as
+      | ((cb: (deadline?: any) => void, opts?: { timeout: number }) => number)
+      | undefined
+    if (ric) {
+      idleId = ric(() => {
+        if (!cancelled) warmup()
+      }, { timeout: 1200 })
+    } else {
+      timeoutId = window.setTimeout(() => {
+        if (!cancelled) warmup()
+      }, 120)
+    }
 
-    return () => void imgs
+    return () => {
+      cancelled = true
+      if (idleId != null) {
+        try {
+          ;(window as any).cancelIdleCallback?.(idleId)
+        } catch {}
+      }
+      if (timeoutId != null) {
+        window.clearTimeout(timeoutId)
+      }
+      imgs.length = 0
+    }
   }, [])
 
   /* =============================================================================================
@@ -782,9 +831,15 @@ useEffect(() => {
     const cctx = cometsCanvas.getContext('2d')
     if (!sctx || !cctx) return
 
+    const coarsePointer = window.matchMedia('(pointer: coarse)').matches
+    const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    const lowPowerDevice = coarsePointer || (navigator.hardwareConcurrency || 4) <= 4
+    const quality = reducedMotion ? 0.55 : lowPowerDevice ? 0.72 : 1
+    const minFrameMs = lowPowerDevice ? 1000 / 42 : 1000 / 58
+
     let width = window.innerWidth
     let height = window.innerHeight
-    const dpr = Math.min(window.devicePixelRatio || 1, 2)
+    const dpr = Math.min(window.devicePixelRatio || 1, lowPowerDevice ? 1.5 : 2)
 
     const resize = () => {
       width = window.innerWidth
@@ -811,13 +866,13 @@ useEffect(() => {
     let pY = 0
 
     const PARALLAX = {
-      bgX: 7.5,
-      bgY: 6.5,
-      starsX: 32,
-      starsY: 28,
-      cometsX: 22,
-      cometsY: 20,
-      follow: 0.095,
+      bgX: 7.5 * quality,
+      bgY: 6.5 * quality,
+      starsX: 32 * quality,
+      starsY: 28 * quality,
+      cometsX: 22 * quality,
+      cometsY: 20 * quality,
+      follow: lowPowerDevice ? 0.075 : 0.095,
     }
 
     const onMove = (e: MouseEvent) => {
@@ -839,9 +894,16 @@ useEffect(() => {
       tgtGX = clamp(ax / 9.8, -1, 1)
       tgtGY = clamp(ay / 9.8, -1, 1)
     }
-    window.addEventListener('devicemotion', onMotion)
+    const useGyroParallax = !lowPowerDevice && !reducedMotion
+    if (useGyroParallax) {
+      window.addEventListener('devicemotion', onMotion, { passive: true })
+    }
 
-    const starsCount = clamp(Math.floor((width * height) / 9000), 70, 220)
+    const starsCount = clamp(
+      Math.floor((width * height) / (9000 / quality)),
+      lowPowerDevice ? 42 : 70,
+      lowPowerDevice ? 140 : 220
+    )
     const stars: Star[] = new Array(starsCount).fill(0).map(() => ({
       x: Math.random() * width,
       y: Math.random() * height,
@@ -867,7 +929,7 @@ useEffect(() => {
         y = rand(-height * 0.15, height * 0.25)
       }
 
-      const speed = rand(520, 920)
+      const speed = rand(lowPowerDevice ? 440 : 520, lowPowerDevice ? 760 : 920)
       const ang = rand(0.8, 1.05)
       const vx = Math.cos(ang) * speed
       const vy = Math.sin(ang) * speed
@@ -878,18 +940,32 @@ useEffect(() => {
         vx,
         vy,
         life: 0,
-        maxLife: rand(0.7, 1.25),
-        tail: rand(90, 140),
-        width: rand(1.3, 2.6),
+        maxLife: rand(lowPowerDevice ? 0.55 : 0.7, lowPowerDevice ? 1.05 : 1.25),
+        tail: rand(lowPowerDevice ? 68 : 90, lowPowerDevice ? 112 : 140),
+        width: rand(lowPowerDevice ? 1.1 : 1.3, lowPowerDevice ? 2.1 : 2.6),
       })
     }
 
     let last = performance.now()
     let cometTimer = 0
+    const cometInterval = lowPowerDevice ? 2.05 : 1.35
+    const cometChance = lowPowerDevice ? 0.4 : 0.75
+    let rafId = 0
 
     const draw = (now: number) => {
-      const dt = clamp((now - last) / 1000, 0, 0.05)
+      const frameGap = now - last
+      if (frameGap < minFrameMs) {
+        rafId = requestAnimationFrame(draw)
+        return
+      }
+
+      const dt = clamp(frameGap / 1000, 0, 0.05)
       last = now
+
+      if (document.hidden) {
+        rafId = requestAnimationFrame(draw)
+        return
+      }
 
       pX += (targetPX - pX) * PARALLAX.follow
       pY += (targetPY - pY) * PARALLAX.follow
@@ -927,9 +1003,9 @@ useEffect(() => {
       cctx.clearRect(0, 0, width, height)
 
       cometTimer += dt
-      if (cometTimer > 1.35) {
+      if (cometTimer > cometInterval) {
         cometTimer = 0
-        if (Math.random() < 0.75) spawnComet()
+        if (Math.random() < cometChance) spawnComet()
       }
 
       for (let i = comets.length - 1; i >= 0; i--) {
@@ -972,16 +1048,18 @@ useEffect(() => {
         }
       }
 
-      requestAnimationFrame(draw)
+      rafId = requestAnimationFrame(draw)
     }
 
-    const raf = requestAnimationFrame(draw)
+    rafId = requestAnimationFrame(draw)
 
     return () => {
-      cancelAnimationFrame(raf)
+      cancelAnimationFrame(rafId)
       window.removeEventListener('resize', resize)
       window.removeEventListener('mousemove', onMove)
-      window.removeEventListener('devicemotion', onMotion)
+      if (useGyroParallax) {
+        window.removeEventListener('devicemotion', onMotion as any)
+      }
     }
   }, [])
 
@@ -1260,7 +1338,7 @@ useEffect(() => {
   // чтобы “финиш” (возврат к 123 и readyToOpen) сработал ровно 1 раз
   const threeFinishingRef = useRef(false)
 
-  const THREE_SHAKE_THRESHOLD = 9.6
+  const THREE_SHAKE_THRESHOLD = 8.8
   const THREE_SHAKE_STEP_BASE = 0.085
 
   /* =============================================================================================
@@ -1338,7 +1416,7 @@ useEffect(() => {
   // чтобы “финиш” (возврат к 123 и readyToOpen) сработал ровно 1 раз
   const ppfFinishingRef = useRef(false)
 
-  const PPF_SHAKE_THRESHOLD = 9.6
+  const PPF_SHAKE_THRESHOLD = 8.8
   const PPF_SHAKE_STEP_BASE = 0.085
 
 
@@ -1372,6 +1450,17 @@ useEffect(() => {
   const [dailyDesc, setDailyDesc] = useState<string>('')
   const [dailyCardName, setDailyCardName] = useState<string>('')
   const [dailyDayKey, setDailyDayKey] = useState<string>('')
+
+  // Подогреваем конкретную карту дня заранее, чтобы reveal открывался без подгрузочного “фриза”.
+  useEffect(() => {
+    if (!dailyFrontUrl) return
+    const im = new Image()
+    im.decoding = 'async'
+    im.src = dailyFrontUrl
+    try {
+      ;(im as any).decode?.().catch(() => {})
+    } catch {}
+  }, [dailyFrontUrl])
 
   // =================================================================================================
   // [ADDED] STATES FOR READINGS DESCRIPTIONS AND LOADING INDICATORS
@@ -1410,7 +1499,7 @@ useEffect(() => {
   const shakeCooldownRef = useRef(0)
 
   const HAPTIC_MIN_INTERVAL = 55 // ms
-  const SHAKE_THRESHOLD = 10.5
+  const SHAKE_THRESHOLD = 9.1
   const SHAKE_STEP_BASE = 0.022
 
   // ---------------------------------------------------------------------------------------------
@@ -1761,6 +1850,10 @@ useEffect(() => {
 
     if (needsMotionPermission) await requestMotion()
 
+    threeLastAccelRef.current = null
+    threeShakeCooldownRef.current = 0
+    threeLastPulseRef.current = 0
+
     // обнулим старые карты: настоящие значения будут получены с бэка
     setThreeCards([])
     // Reset description and mark as loading while we fetch from the backend
@@ -1970,6 +2063,10 @@ useEffect(() => {
 
     if (needsMotionPermission) await requestMotion()
 
+    ppfLastAccelRef.current = null
+    ppfShakeCooldownRef.current = 0
+    ppfLastPulseRef.current = 0
+
     // обнулим старые карты: настоящие значения будут получены с бэка
     setPpfCards([])
     // Reset description and mark as loading while we fetch from the backend
@@ -2177,7 +2274,7 @@ useEffect(() => {
   const decisionLastSwapAtRef = useRef(0)
   const decisionFinishingRef = useRef(false)
 
-  const DECISION_SHAKE_THRESHOLD = 9.6
+  const DECISION_SHAKE_THRESHOLD = 8.8
   const DECISION_SHAKE_STEP_BASE = 0.11
 
   const buildDecisionCardsMock = (): DecisionCardResult[] => {
@@ -2356,6 +2453,10 @@ useEffect(() => {
     }
 
     if (needsMotionPermission) await requestMotion()
+
+    decisionLastAccelRef.current = null
+    decisionShakeCooldownRef.current = 0
+    decisionLastPulseRef.current = 0
 
     // обнулим старые карты: настоящие значения будут получены с бэка
     setDecisionCards([])
@@ -2548,6 +2649,12 @@ useEffect(() => {
 
 
   const enableShake = async () => {
+    lastAccelRef.current = null
+    lastPulseRef.current = 0
+    shakeCooldownRef.current = 0
+    setShuffleProgress(0)
+    setStopRequested(false)
+
     // ✅ отправляем question + topic на бекенд, чтобы он выдал/вернул карту дня
     if (token) {
       setCardDayLoading(true)
@@ -2614,7 +2721,7 @@ useEffect(() => {
 
     // ✅ теперь фронт уже залочен в PremiumFlipCard на dailyFrontUrl,
     // но дополнительно сохраним в selectedFrontUrl, чтобы result точно совпадал
-    setSelectedFrontUrl(dailyFrontUrl || '')
+    setSelectedFrontUrl(dailyFrontUrl || backCardImg)
 
     setTimeout(() => {
       hapticPulse(1)
@@ -3273,7 +3380,7 @@ useEffect(() => {
                       return (
                         <div
                           key={s.id}
-                          className={`spread-card ${isActive ? 'is-active' : ''}`}
+                          className={`spread-card ${SPREAD_THEME_CLASSES[s.id]} ${isActive ? 'is-active' : ''}`}
                           role="button"
                           tabIndex={0}
                           onClick={() => setSpread(s.id)}
@@ -3686,7 +3793,7 @@ useEffect(() => {
             {/* активный spread-card */}
             {!isResult && !cardDayLoading && (
               <div className="spread-list">
-                <div ref={spreadActiveRef} className="spread-card is-active" role="button" tabIndex={0}>
+                <div ref={spreadActiveRef} className="spread-card spread-card--sun is-active" role="button" tabIndex={0}>
                   <div className="spread-icon__svg" aria-hidden="true">
                     <img src={cardDayIcon} alt="" />
                   </div>
@@ -3702,7 +3809,7 @@ useEffect(() => {
 
             <PremiumFlipCard
               key={pflipMountKey}
-              frontUrls={FRONT_CARD_URLS}
+              frontUrls={SHUFFLE_FRONT_URLS}
               backUrl={backCardImg}
               active={!shakenOnce && !stopRequested && !cardDayLoading}
               durationMs={2600}
@@ -3718,7 +3825,7 @@ useEffect(() => {
               onFrontChange={setSelectedFrontUrl}
               // ✅ во время загрузки — рубашка, без рандомных фронтов
               lockFront={cardDayLoading || stopRequested || shakenOnce || cardRevealed}
-              lockedFrontUrl={cardDayLoading ? backCardImg : dailyFrontUrl}
+              lockedFrontUrl={cardDayLoading ? backCardImg : dailyFrontUrl || backCardImg}
             />
 
             {!isResult && !cardDayLoading && (

@@ -129,7 +129,7 @@ async def _call_openai(system_prompt: str, user_prompt: str, *, model: str, temp
                 "user_prompt": user_prompt,
             }
 
-            async with httpx.AsyncClient(timeout=120.0) as client:
+            async with httpx.AsyncClient(timeout=90.0) as client:
                 resp = await client.post(relay_url, headers=headers, json=payload)
                 resp.raise_for_status()
                 data = resp.json()
@@ -214,7 +214,7 @@ async def _call_openai_with_image(
                 "image_base64": base64.b64encode(image_bytes).decode("ascii"),
             }
 
-            async with httpx.AsyncClient(timeout=180.0) as client:
+            async with httpx.AsyncClient(timeout=120.0) as client:
                 resp = await client.post(relay_url, headers=headers, json=payload)
                 resp.raise_for_status()
                 data = resp.json()
@@ -299,18 +299,18 @@ async def generate_card_text_llm(
     meaning = card["reversed_meaning"] if is_reversed else card["upright_meaning"]
 
     system_prompt = (
-        "Ты — человечный таролог-психолог. Пиши естественно, без канцелярита.\n"
-        "Не делай «точных предсказаний», не утверждай факты о людях без оснований.\n"
-        "Если вопрос провокационный/токсичный — переформулируй его мягко и дай пользу.\n\n"
-        "Стиль:\n"
-        "- Русский язык.\n"
-        "- Без перечисления голых значений карты.\n"
-        "- Без повторов текста из входных данных.\n"
-        "- Тон: поддерживающий, спокойный.\n\n"
-        "Формат:\n"
-        "1) 2–3 предложения — суть в контексте вопроса\n"
-        "2) 4–6 буллетов — конкретные шаги\n"
-        "3) 1 строка — мягкая подсказка\n"
+        "Ты — человечный таролог-психолог. Пиши на русском, живо и понятно.\n"
+        "Не делай точных предсказаний и не выдумывай факты о людях.\n"
+        "Опирайся на вопрос пользователя и смысл карты.\n\n"
+        "Формат строго в markdown:\n"
+        "## Суть\n"
+        "2–3 предложения, коротко и по вопросу.\n"
+        "## Что это значит в контексте вопроса\n"
+        "2–4 предложения.\n"
+        "## Практика на сегодня\n"
+        "- 4–6 конкретных шагов\n"
+        "**Итог:** 1 короткая поддерживающая фраза.\n\n"
+        "Ограничение: 140–220 слов, без воды."
     )
 
     user_prompt = (
@@ -328,8 +328,8 @@ async def generate_card_text_llm(
                 system_prompt,
                 user_prompt,
                 model=model,
-                temperature=0.85,
-                max_tokens=900,
+                temperature=0.72,
+                max_tokens=560,
             )
             text = (text or "").strip()
             if text:
@@ -382,15 +382,18 @@ async def generate_spread_text_llm(
             card_lines.append(f"- {name} ({orient}) — {meaning}")
 
     system_prompt = (
-        "Ты — человечный таролог-психолог. Пиши как живой человек, без шаблонов.\n"
-        "Не делай «точных предсказаний», не утверждай факты о людях без оснований.\n"
-        "НЕЛЬЗЯ: просто переписать значения карт или повторять входной текст.\n"
-        "НУЖНО: связать карты в цельный сюжет и дать практические шаги.\n\n"
-        "Формат (строго):\n"
-        "1) 1 абзац — общий смысл расклада\n"
-        "2) По позициям (в том же порядке): подзаголовок + 2–4 предложения на позицию\n"
-        "3) 6–8 буллетов — конкретные рекомендации\n"
-        "4) 1 строка — мягкий итог/подсказка\n"
+        "Ты — человечный таролог-психолог. Пиши как живой эксперт, без шаблонов.\n"
+        "Не делай точных предсказаний и не повторяй дословно входные значения карт.\n"
+        "Собери карты в одну понятную картину по вопросу пользователя.\n\n"
+        "Формат строго в markdown:\n"
+        "## Общий вектор\n"
+        "1 абзац (3–4 предложения) по вопросу.\n"
+        "## По картам\n"
+        "Для каждой позиции в исходном порядке: **Название позиции: карта** + 2–3 предложения.\n"
+        "## Рекомендации\n"
+        "- 5–7 конкретных шагов\n"
+        "**Итог:** 1 короткая практичная мысль.\n\n"
+        "Ограничение: 220–340 слов."
     )
 
     user_prompt = (
@@ -409,8 +412,8 @@ async def generate_spread_text_llm(
                 system_prompt,
                 user_prompt,
                 model=model,
-                temperature=0.9,
-                max_tokens=1200,
+                temperature=0.7,
+                max_tokens=780,
             )
             text = (text or "").strip()
             if text:
@@ -572,7 +575,7 @@ async def generate_photo_analysis_llm(
                 image_mime=image_mime,
                 model=model,
                 temperature=0.6,
-                max_tokens=1400,
+                max_tokens=980,
             )
             text = (text or "").strip()
             if not text:

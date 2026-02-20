@@ -2,7 +2,7 @@
    [1] ИМПОРТЫ
 ================================================================================================= */
 
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import './App.css'
 import { telegramAuth, getMe, getCardOfDayToday, createCardOfDay, getCardOfDayHistory, analyzeSpreadPhoto, createReading } from './api'
 
@@ -214,6 +214,110 @@ function clamp(n: number, min: number, max: number) {
 
 function rand(min: number, max: number) {
   return min + Math.random() * (max - min)
+}
+
+function renderMdInline(text: string, keyPrefix: string) {
+  const nodes: any[] = []
+  const re = /\*\*([^*]+)\*\*/g
+  let last = 0
+  let idx = 0
+  let m: RegExpExecArray | null
+
+  while ((m = re.exec(text)) !== null) {
+    if (m.index > last) {
+      nodes.push(
+        <Fragment key={`${keyPrefix}-t-${idx++}`}>
+          {text.slice(last, m.index)}
+        </Fragment>,
+      )
+    }
+    nodes.push(
+      <strong key={`${keyPrefix}-b-${idx++}`} className="md-strong">
+        {m[1]}
+      </strong>,
+    )
+    last = m.index + m[0].length
+  }
+
+  if (last < text.length) {
+    nodes.push(
+      <Fragment key={`${keyPrefix}-t-${idx++}`}>
+        {text.slice(last)}
+      </Fragment>,
+    )
+  }
+
+  return nodes.length ? nodes : [text]
+}
+
+function MarkdownText({ text, className = '' }: { text?: string; className?: string }) {
+  const source = String(text || '').replace(/\r\n?/g, '\n').trim()
+  if (!source) return null
+
+  const lines = source.split('\n')
+  const blocks: any[] = []
+  let listType: 'ul' | 'ol' | null = null
+  let listItems: string[] = []
+  let key = 0
+
+  const flushList = () => {
+    if (!listType || !listItems.length) return
+    const Tag = listType
+    blocks.push(
+      <Tag key={`md-list-${key++}`}>
+        {listItems.map((item, i) => (
+          <li key={`md-li-${key}-${i}`}>{renderMdInline(item, `md-li-${key}-${i}`)}</li>
+        ))}
+      </Tag>,
+    )
+    listType = null
+    listItems = []
+  }
+
+  for (const raw of lines) {
+    const line = raw.trim()
+    if (!line) {
+      flushList()
+      continue
+    }
+
+    const h = line.match(/^(#{1,3})\s+(.+)$/)
+    if (h) {
+      flushList()
+      blocks.push(
+        <h4 key={`md-h-${key++}`}>{renderMdInline(h[2], `md-h-${key}`)}</h4>,
+      )
+      continue
+    }
+
+    const ul = line.match(/^[-*•]\s+(.+)$/)
+    if (ul) {
+      if (listType !== 'ul') {
+        flushList()
+        listType = 'ul'
+      }
+      listItems.push(ul[1])
+      continue
+    }
+
+    const ol = line.match(/^\d+[.)]\s+(.+)$/)
+    if (ol) {
+      if (listType !== 'ol') {
+        flushList()
+        listType = 'ol'
+      }
+      listItems.push(ol[1])
+      continue
+    }
+
+    flushList()
+    blocks.push(
+      <p key={`md-p-${key++}`}>{renderMdInline(line, `md-p-${key}`)}</p>,
+    )
+  }
+
+  flushList()
+  return <div className={`result-md ${className}`.trim()}>{blocks}</div>
 }
 
 /* =================================================================================================
@@ -1906,6 +2010,13 @@ useEffect(() => {
     window.setTimeout(() => {
       setThreeReadyToOpen(true)
       setThreeShuffleProgress(1)
+
+      window.setTimeout(() => {
+        setThreeScreen('result')
+        try {
+          hapticPulse(0.7)
+        } catch {}
+      }, 180)
     }, 420)
   }
 
@@ -1977,16 +2088,6 @@ useEffect(() => {
     requestAnimationFrame(tick)
   }
 
-
-  const openThreeResult = () => {
-    if (!threeReadyToOpen && threeShuffleProgress < 1) return
-    setThreeScreen('result')
-    setThreeShakeEnabled(false)
-
-    try {
-      hapticPulse(0.7)
-    } catch {}
-  }
 
   const restartThreeCards = () => {
     resetThreeCardsState()
@@ -2115,6 +2216,13 @@ useEffect(() => {
     window.setTimeout(() => {
       setPpfReadyToOpen(true)
       setPpfShuffleProgress(1)
+
+      window.setTimeout(() => {
+        setPpfScreen('result')
+        try {
+          hapticPulse(0.7)
+        } catch {}
+      }, 180)
     }, 420)
   }
 
@@ -2180,16 +2288,6 @@ useEffect(() => {
     }
 
     requestAnimationFrame(tick)
-  }
-
-  const openPpfResult = () => {
-    if (!ppfReadyToOpen && ppfShuffleProgress < 1) return
-    setPpfScreen('result')
-    setPpfShakeEnabled(false)
-
-    try {
-      hapticPulse(0.7)
-    } catch {}
   }
 
   const restartPpf = () => {
@@ -3743,11 +3841,7 @@ useEffect(() => {
 
                     <div className="result-card__scroll">
                       {photoResult.description
-                        ? (photoResult.description || '').split('\n').map((line, i) => (
-                            <p key={i} style={{ marginTop: i === 0 ? 0 : 10, marginBottom: 0 }}>
-                              {line}
-                            </p>
-                          ))
+                        ? <MarkdownText text={photoResult.description || ''} />
                         : (
                           <p style={{ marginTop: 0, marginBottom: 0, opacity: 0.8 }}>
                             Ответ пустой. Проверьте бэкенд/LLM и попробуйте ещё раз.
@@ -3770,11 +3864,7 @@ useEffect(() => {
                                 </b>
                               </p>
 
-                              {(String(c.meaning || '') || '').split('\n').map((ln: string, j: number) => (
-                                <p key={j} style={{ marginTop: j === 0 ? 0 : 8, marginBottom: 0, opacity: 0.92 }}>
-                                  {ln}
-                                </p>
-                              ))}
+                              <MarkdownText text={String(c.meaning || '') || ''} />
                             </div>
                           ))}
                         </div>
@@ -3977,11 +4067,7 @@ useEffect(() => {
                       ) : null}
 
                       {dailyDesc ? (
-                        dailyDesc.split('\n').map((line, i) => (
-                          <p key={i} style={{ marginTop: i === 0 ? 0 : 10 }}>
-                            {line}
-                          </p>
-                        ))
+                        <MarkdownText text={dailyDesc} />
                       ) : (
                         <p>Описание пока недоступно.</p>
                       )}
@@ -4129,17 +4215,9 @@ useEffect(() => {
                     ) : (
                       <>
                         <div className="shake__badge is-done">
-                          <div className="shake__title">Откройте карты</div>
-                          <div className="shake__sub">Нажмите кнопку ниже — покажем 3 карты и их значения.</div>
+                          <div className="shake__title">Открываем карты…</div>
+                          <div className="shake__sub">Сейчас покажем 3 карты и интерпретацию.</div>
                         </div>
-
-                        <button type="button" className="glass-cta mini-cta" onClick={openThreeResult}>
-                          <span className="glass-cta__inner">
-                            <span className="glass-cta__rim" aria-hidden="true" />
-                            <span className="glass-cta__text">Открыть карты</span>
-                            <span className="glass-cta__spark" aria-hidden="true" />
-                          </span>
-                        </button>
                       </>
                     )}
                   </div>
@@ -4191,12 +4269,8 @@ useEffect(() => {
 
                           {/* Description from backend */}
                           {!!threeDesc && (
-                            <div style={{ marginTop: 10, opacity: 0.86 }}>
-                              {threeDesc.split('\n').map((line, i) => (
-                                <p key={i} style={{ marginTop: i === 0 ? 0 : 10, marginBottom: 0 }}>
-                                  {line}
-                                </p>
-                              ))}
+                            <div style={{ marginTop: 10 }}>
+                              <MarkdownText text={threeDesc} />
                               <div style={{ height: 10 }} />
                             </div>
                           )}
@@ -4209,11 +4283,7 @@ useEffect(() => {
                                 </b>
                               </p>
 
-                              {(c.text || '').split('\n').map((line, i) => (
-                                <p key={i} style={{ marginTop: i === 0 ? 0 : 10, marginBottom: 0 }}>
-                                  {line}
-                                </p>
-                              ))}
+                              <MarkdownText text={c.text || ''} />
                             </div>
                           ))}
                         </div>
@@ -4363,17 +4433,9 @@ useEffect(() => {
                     ) : (
                       <>
                         <div className="shake__badge is-done">
-                          <div className="shake__title">Откройте карты</div>
-                          <div className="shake__sub">Нажмите кнопку ниже — покажем 3 карты и их значения.</div>
+                          <div className="shake__title">Открываем карты…</div>
+                          <div className="shake__sub">Сейчас покажем 3 карты и интерпретацию.</div>
                         </div>
-
-                        <button type="button" className="glass-cta mini-cta" onClick={openPpfResult}>
-                          <span className="glass-cta__inner">
-                            <span className="glass-cta__rim" aria-hidden="true" />
-                            <span className="glass-cta__text">Открыть карты</span>
-                            <span className="glass-cta__spark" aria-hidden="true" />
-                          </span>
-                        </button>
                       </>
                     )}
                   </div>
@@ -4418,12 +4480,8 @@ useEffect(() => {
 
                           {/* Description from backend */}
                           {!!ppfDesc && (
-                            <div style={{ marginTop: 10, opacity: 0.86 }}>
-                              {ppfDesc.split('\n').map((line, i) => (
-                                <p key={i} style={{ marginTop: i === 0 ? 0 : 10, marginBottom: 0 }}>
-                                  {line}
-                                </p>
-                              ))}
+                            <div style={{ marginTop: 10 }}>
+                              <MarkdownText text={ppfDesc} />
                               <div style={{ height: 10 }} />
                             </div>
                           )}
@@ -4436,11 +4494,7 @@ useEffect(() => {
                                 </b>
                               </p>
 
-                              {(c.text || '').split('\n').map((line, i) => (
-                                <p key={i} style={{ marginTop: i === 0 ? 0 : 10, marginBottom: 0 }}>
-                                  {line}
-                                </p>
-                              ))}
+                              <MarkdownText text={c.text || ''} />
                             </div>
                           ))}
                         </div>
@@ -4646,12 +4700,8 @@ useEffect(() => {
 
                           {/* Description from backend */}
                           {!!decisionDesc && (
-                            <div style={{ marginTop: 10, opacity: 0.86 }}>
-                              {decisionDesc.split('\n').map((line, i) => (
-                                <p key={i} style={{ marginTop: i === 0 ? 0 : 10 }}>
-                                  {line}
-                                </p>
-                              ))}
+                            <div style={{ marginTop: 10 }}>
+                              <MarkdownText text={decisionDesc} />
                               <div style={{ height: 10 }} />
                             </div>
                           )}
@@ -4662,13 +4712,7 @@ useEffect(() => {
                                 {c.role}: {c.name}
                               </div>
 
-                              {String(c.text || '')
-                                .split('\n')
-                                .map((line, i) => (
-                                  <p key={i} style={{ marginTop: i === 0 ? 0 : 10 }}>
-                                    {line}
-                                  </p>
-                                ))}
+                              <MarkdownText text={String(c.text || '')} />
                             </div>
                           ))}
                         </div>

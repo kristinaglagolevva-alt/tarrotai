@@ -8,6 +8,7 @@ import secrets
 from datetime import datetime, timedelta, timezone
 from typing import Dict, Any, List, Optional
 
+import asyncpg
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, LabeledPrice, Update, WebAppInfo
 from telegram.constants import ParseMode
 from telegram.error import BadRequest
@@ -20,10 +21,9 @@ from telegram.ext import (
     PreCheckoutQueryHandler,
     filters,
 )
-from sqlalchemy import select
+from dotenv import load_dotenv
 
-from db import SessionLocal
-from models import User, PaymentTransaction
+load_dotenv()
 
 logger = logging.getLogger("telegram_bot")
 
@@ -141,6 +141,15 @@ def _to_utc(dt: Optional[datetime]) -> Optional[datetime]:
     return dt.astimezone(timezone.utc)
 
 
+def _database_dsn_for_asyncpg() -> str:
+    raw = (os.environ.get("DATABASE_URL") or "").strip()
+    if not raw:
+        raise RuntimeError("DATABASE_URL is not set")
+    if raw.startswith("postgresql+asyncpg://"):
+        return "postgresql://" + raw[len("postgresql+asyncpg://"):]
+    return raw
+
+
 async def _activate_purchase_for_user(
     *,
     tg_user_id: int,
@@ -155,74 +164,123 @@ async def _activate_purchase_for_user(
     Persist payment effect in DB so API limits can rely on real balances/subscription.
     Idempotent by Telegram/provider charge IDs.
     """
+    conn: Optional[asyncpg.Connection] = None
     try:
-        async with SessionLocal() as db:
+        dsn = _database_dsn_for_asyncpg()
+        conn = await asyncpg.connect(dsn=dsn)
+
+        async with conn.transaction():
             if tg_charge_id:
-                exists_tg = await db.execute(
-                    select(PaymentTransaction).where(PaymentTransaction.telegram_payment_charge_id == tg_charge_id)
+                exists_tg = await conn.fetchval(
+                    "SELECT 1 FROM payment_transactions WHERE telegram_payment_charge_id = $1 LIMIT 1",
+                    str(tg_charge_id),
                 )
-                if exists_tg.scalar_one_or_none():
+                if exists_tg:
                     return {"applied": False, "duplicate": True}
 
             if provider_charge_id:
-                exists_provider = await db.execute(
-                    select(PaymentTransaction).where(PaymentTransaction.provider_payment_charge_id == provider_charge_id)
+                exists_provider = await conn.fetchval(
+                    "SELECT 1 FROM payment_transactions WHERE provider_payment_charge_id = $1 LIMIT 1",
+                    str(provider_charge_id),
                 )
-                if exists_provider.scalar_one_or_none():
+                if exists_provider:
                     return {"applied": False, "duplicate": True}
 
-            user_res = await db.execute(select(User).where(User.telegram_id == int(tg_user_id)))
-            user = user_res.scalar_one_or_none()
-            if not user:
-                user = User(telegram_id=int(tg_user_id))
-                db.add(user)
-                await db.flush()
+            user_row = await conn.fetchrow(
+                """
+                SELECT id, paid_readings_balance, subscription_until
+                FROM users
+                WHERE telegram_id = $1
+                FOR UPDATE
+                """,
+                int(tg_user_id),
+            )
+            if not user_row:
+                user_row = await conn.fetchrow(
+                    """
+                    INSERT INTO users (telegram_id, paid_readings_balance)
+                    VALUES ($1, 0)
+                    RETURNING id, paid_readings_balance, subscription_until
+                    """,
+                    int(tg_user_id),
+                )
 
+            user_id = int(user_row["id"])
             now = datetime.now(timezone.utc)
             kind = str(product.get("kind") or "credits")
 
             credits_delta = 0
             sub_days = 0
+            balance_after = int(user_row["paid_readings_balance"] or 0)
+            subscription_until = _to_utc(user_row["subscription_until"])
 
             if kind == "subscription":
                 sub_days = max(0, int(product.get("days") or 0))
                 base = now
-                current_until = _to_utc(user.subscription_until)
-                if current_until and current_until > base:
-                    base = current_until
-                user.subscription_until = base + timedelta(days=sub_days)
+                if subscription_until and subscription_until > base:
+                    base = subscription_until
+                subscription_until = base + timedelta(days=sub_days)
+                await conn.execute(
+                    "UPDATE users SET subscription_until = $1 WHERE id = $2",
+                    subscription_until,
+                    user_id,
+                )
             else:
                 credits_delta = max(0, int(product.get("credits") or 0))
-                user.paid_readings_balance = int(user.paid_readings_balance or 0) + credits_delta
+                balance_after = balance_after + credits_delta
+                await conn.execute(
+                    "UPDATE users SET paid_readings_balance = $1 WHERE id = $2",
+                    int(balance_after),
+                    user_id,
+                )
 
-            tx = PaymentTransaction(
-                user_id=int(user.id),
-                invoice_payload=str(payload or ""),
-                product_code=str(product.get("code") or ""),
-                kind=kind,
-                amount=int(total_amount or 0),
-                currency=str(currency or "RUB"),
-                credits_delta=int(credits_delta),
-                subscription_days=int(sub_days),
-                telegram_payment_charge_id=str(tg_charge_id or "") or None,
-                provider_payment_charge_id=str(provider_charge_id or "") or None,
+            await conn.execute(
+                """
+                INSERT INTO payment_transactions (
+                    user_id,
+                    invoice_payload,
+                    product_code,
+                    kind,
+                    amount,
+                    currency,
+                    credits_delta,
+                    subscription_days,
+                    telegram_payment_charge_id,
+                    provider_payment_charge_id
+                ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+                """,
+                int(user_id),
+                str(payload or ""),
+                str(product.get("code") or ""),
+                kind,
+                int(total_amount or 0),
+                str(currency or "RUB"),
+                int(credits_delta),
+                int(sub_days),
+                str(tg_charge_id or "") or None,
+                str(provider_charge_id or "") or None,
             )
-            db.add(tx)
-            await db.commit()
-            await db.refresh(user)
 
             return {
                 "applied": True,
                 "duplicate": False,
                 "kind": kind,
                 "credits_added": int(credits_delta),
-                "balance": int(user.paid_readings_balance or 0),
-                "subscription_until": _to_utc(user.subscription_until),
+                "balance": int(balance_after),
+                "subscription_until": subscription_until,
                 "subscription_days": int(sub_days),
             }
+    except asyncpg.UniqueViolationError:
+        return {"applied": False, "duplicate": True}
     except Exception as exc:
         logger.exception("Failed to persist payment effect for tg_user=%s: %s", tg_user_id, exc)
         return {"applied": False, "duplicate": False, "error": str(exc)}
+    finally:
+        if conn is not None:
+            try:
+                await conn.close()
+            except Exception:
+                pass
 
 
 async def _safe_answer_query(query) -> None:

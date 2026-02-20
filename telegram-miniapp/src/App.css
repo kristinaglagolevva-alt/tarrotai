@@ -3134,36 +3134,39 @@ body,
   width: var(--block-w);
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 10px;
+  justify-content: flex-start;
+  gap: 14px;
+  min-height: 34px;
+  margin-bottom: 10px;
 }
 
 .subtab-back {
-  border: 1px solid rgba(178, 198, 255, 0.3);
-  border-radius: 999px;
-  background:
-    linear-gradient(180deg, rgba(43, 60, 104, 0.7), rgba(27, 42, 82, 0.75));
-  color: rgba(241, 248, 255, 0.96);
-  font-size: 13px;
-  font-weight: 640;
-  line-height: 1;
-  min-height: 36px;
-  padding: 0 12px;
-  box-shadow:
-    0 12px 24px rgba(3, 8, 24, 0.34),
-    0 0 0 1px rgba(255, 255, 255, 0.05) inset;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: rgba(211, 226, 255, 0.92);
+  font-size: 14px;
+  font-weight: 650;
+  line-height: 1.2;
+  min-height: 0;
+  padding: 4px 0;
+  box-shadow: none;
   cursor: pointer;
+  text-shadow: 0 8px 20px rgba(3, 8, 24, 0.42);
+  transition: opacity 140ms ease, transform 140ms ease;
 }
 
 .subtab-back:active {
+  opacity: 0.7;
   transform: translateY(1px);
 }
 
 .subtab-title {
-  font-size: 16px;
-  font-weight: 760;
+  font-size: 18px;
+  font-weight: 780;
   color: rgba(239, 247, 255, 0.96);
   letter-spacing: -0.01em;
+  text-shadow: 0 10px 24px rgba(3, 8, 24, 0.5);
 }
 
 .nav-pages,

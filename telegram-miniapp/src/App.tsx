@@ -4020,6 +4020,17 @@ useEffect(() => {
 
                 <div className="nav-page" data-page="history">
                   <div className="history-wrap">
+                    <div className="subtab-toolbar">
+                      <button
+                        type="button"
+                        className="subtab-back"
+                        onClick={goToMainTab}
+                        aria-label="Вернуться на главную"
+                      >
+                        ← Назад на главную
+                      </button>
+                      <div className="subtab-title">История</div>
+                    </div>
 
                     {!token && (
                       <div className="history-empty">История доступна после входа через Telegram.</div>
@@ -4158,6 +4169,17 @@ useEffect(() => {
 
 
                 <div className="nav-page" data-page="profile">
+                  <div className="subtab-toolbar">
+                    <button
+                      type="button"
+                      className="subtab-back"
+                      onClick={goToMainTab}
+                      aria-label="Вернуться на главную"
+                    >
+                      ← Назад на главную
+                    </button>
+                    <div className="subtab-title">Профиль</div>
+                  </div>
 
                   <div className="profile-card">
                     <div className="profile-card__head">

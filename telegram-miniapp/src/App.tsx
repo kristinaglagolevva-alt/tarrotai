@@ -2428,7 +2428,7 @@ useEffect(() => {
         spread_type: 'three_cards' as const,
         topic: topic,
         question: threeQuestion.trim(),
-        consider_reversed: false,
+        consider_reversed: true,
       }
       const reading: any = await createReading(token, params)
       // Save the description from the backend so we can display it in the UI
@@ -2437,7 +2437,8 @@ useEffect(() => {
       return (reading.cards || []).slice(0, 3).map((c: any, i: number) => {
         const idx = Number(c.card_index ?? 0)
         const url = FRONT_CARD_URLS[idx] || backCardImg
-        const name = String(c.card_name || cardNameFromUrl(url))
+        const baseName = String(c.card_name || cardNameFromUrl(url))
+        const name = c?.is_reversed ? `${baseName} (перевёрнутая)` : baseName
         const text = String(c.meaning || '').trim() || ''
         return {
           idx,
@@ -2463,7 +2464,7 @@ useEffect(() => {
         spread_type: 'ppf' as const,
         topic: topic,
         question: ppfQuestion.trim(),
-        consider_reversed: false,
+        consider_reversed: true,
       }
       const reading: any = await createReading(token, params)
       // Save description returned from the backend
@@ -2478,7 +2479,8 @@ useEffect(() => {
       return (reading.cards || []).slice(0, 3).map((c: any, i: number) => {
         const idx = Number(c.card_index ?? 0)
         const url = FRONT_CARD_URLS[idx] || backCardImg
-        const name = String(c.card_name || cardNameFromUrl(url))
+        const baseName = String(c.card_name || cardNameFromUrl(url))
+        const name = c?.is_reversed ? `${baseName} (перевёрнутая)` : baseName
         const meaning = String(c.meaning || '').trim() || ''
         const text = `${focusLine}\n\n${meaning}`
         return {
@@ -2505,7 +2507,7 @@ useEffect(() => {
         spread_type: 'decision' as const,
         topic: topic,
         question: decisionQuestion.trim(),
-        consider_reversed: false,
+        consider_reversed: true,
       }
       const reading: any = await createReading(token, params)
       // Save description returned from the backend
@@ -2514,7 +2516,8 @@ useEffect(() => {
       return (reading.cards || []).slice(0, 2).map((c: any, i: number) => {
         const idx = Number(c.card_index ?? 0)
         const url = FRONT_CARD_URLS[idx] || backCardImg
-        const name = String(c.card_name || cardNameFromUrl(url))
+        const baseName = String(c.card_name || cardNameFromUrl(url))
+        const name = c?.is_reversed ? `${baseName} (перевёрнутая)` : baseName
         const text = String(c.meaning || '').trim() || ''
         return {
           idx,
@@ -2785,6 +2788,7 @@ useEffect(() => {
           question: question || '',
           topic: topic,
           deck_size: 78,
+          consider_reversed: true,
         })
 
         const idx = Math.max(0, Math.min(dto.card_index ?? 0, 77))

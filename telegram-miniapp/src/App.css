@@ -1,0 +1,2645 @@
+/* =================================================================================================
+   [1] BASE
+================================================================================================= */
+
+html,
+body,
+#root {
+  margin: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: #000;
+  font-family: Inter, system-ui, sans-serif;
+}
+
+:root {
+  --rec-bg: rgba(255, 90, 120, 0);
+  --rec-border: rgba(203, 90, 255, 0);
+  --rec-ring:
+    0 18px 48px rgba(0,0,0,0.58),
+    0 0 0 1px rgba(102, 0, 255, 0.721) inset,
+    0 0 26px rgba(149, 0, 255, 0.55);
+}
+
+.ask-mic.recording {
+  background: var(--rec-bg);
+  border-color: var(--rec-border);
+  box-shadow: var(--rec-ring);
+}
+
+
+
+
+/* =================================================================================================
+   [2] APP / CANVAS LAYERS
+================================================================================================= */
+
+.app {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  background-size: cover;
+  background-position: var(--bgx, 50%) var(--bgy, 50%);
+  background-repeat: no-repeat;
+  transform: translateZ(0);
+  display: flex;
+  justify-content: center;
+  background: linear-gradient(180deg, #0b1222, #303a46);
+}
+
+.stars-canvas,
+.comets-canvas {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.stars-canvas { z-index: 1; }
+.comets-canvas { z-index: 2; }
+
+
+
+
+/* =================================================================================================
+   [3] CONTENT SHELL
+================================================================================================= */
+
+.content {
+  height: 100%;
+  overflow-y: auto;
+  overflow-x: hidden;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+
+  --block-w: 100%;
+  --glass-fill: rgba(255, 255, 255, 0.10);
+  --glass-stroke: rgba(255, 255, 255, 0.16);
+  --glass-stroke-2: rgba(255, 255, 255, 0.08);
+
+  --shadow-soft: 0 18px 44px rgba(0, 0, 0, 0.58);
+  --shadow-mid: 0 10px 26px rgba(0, 0, 0, 0.45);
+
+  position: relative;
+  z-index: 3;
+
+  width: 100%;
+  max-width: 640px;
+  box-sizing: border-box;
+
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+
+  gap: 14px;
+  text-align: center;
+
+  padding: 3.2rem 4vw calc(20px + env(safe-area-inset-bottom, 0px));
+  margin: 0 auto;
+
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+.content::-webkit-scrollbar { width: 0; height: 0; }
+.content > * { flex-shrink: 0; }
+
+.content h1 {
+  margin: 0;
+  font-size: 34px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  color: rgba(255, 255, 255, 0.92);
+  text-shadow: 0 14px 34px rgba(0, 0, 0, 0.55);
+}
+
+.content p {
+  margin: 0 0 4px 0;
+  font-size: 14px;
+  color: rgba(255, 255, 255, 0.64);
+  text-shadow: 0 12px 28px rgba(0, 0, 0, 0.48);
+}
+
+
+
+
+/* =================================================================================================
+   [4] MOTION BUTTON (iOS)
+================================================================================================= */
+
+.motion-btn {
+  position: absolute;
+  z-index: 6;
+  right: 16px;
+  top: calc(72px + env(safe-area-inset-top, 0px));
+  padding: 10px 14px;
+  border-radius: 999px;
+
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: rgba(18, 18, 28, 0.42);
+  color: rgba(255, 255, 255, 0.92);
+
+  backdrop-filter: blur(14px) saturate(1.3);
+  -webkit-backdrop-filter: blur(14px) saturate(1.3);
+
+  box-shadow:
+    0 14px 34px rgba(0,0,0,0.55),
+    0 0 0 1px rgba(255,255,255,0.05) inset;
+
+  cursor: pointer;
+  outline: none;
+}
+
+.motion-btn:focus,
+.motion-btn:focus-visible { outline: none; }
+
+
+
+
+/* =================================================================================================
+   [5] CARD-DAY TILE
+================================================================================================= */
+
+.card-day {
+  position: relative;
+  height: 120px;
+
+  display: block;
+
+  border-radius: 22px;
+  overflow: hidden;
+  border: 1px solid var(--glass-stroke);
+
+  background: var(--glass-fill);
+
+  backdrop-filter: blur(22px) saturate(1.55);
+  -webkit-backdrop-filter: blur(22px) saturate(1.55);
+
+  cursor: pointer;
+}
+
+.card-day::before, .card-day_2:before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 4;
+
+  background: linear-gradient(
+    180deg,
+    rgba(255,255,255,0.22),
+    rgba(255,255,255,0.06) 45%,
+    rgba(255,255,255,0.02)
+  );
+  opacity: 0.55;
+}
+
+.card-day::after, .card-day_2:after {
+  content: "";
+  position: absolute;
+  left: 10px;
+  right: 10px;
+  top: 8px;
+  height: 18px;
+  border-radius: 999px;
+  pointer-events: none;
+
+  background: linear-gradient(180deg, rgba(255,255,255,0.16), transparent);
+  opacity: 0.65;
+}
+
+.card-day__media {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 120px;
+  height: 100%;
+  z-index: 1;
+
+  overflow: hidden;
+  border-top-right-radius: 22px;
+  border-bottom-right-radius: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+}
+
+.card-day__img {
+  width: 60px;
+}
+
+.card-day__text {
+  position: absolute;
+  left: 0;
+  top: 0;
+  right: 0;
+  z-index: 3;
+
+  padding: 10px 14px;
+  padding-right: calc(14px + 120px);
+  text-align: left;
+}
+
+
+.card-day_2 {
+  position: relative;
+  height: 380px;
+
+  display: block;
+
+  border-radius: 22px;
+  overflow: hidden;
+  border: 1px solid var(--glass-stroke);
+
+  background: var(--glass-fill);
+
+  backdrop-filter: blur(22px) saturate(1.55);
+  -webkit-backdrop-filter: blur(22px) saturate(1.55);
+
+  box-shadow:
+    0 22px 60px rgba(0,0,0,0.55),
+    0 0 0 1px rgba(255,255,255,0.05) inset;
+
+  cursor: pointer;
+}
+.card-day__text_2 {
+  position: absolute;
+  left: 0;
+  top: 0;
+  right: 0;
+  z-index: 3;
+  padding: 10px 14px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.card-day__title {
+  font-size: 22px;
+  font-weight: 780;
+  letter-spacing: -0.01em;
+  color: rgba(255,255,255,0.92);
+  text-shadow: 0 12px 28px rgba(0,0,0,0.55);
+
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.card-day__subtitle {
+  margin-top: 6px;
+  font-size: 14px;
+  color: rgba(255,255,255,0.64);
+  text-shadow: 0 12px 24px rgba(0,0,0,0.45);
+  max-width: 320px;
+}
+
+.card-day__subtitle span { display: block; }
+
+.card-day__rim,
+.card-day__spark { opacity: 0; }
+
+
+
+
+/* =================================================================================================
+   [6] ASK GLASS (input)
+================================================================================================= */
+
+.ask-wrap {
+  width: var(--block-w);
+  display: flex;
+  flex-direction: column;
+}
+
+.ask-wrap,
+.spread-list { position: relative; }
+
+.ask-wrap.is-attn .ask-glass {
+  background: var(--rec-bg);
+  border-color: var(--rec-border);
+}
+
+.ask-glass {
+  position: relative;
+  border-radius: 20px;
+  overflow: hidden;
+  align-items: center;
+
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  background: rgba(255, 255, 255, 0.10);
+
+  backdrop-filter: blur(22px) saturate(1.55);
+  -webkit-backdrop-filter: blur(22px) saturate(1.55);
+
+  transition:
+    border-color 900ms cubic-bezier(.16, 1, .3, 1),
+    box-shadow 1100ms cubic-bezier(.16, 1, .3, 1),
+    background-color 1100ms cubic-bezier(.16, 1, .3, 1);
+
+  display: flex;
+  gap: 10px;
+
+  padding: 10px 10px 10px 12px;
+}
+
+.ask-glass::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+
+  background: linear-gradient(
+    180deg,
+    rgba(255,255,255,0.22),
+    rgba(255,255,255,0.06) 45%,
+    rgba(255,255,255,0.02)
+  );
+  opacity: 0.55;
+}
+
+.ask-glass::after {
+  content: "";
+  position: absolute;
+  left: 10px;
+  right: 10px;
+  top: 8px;
+  height: 18px;
+  border-radius: 999px;
+  pointer-events: none;
+
+  background: linear-gradient(180deg, rgba(255,255,255,0.16), transparent);
+  opacity: 0.65;
+}
+
+.ask-input {
+  position: relative;
+  z-index: 1;
+
+  flex: 1;
+  min-width: 0;
+  resize: none;
+
+  border: 0;
+  outline: none;
+  background: transparent;
+
+  color: rgba(255,255,255,0.92);
+  font-size: 14px;
+  line-height: 1.35;
+
+  padding: 8px 6px;
+}
+
+.ask-input::placeholder { color: rgba(255,255,255,0.50); }
+
+.ask-input:focus,
+.ask-input:focus-visible { outline: none; box-shadow: none; }
+
+.ask-mic {
+  position: relative;
+  z-index: 1;
+
+  width: 46px;
+  height: 46px;
+  flex: 0 0 46px;
+
+  border-radius: 999px;
+  border: 1px solid rgba(255,255,255,0.16);
+
+  background: rgba(255, 255, 255, 0.10);
+
+  box-shadow:
+    0 16px 44px rgba(0,0,0,0.55),
+    0 0 0 1px rgba(255,255,255,0.05) inset;
+
+  display: flex;
+  place-items: center;
+  justify-content: center;
+  align-items: center;
+
+  cursor: pointer;
+  user-select: none;
+
+  transition:
+    transform 160ms cubic-bezier(.2,.9,.2,1),
+    border-color 220ms ease,
+    box-shadow 220ms ease,
+    background-color 320ms ease;
+}
+
+.ask-mic:focus,
+.ask-mic:focus-visible { outline: none; }
+
+.ask-mic:hover { transform: translateY(-1px); border-color: rgba(255,255,255,0.22); }
+.ask-mic:active { transform: translateY(1px) scale(0.98); }
+
+.ask-mic__icon {
+  width: 18px;
+  height: 18px;
+  display: block;
+  filter: brightness(0) invert(1) drop-shadow(0 10px 16px rgba(0,0,0,0.45));
+  opacity: 0.92;
+}
+
+.ask-mic.recording {
+  background: rgba(255, 90, 120, 0.18);
+  border-color: rgba(255, 90, 120, 0.45);
+  box-shadow:
+    0 18px 48px rgba(0,0,0,0.58),
+    0 0 0 1px rgb(255, 0, 0) inset,
+    0 0 28px rgb(255, 0, 47);
+}
+
+.ask-hint {
+  font-size: 12px;
+  color: rgba(255,255,255,0.58);
+  text-shadow: 0 10px 22px rgba(0,0,0,0.45);
+  padding-left: 6px;
+
+  overflow: hidden;
+  max-height: 0;
+  opacity: 0;
+  transform: translateY(-6px);
+
+  transition:
+    max-height 360ms cubic-bezier(.16, 1, .3, 1),
+    opacity 220ms ease,
+    transform 360ms cubic-bezier(.16, 1, .3, 1);
+}
+
+.ask-hint.is-visible { max-height: 40px; opacity: 1; transform: translateY(0); }
+
+
+
+
+/* =================================================================================================
+   [7] CTA BUTTON
+================================================================================================= */
+
+.glass-cta {
+  max-width: 600px;
+  width: var(--block-w);
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+  outline: none;
+}
+
+.glass-cta:focus,
+.glass-cta:focus-visible { outline: none; }
+
+.glass-cta__inner {
+  position: relative;
+  width: 100%;
+  height: 52px;
+  border-radius: 999px;
+
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  border: 1px solid var(--glass-stroke);
+
+  background:
+    radial-gradient(
+      120px 90px at var(--rx, 50%) var(--ry, 50%),
+      rgba(255,255,255,0.16),
+      transparent 65%
+    ),
+    linear-gradient(180deg, rgba(255,255,255,0.07), rgba(255,255,255,0.02)),
+    var(--glass-fill);
+
+  backdrop-filter: blur(18px) saturate(1.45) contrast(1.06);
+  -webkit-backdrop-filter: blur(18px) saturate(1.45) contrast(1.06);
+
+
+  transition:
+    transform 160ms cubic-bezier(.2,.9,.2,1),
+    border-color 220ms ease,
+    box-shadow 220ms ease;
+}
+
+.glass-cta__rim {
+  position: absolute;
+  inset: 1px;
+  border-radius: 999px;
+  pointer-events: none;
+
+  background: linear-gradient(
+    180deg,
+    rgba(255,255,255,0.22),
+    rgba(255,255,255,0.07) 45%,
+    rgba(255,255,255,0.03)
+  );
+  opacity: 0.65;
+}
+
+.glass-cta__spark {
+  position: absolute;
+  inset: 0;
+  border-radius: 999px;
+  pointer-events: none;
+  opacity: 0.6;
+}
+
+.glass-cta__text {
+  font-size: 20px;
+  font-weight: 520;
+  letter-spacing: 0.2px;
+  color: rgba(242, 239, 255, 0.92);
+  text-shadow: 0 12px 24px rgba(0,0,0,0.45);
+}
+
+.glass-cta.is-error .glass-cta__inner {
+  animation: cta-error 520ms ease;
+  border-color: rgba(255, 90, 120, 0);
+}
+
+@keyframes cta-error {
+  0%   { transform: translateY(0) scale(1); }
+  20%  { transform: translateY(1px) scale(0.992); }
+  55%  { transform: translateY(-1px) scale(1.004); }
+  100% { transform: translateY(0) scale(1); }
+}
+
+
+
+
+/* =================================================================================================
+   [8] SEGMENTED
+================================================================================================= */
+
+.seg {
+  width: 100%;
+  --h: 44px;
+  height: var(--h);
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+
+  position: relative;
+  border-radius: 999px;
+  overflow: hidden;
+  align-items: center;
+
+  background: rgba(255, 255, 255, 0.10);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+
+  backdrop-filter: blur(22px) saturate(1.55);
+  -webkit-backdrop-filter: blur(22px) saturate(1.55);
+
+  padding: 6px 0px;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.seg__svg { position: absolute; width: 0; height: 0; pointer-events: none; }
+
+.seg__pill {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  right: 2px;
+  height: calc(100% - 6px);
+  width: calc((100% - 9px) / 3);
+  border-radius: 999px;
+  z-index: 1;
+
+  background: rgba(255, 255, 255, 0.18);
+  border: 1px solid rgba(255, 255, 255, 0.22);
+
+  box-shadow:
+    0 14px 28px rgba(0, 0, 0, 0.22),
+    inset 0 1px 0 rgba(255, 255, 255, 0.22);
+
+  transform: translate3d(calc(var(--i) * 100%), 0, 0) scale(1);
+
+  transition:
+    transform 950ms cubic-bezier(.16, 1, .3, 1),
+    filter 220ms ease;
+
+  will-change: transform, filter;
+}
+
+.seg[data-bump] .seg__pill { animation: seg-bump 520ms cubic-bezier(.2, .9, .2, 1); }
+
+.seg.is-bump .seg__pill {
+  animation: seg-bump 440ms cubic-bezier(.16, 1, .3, 1);
+  filter: blur(0.45px);
+}
+
+@keyframes seg-bump {
+  0%   { transform: translate3d(calc(var(--i) * 100%), 0, 0) scale(0.985); }
+  45%  { transform: translate3d(calc(var(--i) * 100%), 0, 0) scale(1.015); }
+  100% { transform: translate3d(calc(var(--i) * 100%), 0, 0) scale(1); }
+}
+
+.seg__btn {
+  position: relative;
+  z-index: 2;
+  border: 0;
+  background: rgba(255, 255, 255, 0);
+  cursor: pointer;
+
+  height: calc(var(--h) - 6px);
+  border-radius: 999px;
+  padding: 0 10px;
+
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0.2px;
+  color: rgba(189, 189, 189, 0.727);
+
+  transition:
+    transform 220ms cubic-bezier(.16, 1, .3, 1),
+    color 320ms ease,
+    filter 220ms ease;
+
+  outline: none;
+  box-shadow: none;
+}
+
+.seg__btn:focus,
+.seg__btn:focus-visible { outline: none !important; box-shadow: none !important; }
+
+.seg__btn.is-active { color: rgba(255, 255, 255, 0.94); }
+
+
+
+
+/* =================================================================================================
+   [8.1] NAV (HOME): SWITCHER + SLIDE PAGES
+================================================================================================= */
+
+.nav-pages {
+  width: var(--block-w);
+  position: relative;
+  overflow: hidden;
+
+}
+
+.nav-track {
+  width: 100%;
+  display: flex;
+  flex-direction: row;
+  will-change: transform;
+  gap: 20px;
+  transform: translate3d(calc(var(--pi) * (-100% - 20px)), 0, 0);
+
+
+  transition: transform 950ms cubic-bezier(.16, 1, .3, 1);
+}
+
+.nav-page {
+  width: 100%;
+  flex: 0 0 100%;
+  padding-top: 2px;
+
+  display: flex;
+  flex-direction: column;
+  gap: 15px;
+}
+
+
+
+
+/* =================================================================================================
+   [9] SPREAD LIST
+================================================================================================= */
+
+.spread-list {
+  width: var(--block-w);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  border-radius: 22px;
+}
+
+.spread-card {
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 18px;
+
+  background: rgba(255, 255, 255, 0.08);
+  backdrop-filter: blur(18px) saturate(1.35);
+  -webkit-backdrop-filter: blur(18px) saturate(1.35);
+
+
+  padding: 14px 14px;
+
+  display: flex;
+  align-items: center;
+  gap: 14px;
+
+  cursor: pointer;
+  text-align: left;
+
+  transition:
+    transform 180ms cubic-bezier(.16, 1, .3, 1),
+    border-color 220ms ease,
+    box-shadow 220ms ease,
+    background-color 220ms ease;
+}
+
+.spread-card:hover {
+  transform: translateY(-1px);
+  border-color: rgba(255,255,255,0.18);
+  box-shadow:
+    0 22px 56px rgba(0,0,0,0.50),
+    0 0 0 1px rgba(255,255,255,0.05) inset;
+}
+
+.spread-card:active { transform: translateY(1px) scale(0.995); }
+
+.spread-card.is-active {
+  border-color: rgba(157, 0, 255, 0.85);
+  box-shadow:
+    0 22px 56px rgba(73, 0, 129, 0.294),
+    0 0 0 1px rgba(55, 0, 68, 0.35) inset,
+    0 0 0 2px rgba(234, 0, 255, 0.18);
+}
+
+.spread-card.is-attn {
+  border-color: var(--rec-border);
+  box-shadow: var(--rec-ring);
+}
+
+.spread-icon__svg img {
+  width: 44px;
+  height: 44px;
+  object-fit: contain;
+  display: block;
+  filter: drop-shadow(0 10px 18px rgba(0,0,0,0.35));
+}
+
+
+.spread-body {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  gap: 3px;
+}
+
+.spread-title {
+  font-size: 16px;
+  font-weight: 760;
+  color: rgba(255,255,255,0.92);
+  text-shadow: 0 12px 26px rgba(0,0,0,0.45);
+  line-height: 1.15;
+
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.spread-subtitle {
+  font-size: 13px;
+  color: rgba(255,255,255,0.62);
+  text-shadow: 0 10px 22px rgba(0,0,0,0.40);
+  line-height: 1.2;
+
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.spread-meta {
+  font-size: 12px;
+  color: rgba(255,255,255,0.42);
+  text-shadow: 0 10px 22px rgba(0,0,0,0.35);
+  margin-top: 2px;
+}
+
+
+
+
+/* =================================================================================================
+   [10] CARD DAY PREP TOPBAR / HEAD
+================================================================================================= */
+
+.topbar {
+  width: 100%;
+  display: grid;
+  grid-template-columns: 44px 1fr 44px;
+  align-items: center;
+  gap: 10px;
+  display: flex;
+  flex-direction: row;
+  margin-top: 2.5rem;
+}
+
+.back-btn {
+  width: 44px;
+  height: 44px;
+  border-radius: 999px;
+
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: rgba(18, 18, 28, 0.42);
+  color: rgba(255, 255, 255, 0.92);
+
+  backdrop-filter: blur(14px) saturate(1.3);
+  -webkit-backdrop-filter: blur(14px) saturate(1.3);
+
+  box-shadow:
+    0 14px 34px rgba(0,0,0,0.55),
+    0 0 0 1px rgba(255,255,255,0.05) inset;
+
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.back-btn__ic { width: 22px; height: 22px; display: block; }
+
+.back-btn__ic svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+  filter: drop-shadow(0 10px 16px rgba(0,0,0,0.45));
+}
+
+.topbar__titles { text-align: left; }
+
+.topbar__title {
+  font-size: 18px;
+  font-weight: 760;
+  color: rgba(255,255,255,0.92);
+  text-shadow: 0 12px 28px rgba(0,0,0,0.55);
+  letter-spacing: -0.01em;
+}
+
+.topbar__subtitle {
+  margin-top: 2px;
+  font-size: 13px;
+  color: rgba(255,255,255,0.58);
+  text-shadow: 0 10px 22px rgba(0,0,0,0.45);
+}
+
+.topbar__spacer { width: 44px; height: 44px; }
+
+.prep-head {
+  width: 100%;
+  margin-top: 6px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+
+.prep-title {
+  font-size: 26px;
+  font-weight: 820;
+  letter-spacing: -0.02em;
+  color: rgba(255,255,255,0.92);
+  text-shadow: 0 14px 34px rgba(0,0,0,0.55);
+}
+
+.prep-subtitle {
+  font-size: 14px;
+  color: rgba(255,255,255,0.64);
+  text-shadow: 0 12px 28px rgba(0,0,0,0.48);
+}
+
+
+
+
+/* =================================================================================================
+   [11] QBOX (same glass as input)
+================================================================================================= */
+
+.qbox-wrap { width: var(--block-w); }
+
+.qbox__col {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  text-align: left;
+  padding: 6px 6px;
+}
+
+.qbox__label {
+  font-size: 13px;
+  color: rgba(255,255,255,0.62);
+  text-shadow: 0 10px 22px rgba(0,0,0,0.40);
+}
+
+.qbox__text {
+  font-size: 15px;
+  font-weight: 560;
+  color: rgba(255,255,255,0.92);
+  text-shadow: 0 12px 26px rgba(0,0,0,0.45);
+  line-height: 1.3;
+}
+
+
+
+
+/* =================================================================================================
+   [12] PREMIUM FLIP CARD — FINAL (SHAKE → BACK → CLICK → FRONT ONLY) + iOS FIX
+================================================================================================= */
+
+/* ... (дальше файл без изменений — оставь как у тебя) */
+
+
+
+
+/* =================================================================================================
+   [12] PREMIUM FLIP CARD — FINAL (SHAKE → BACK → CLICK → FRONT ONLY) + iOS FIX
+================================================================================================= */
+
+
+.pflip {
+  width: 116px;
+  height: 280px;
+
+  position: fixed;
+  left: 50%;
+  top: var(--pflip-top, 50%);
+
+  transform: translate(-50%, -50%) scale(var(--pflip-s, 1));
+  transform-origin: center center;
+
+  perspective: 1200px;
+  z-index: 20;
+  will-change: transform;
+}
+
+
+.pflip.is-clickable { cursor: pointer; }
+
+/* ✨ аура вокруг карты */
+.pflip::before {
+  content: "";
+  position: absolute;
+  inset: -22px;
+  border-radius: 18px;
+  pointer-events: none;
+
+  opacity: 0;
+  filter: blur(18px);
+
+  background: radial-gradient(closest-side,
+    rgba(171, 110, 255, 0.55),
+    rgba(140, 84, 255, 0.28) 45%,
+    rgba(120, 60, 255, 0.00) 75%
+  );
+
+  transition: opacity 220ms ease;
+}
+
+.pflip.is-done::before {
+  opacity: 1;
+  animation: pflip-aura-pulse 1.35s ease-in-out infinite;
+}
+
+.pflip.is-done.is-revealed::before {
+  background: radial-gradient(closest-side,
+    rgba(255,255,255,0.85),
+    rgba(255,255,255,0.35) 45%,
+    rgba(255,255,255,0.00) 75%
+  );
+  animation: pflip-white-aura 1.55s ease-in-out infinite;
+}
+
+.pflip__stage {
+  width: 100%;
+  height: 100%;
+  position: relative;
+
+  transform-style: preserve-3d;
+  -webkit-transform-style: preserve-3d;
+
+  padding-top: 40px;
+
+  transform: rotateX(10deg) rotateZ(-2deg);
+  transition: transform 420ms cubic-bezier(.2,.9,.2,1);
+}
+
+/* во время шейка/перемешивания — лёгкий wobble */
+.pflip.is-active .pflip__stage {
+  animation: pflip-wobble 900ms linear infinite;
+}
+
+/* после done — убираем наклон, чтобы было “чисто” */
+.pflip.is-done .pflip__stage {
+  animation: none;
+  transform: rotateX(0deg) rotateZ(0deg);
+}
+
+.pflip__card {
+  width: 128%;
+  height: 240px;
+  position: relative;
+  left: -12%;
+  transform-style: preserve-3d;
+  -webkit-transform-style: preserve-3d;
+
+  transform-origin: center;
+  border-radius: 8px;
+
+  /* var(--dur) задаётся из JS/inline (как у тебя было) */
+  animation: pflip-spin var(--dur) linear infinite;
+
+  transition:
+    transform 520ms cubic-bezier(.16, 1, .3, 1),
+    filter 320ms ease,
+    box-shadow 320ms ease;
+}
+
+/* ✅ DONE (после shake): рубашка к нам + пульс + фиолетовый неон */
+.pflip.is-done:not(.is-revealed) .pflip__card {
+  /* стопаем бесконечный spin и включаем "пульс" */
+  animation: pflip-done-pulse 1.35s ease-in-out infinite;
+
+  /* рубашка к нам */
+  transform: rotateY(180deg);
+
+  box-shadow:
+    0 0 0 1px rgba(255,255,255,0.18) inset,
+    0 0 22px rgba(171,110,255,0.55),
+    0 0 44px rgba(140, 84,255,0.28),
+    0 0 70px rgba(120, 60,255,0.14);
+
+  filter:
+    drop-shadow(0 0 14px rgba(171,110,255,0.65))
+    drop-shadow(0 0 34px rgba(140, 84,255,0.26));
+}
+
+/* ✅ REVEALED (клик по карте): “реальный” flip 180 -> 0 + белая подсветка */
+.pflip.is-done.is-revealed .pflip__card {
+  /* делаем controlled flip и затем breathing */
+  animation:
+    pflip-reveal-flip 520ms cubic-bezier(.16, 1, .3, 1) both,
+    pflip-reveal-breathe 1.55s ease-in-out 520ms infinite;
+
+  transform: rotateY(0deg) scale(1.06);
+
+  box-shadow:
+    0 0 0 1px rgba(255,255,255,0.26) inset,
+    0 0 22px rgba(255,255,255,0.42),
+    0 0 48px rgba(255,255,255,0.18);
+
+  filter:
+    drop-shadow(0 0 16px rgba(255,255,255,0.50))
+    drop-shadow(0 0 44px rgba(255,255,255,0.18));
+}
+
+/* -------------------------------------------------------------------------------------------------
+   FACES
+------------------------------------------------------------------------------------------------- */
+
+.pflip__face {
+  position: absolute;
+  inset: 0;
+
+  width: 100%;
+  height: 100%;
+  border-radius: 8px;
+
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+
+  box-shadow: 0 0 0 1px rgba(255,255,255,0.14) inset;
+
+  /* iOS/Safari stability */
+  will-change: transform, opacity;
+  transform-style: preserve-3d;
+  -webkit-transform-style: preserve-3d;
+
+  transition: opacity 220ms ease, visibility 220ms ease;
+}
+
+/* FRONT: скрываем заднюю сторону фронта */
+.pflip__front {
+  transform: rotateY(0deg) translateZ(2px);
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+}
+
+/* BACK: чтобы не исчезала на iOS после shake */
+.pflip__back {
+  transform: rotateY(180deg) translateZ(2px);
+
+  /* 🔥 ключевой iOS fix */
+  backface-visibility: visible;
+  -webkit-backface-visibility: visible;
+}
+
+/* -------------------------------------------------------------------------------------------------
+   STATE VISIBILITY / отключение back после клика
+------------------------------------------------------------------------------------------------- */
+
+/* DONE (рубашка к нам): фронт скрыт, back активен */
+.pflip.is-done:not(.is-revealed) .pflip__front {
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.pflip.is-done:not(.is-revealed) .pflip__back {
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+}
+
+/* REVEALED (клик): back полностью отключаем */
+.pflip.is-done.is-revealed .pflip__back {
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+
+  /* чтобы точно убрать из 3D-композиции */
+  transform: rotateY(180deg) translateZ(-1px);
+}
+
+/* REVEALED: фронт активен */
+.pflip.is-done.is-revealed .pflip__front {
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+}
+
+/* -------------------------------------------------------------------------------------------------
+   KEYFRAMES
+------------------------------------------------------------------------------------------------- */
+
+@keyframes pflip-spin {
+  from { transform: rotateY(0deg); }
+  to   { transform: rotateY(360deg); }
+}
+
+@keyframes pflip-wobble {
+  0%   { transform: rotateX(10deg) rotateZ(-2deg); }
+  50%  { transform: rotateX(10deg) rotateZ(calc(-2deg + var(--k) * 2deg)); }
+  100% { transform: rotateX(10deg) rotateZ(-2deg); }
+}
+
+@keyframes pflip-done-pulse {
+  0%   { scale: 1; }
+  50%  { scale: 1.028; }
+  100% { scale: 1; }
+}
+
+@keyframes pflip-aura-pulse {
+  0%   { transform: scale(1);    opacity: 0.85; }
+  50%  { transform: scale(1.08); opacity: 1; }
+  100% { transform: scale(1);    opacity: 0.85; }
+}
+
+@keyframes pflip-white-aura {
+  0%   { transform: scale(1);    opacity: 0.78; }
+  50%  { transform: scale(1.12); opacity: 1; }
+  100% { transform: scale(1);    opacity: 0.78; }
+}
+
+@keyframes pflip-reveal-flip {
+  from { transform: rotateY(180deg) scale(1.02); }
+  to   { transform: rotateY(0deg)   scale(1.06); }
+}
+
+@keyframes pflip-reveal-breathe {
+  0%   { transform: rotateY(0deg) scale(1.06); }
+  50%  { transform: rotateY(0deg) scale(1.085); }
+  100% { transform: rotateY(0deg) scale(1.06); }
+}
+
+
+/* =================================================================================================
+   [13] SHAKE SECTION (UI FIX: fits CURRENT markup)
+   Markup expected:
+   <div class="shake">
+     <div class="shake__badge [is-done]">
+       <div class="shake__title">...</div>
+       <div class="shake__sub">...</div>
+     </div>
+     <button class="glass-cta mini-cta">...</button>
+     <div class="shake__note">...</div>
+   </div>
+================================================================================================= */
+
+.shake {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+
+  padding: 14px 16px 20px;
+
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+
+  z-index: 50;
+
+  /* безопасная зона для iOS */
+  padding-bottom: calc(40px + env(safe-area-inset-bottom));
+}
+
+
+/* Главная “карточка” с текстом */
+.shake__badge {
+  max-width: 484px;
+  border-radius: 22px;
+
+  border: 1px solid rgba(255,255,255,0.16);
+  background:
+    radial-gradient(220px 160px at 18% 12%, rgba(255,255,255,0.12), transparent 58%),
+    rgba(255,255,255,0.08);
+
+  backdrop-filter: blur(22px) saturate(1.55);
+  -webkit-backdrop-filter: blur(22px) saturate(1.55);
+
+  box-shadow:
+    0 22px 60px rgba(0,0,0,0.55),
+    0 0 0 1px rgba(255,255,255,0.05) inset;
+
+  padding: 18px 16px 16px;
+  text-align: left;
+
+  position: relative;
+  overflow: hidden;
+
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+/* верхний “блик” как у других стеклянных блоков */
+.shake__badge::before {
+  content: "";
+  position: absolute;
+  left: 10px;
+  right: 10px;
+  top: 8px;
+  height: 18px;
+  border-radius: 999px;
+  pointer-events: none;
+
+  background: linear-gradient(180deg, rgba(255,255,255,0.16), transparent);
+  opacity: 0.65;
+}
+
+/* декоративный “пузырёк” (типа иконки), чтобы было богаче без смены разметки */
+.shake__badge::after {
+  content: "";
+  position: absolute;
+  width: 56px;
+  height: 56px;
+  border-radius: 999px;
+
+  right: 14px;
+  top: 50%;
+  transform: translateY(-50%);
+
+  pointer-events: none;
+
+  background:
+    radial-gradient(20px 20px at 35% 30%, rgba(255,255,255,0.18), transparent 60%),
+    radial-gradient(40px 34px at 70% 75%, rgba(157, 0, 255, 0.28), transparent 68%),
+    rgba(255,255,255,0.08);
+
+  border: 1px solid rgba(255,255,255,0.14);
+
+  box-shadow:
+    0 18px 44px rgba(0,0,0,0.38),
+    0 0 0 1px rgba(255,255,255,0.04) inset;
+
+  opacity: 0.95;
+}
+
+
+/* лёгкая пульсация пока не готово */
+.shake__badge:not(.is-done) {
+  animation: shake-card-pulse 1400ms cubic-bezier(.16, 1, .3, 1) infinite;
+}
+
+@keyframes shake-card-pulse {
+  0%   { transform: translateY(0); }
+  45%  { transform: translateY(-1px); }
+  100% { transform: translateY(0); }
+}
+
+/* done state — чуть ярче */
+.shake__badge.is-done {
+  /* тот же стиль, что и обычный badge: без яркого фиолетового акцента */
+  border: 1px solid rgba(255,255,255,0.16);
+  box-shadow:
+    0 22px 60px rgba(0,0,0,0.55),
+    0 0 0 1px rgba(255,255,255,0.05) inset;
+}
+
+/* Заголовок */
+.shake__title {
+  font-size: 22px;
+  font-weight: 820;
+  letter-spacing: -0.02em;
+
+  color: rgba(255,255,255,0.92);
+  text-shadow: 0 14px 34px rgba(0,0,0,0.55);
+
+  padding-right: 70px; /* место под декоративный кружок справа */
+  margin: 0;
+}
+
+/* Подзаголовок */
+.shake__sub {
+  font-size: 14px;
+  line-height: 1.35;
+
+  color: rgba(255,255,255,0.64);
+  text-shadow: 0 12px 28px rgba(0,0,0,0.48);
+
+  padding-right: 70px; /* место под декоративный кружок справа */
+  margin: 0;
+}
+
+/* CTA внутри shake — собраннее */
+.mini-cta {
+  margin-top: 2px;
+  width: 100%;
+}
+
+.mini-cta .glass-cta__inner {
+  height: 50px;
+  border-color: rgba(255,255,255,0.16);
+}
+
+.mini-cta .glass-cta__text {
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: 0.2px;
+}
+
+/* Note — как спокойная “подсказка” */
+.shake__note {
+  padding: 12px 12px;
+  width: 95%;
+  border-radius: 18px;
+  border: 1px solid rgba(255,255,255,0.12);
+
+  background:
+    radial-gradient(220px 160px at 18% 12%, rgba(255,255,255,0.12), transparent 58%),
+    rgba(255,255,255,0.08);
+
+  backdrop-filter: blur(18px) saturate(1.35);
+  -webkit-backdrop-filter: blur(18px) saturate(1.35);
+
+  box-shadow:
+    0 16px 40px rgba(0,0,0,0.38),
+    0 0 0 1px rgba(255,255,255,0.04) inset;
+
+  font-size: 12.5px;
+  line-height: 1.35;
+  text-align: left;
+
+  color: rgba(255,255,255,0.56);
+  text-shadow: 0 10px 22px rgba(0,0,0,0.40);
+}
+
+
+/* =================================================================================================
+   [C14] BOTTOM PANELS (INPUT + SHAKE)
+================================================================================================= */
+
+.bottom-panel {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+
+  /* ✅ как у контентной колонки */
+  width: 100%;
+  max-width: 640px;
+  margin: 0 auto;
+
+  /* ✅ те же горизонтальные паддинги, что у .content (у тебя 4vw) */
+  padding: 12px 4vw 14px;
+  padding-bottom: calc(40px + env(safe-area-inset-bottom));
+
+  box-sizing: border-box;
+
+  z-index: 60;
+
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+
+  background: linear-gradient(
+    180deg,
+    rgba(0,0,0,0.00) 0%,
+    rgba(0,0,0,0.22) 20%,
+    rgba(0,0,0,0.42) 100%
+  );
+}
+
+/* =================================================================================================
+   [14] BACK BUTTON ICON (SVG)
+================================================================================================= */
+
+.back-btn__ic {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  width: 42px;
+  height: 42px;
+
+  border-radius: 12px;
+}
+
+.back-btn__ic img {
+  width: 20px;
+  height: 20px;
+
+  display: block;
+
+  /* если SVG монохромный — будет под цвет текста */
+  filter: brightness(0) invert(1);
+
+  opacity: 0.85;
+  transition:
+    opacity 0.25s ease,
+    transform 0.25s ease;
+}
+
+/* hover / active */
+.back-btn:hover .back-btn__ic img {
+  opacity: 1;
+  transform: translateX(-2px);
+}
+
+.back-btn:active .back-btn__ic img {
+  transform: translateX(-4px) scale(0.96);
+}
+
+
+
+/* =================================================================================================
+   [15] DESKTOP WIDTH CONSTRAINT (Telegram Mini App)
+================================================================================================= 
+
+
+.app {
+  min-height: 100vh;
+  width: 100%;
+
+  display: flex;
+  background:
+    radial-gradient(1200px 800px at var(--bgx, 50%) var(--bgy, 50%), rgba(120, 80, 255, 0.12), transparent 60%),
+    radial-gradient(800px 600px at 20% 80%, rgba(255, 120, 200, 0.08), transparent 60%),
+    #06060a;
+}
+
+
+.content {
+  width: 100%;
+  max-width: 420px;     
+  padding: 3.5rem 14px 28px;
+
+  box-sizing: border-box;
+}
+
+
+@media (min-width: 1200px) {
+  .content {
+    max-width: 460px;
+  }
+}*/
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+/* =================================================================================================
+   [24] CARD DAY — RESULT MODE (FIXED BOTTOM LAYOUT)
+================================================================================================= */
+
+/* контейнер результата — ПРИКЛЕЕН К НИЗУ */
+.result-layout {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+
+  max-width: 484px;
+  margin: 0 auto;
+
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+
+  padding:
+    14px
+    14px
+    calc(14px + env(safe-area-inset-bottom, 0px));
+
+  z-index: 18;
+  pointer-events: auto;
+}
+
+/* блок описания (въезд справа сохраняем) */
+.result-layout__desc {
+  width: 100%;
+  animation: cd-desc-in 520ms cubic-bezier(.16, 1, .3, 1) both;
+}
+
+/* =================================================================================================
+   RESULT CARD — FIXED HEIGHT + REAL SCROLL
+================================================================================================= */
+
+.result-card {
+  display: flex;              /* ✅ важно */
+  flex-direction: column;     /* ✅ теперь работает */
+
+  border-radius: 22px;
+  border: 1px solid rgba(255,255,255,0.16);
+
+  /* ✅ ограничиваем высоту всей карточки */
+  max-height: 280px;
+
+  background:
+    radial-gradient(260px 180px at 18% 12%, rgba(255,255,255,0.12), transparent 58%),
+    rgba(255,255,255,0.08);
+
+  backdrop-filter: blur(22px) saturate(1.55);
+  -webkit-backdrop-filter: blur(22px) saturate(1.55);
+
+  box-shadow:
+    0 22px 60px rgba(0,0,0,0.55),
+    0 0 0 1px rgba(255,255,255,0.05) inset;
+
+  padding: 16px 16px 14px;
+  text-align: left;
+
+  overflow: hidden;           /* ✅ чтобы внутренний скролл не “вытекал” */
+}
+
+/* ограничение высоты + скролл */
+.result-card__scroll {
+  margin-top: 10px;
+
+  /* ✅ ключ: область занимает всё оставшееся место в карточке */
+  flex: 1 1 auto;
+  min-height: 0;              /* ✅ критично для overflow в flex-контейнере */
+
+  overflow: auto;
+  -webkit-overflow-scrolling: touch;
+
+  padding-right: 6px;
+
+  font-size: 14px;
+  line-height: 1.45;
+  color: rgba(255,255,255,0.72);
+  text-shadow: 0 12px 26px rgba(0,0,0,0.45);
+}
+
+
+/* кнопка "вернуться в меню" */
+.result-back {
+  width: 100%;
+  max-width: 640px;
+}
+
+/* =================================================================================================
+   CARD DAY — HIDE SPREAD LIST ON RESULT SCREEN
+================================================================================================= */
+
+.result-layout ~ .spread-list,
+.spread-list.is-out {
+  display: none !important;
+}
+
+
+/* =================================================================================================
+   [27] TELEGRAM PROFILE (НЕОБЯЗАТЕЛЬНАЯ АВТОРИЗАЦИЯ)
+================================================================================================= */
+
+.tg-profile {
+  cursor: default;
+}
+
+.tg-profile__head {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.tg-profile__avatar {
+  width: 64px;
+  height: 64px;
+  border-radius: 999px;
+  overflow: hidden;
+  flex: 0 0 auto;
+  background: rgba(255, 255, 255, 0.10);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+}
+
+.tg-profile__avatarImg {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.tg-profile__avatarFallback {
+  width: 100%;
+  height: 100%;
+  display: grid;
+  place-items: center;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  opacity: 0.9;
+}
+
+.tg-profile__meta {
+  min-width: 0;
+}
+
+.tg-profile__name {
+  font-weight: 800;
+  font-size: 18px;
+  line-height: 1.15;
+}
+
+.tg-profile__username {
+  margin-top: 4px;
+  font-size: 12px;
+  opacity: 0.82;
+}
+
+.tg-profile__note {
+  margin-top: 12px;
+  font-size: 12px;
+  line-height: 1.45;
+  opacity: 0.82;
+}
+
+.tg-profile__badges {
+  margin-top: 12px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.tg-badge {
+  padding: 8px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  line-height: 1;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.22);
+  white-space: nowrap;
+}
+
+.tg-profile__actions {
+  margin-top: 12px;
+  display: grid;
+  gap: 10px;
+}
+
+.tg-btn {
+  width: 100%;
+  padding: 12px 14px;
+  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.08);
+  box-shadow: 0 18px 60px rgba(0, 0, 0, 0.25);
+  color: inherit;
+  font-weight: 800;
+  letter-spacing: 0.01em;
+  cursor: pointer;
+  transition: transform 140ms ease, background 140ms ease, border-color 140ms ease, opacity 140ms ease;
+}
+
+.tg-btn:active {
+  transform: translateY(1px);
+}
+
+.tg-btn:disabled {
+  opacity: 0.65;
+  cursor: default;
+}
+
+.tg-profile__hint {
+  font-size: 12px;
+  line-height: 1.4;
+  opacity: 0.78;
+}
+
+/* =================================================================================================
+   [27.2] HISTORY CARD — premium look (only .spread-card--history)
+================================================================================================= */
+
+.spread-card.spread-card--history {
+  position: relative;
+  overflow: hidden;
+
+  padding: 14px 14px;
+  border-radius: 18px;
+
+  /* чуть более “дорогой” фон */
+  background: var(--glass-fill);
+
+  border: 1px solid rgba(255,255,255,0.14);
+
+  box-shadow:
+    0 22px 60px rgba(0,0,0,0.48),
+    0 0 0 1px rgba(255,255,255,0.05) inset;
+
+  backdrop-filter: blur(18px) saturate(1.35);
+  -webkit-backdrop-filter: blur(18px) saturate(1.35);
+
+  transition:
+    transform 180ms cubic-bezier(.16, 1, .3, 1),
+    border-color 220ms ease,
+    box-shadow 220ms ease,
+    background-color 220ms ease;
+}
+
+/* тонкий “акцент” слева */
+
+/* блик сверху */
+.spread-card.spread-card--history::after {
+  content: "";
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  top: 8px;
+  height: 16px;
+  border-radius: 999px;
+
+  background: linear-gradient(180deg, rgba(255,255,255,0.16), transparent);
+  opacity: 0.65;
+  pointer-events: none;
+}
+
+.spread-card.spread-card--history:hover {
+  transform: translateY(-1px);
+  border-color: rgba(255,255,255,0.18);
+  box-shadow:
+    0 26px 70px rgba(0,0,0,0.52),
+    0 0 0 1px rgba(255,255,255,0.06) inset,
+    0 0 24px rgba(160, 120, 255, 0.12);
+}
+
+.spread-card.spread-card--history:active {
+  transform: translateY(1px) scale(0.995);
+}
+
+/* чуть “плотнее” типографика в истории */
+.spread-card.spread-card--history .spread-title {
+  font-size: 16px;
+  font-weight: 820;
+  letter-spacing: -0.01em;
+}
+
+.spread-card.spread-card--history .spread-subtitle {
+  font-size: 13px;
+  opacity: 0.9;
+}
+
+.spread-card.spread-card--history .spread-meta {
+  margin-top: 4px;
+  font-size: 12px;
+  color: rgba(255,255,255,0.48);
+}
+
+/* миниатюру карты делаем более “премиум” */
+.spread-card.spread-card--history .spread-icon__svg.spread-icon__thumb {
+  border-radius: 12px; /* мягче */
+  box-shadow:
+    0 0 0 1px rgba(255,255,255,0.12) inset,
+    0 18px 40px rgba(0,0,0,0.58);
+}
+
+.spread-card.spread-card--history .spread-icon__svg.spread-icon__thumb::after {
+  inset: -10px;
+  border-radius: 16px;
+  background: radial-gradient(circle at 50% 30%, rgba(255,255,255,0.22), transparent 58%);
+  opacity: 0.85;
+}
+
+/* лёгкая “аура” вокруг карты */
+.spread-card.spread-card--history .spread-icon__svg.spread-icon__thumb img {
+  filter: saturate(1.08) contrast(1.07)
+    drop-shadow(0 18px 28px rgba(0,0,0,0.55));
+}
+
+
+
+
+/* =================================================================================================
+   [28] HISTORY — card media (large, premium)
+================================================================================================= */
+
+.history-card-media {
+  display: inline-flex;           /* shrink to image */
+  align-items: center;
+  justify-content: center;
+
+  height: 96px;                   /* ⬅️ РАЗМЕР КАРТЫ */
+  width: auto;
+
+  border-radius: 4px;
+  overflow: hidden;
+  position: relative;
+
+  background: rgba(255,255,255,0.04);
+
+  box-shadow:
+    0 0 0 1px rgba(255,255,255,0.12) inset,
+    0 22px 46px rgba(0,0,0,0.55),
+    0 0 28px rgba(170, 120, 255, 0.14);
+
+  backdrop-filter: blur(6px);
+}
+
+/* подсветка / аура */
+.history-card-media::after {
+  content: "";
+  position: absolute;
+  inset: -14px;
+  border-radius: 22px;
+  pointer-events: none;
+
+  background: radial-gradient(
+    circle at 50% 30%,
+    rgba(255,255,255,0.25),
+    transparent 58%
+  );
+
+  opacity: 0.85;
+}
+
+/* сама карта */
+.history-card-image {
+  height: 100%;                   /* ⬅️ управляем размером тут */
+  width: auto;
+  display: block;
+
+  object-fit: cover;
+  border-radius: 4px;
+
+  filter:
+    saturate(1.1)
+    contrast(1.08)
+    drop-shadow(0 20px 32px rgba(0,0,0,0.6));
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+/* =============================================================================================
+   [THREE CARDS] — страница “Расклад по 3 картам”
+============================================================================================= */
+
+.threepage{
+  width:100%;
+  max-width:520px;
+  margin:0 auto;
+  display:flex;
+  flex-direction:column;
+  gap:14px;
+  padding-top:6px;
+}
+
+.threepage__top{
+  display:flex;
+  align-items:flex-start;
+  gap:12px;
+}
+
+.threepage__back{
+  flex:0 0 auto;
+  width:42px;
+  height:42px;
+  border-radius:14px;
+  padding:0;
+  display:grid;
+  place-items:center;
+}
+
+.threepage__title{
+  font-size:20px;
+  font-weight:800;
+  letter-spacing:0.2px;
+  line-height:1.1;
+}
+
+.threepage__sub{
+  margin-top:4px;
+  font-size:12.5px;
+  opacity:.78;
+  line-height:1.35;
+}
+
+.threecards-row{
+  display:flex;
+  justify-content:center;
+  gap:12px;
+  margin-top:6px;
+}
+
+.threecard{
+  width:92px;
+  aspect-ratio: 2 / 3.25;
+  border-radius:6px;
+  overflow:hidden;
+  background: rgba(255,255,255,0.06);
+  border:1px solid rgba(255,255,255,0.14);
+  box-shadow: 0 18px 45px rgba(0,0,0,0.45);
+  height: 160px;
+}
+
+.threecard img{
+  width:100%;
+  height:100%;
+  display:block;
+  object-fit:cover;
+}
+
+.threeform{
+  width: 100%;
+  display:flex;
+  flex-direction:column;
+  gap:12px;
+}
+
+.threehint{
+  font-size:12px;
+  opacity:.74;
+  padding:0 2px;
+  line-height:1.35;
+}
+
+
+.three-mix-area{
+  position: relative;
+  width: 100%;
+  height: 260px;
+
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  margin-top: 10px;
+  margin-bottom: 10px;
+}
+
+.three-mix-area::before{
+  content:"";
+  position:absolute;
+  inset:0;
+  pointer-events:none;
+  background: radial-gradient(circle at 30% 20%, rgba(255,255,255,0.12), transparent 55%);
+  opacity:.9;
+}
+
+.three-mix-card{
+  position: absolute;
+
+  width: 118px;
+  height: 182px;
+  border-radius: 18px;
+  overflow: hidden;
+
+  border: 1px solid rgba(255,255,255,0.12);
+  background: rgba(255,255,255,0.06);
+
+  box-shadow:
+    0 22px 60px rgba(0,0,0,0.55),
+    0 0 0 1px rgba(255,255,255,0.04) inset;
+
+  transform:
+    translate3d(var(--x), var(--y), 0)
+    rotate(var(--r))
+    scale(var(--s));
+
+  transition: transform 420ms cubic-bezier(.16, 1, .3, 1);
+  will-change: transform;
+}
+
+.three-mix-area.is-shuffling .three-mix-card{
+  transition-duration: 460ms;
+}
+
+.three-mix-card img{
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: cover;
+}
+
+.three-result{
+  display:flex;
+  flex-direction:column;
+  gap:12px;
+}
+
+.three-result-cards{
+  display:grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap:10px;
+}
+
+.three-mini{
+  border-radius:18px;
+  padding:12px;
+  background: rgba(255,255,255,0.06);
+  border:1px solid rgba(255,255,255,0.12);
+  box-shadow: 0 18px 60px rgba(0,0,0,0.22);
+}
+
+.three-mini__role{
+  font-size:11px;
+  opacity:.72;
+}
+
+.three-mini__name{
+  margin-top:2px;
+  font-size:13.5px;
+  font-weight:800;
+  line-height:1.15;
+}
+
+.three-mini__text{
+  margin-top:8px;
+  font-size:12px;
+  opacity:.86;
+  line-height:1.35;
+  white-space: pre-line;
+}
+
+/* чтобы свитчер типа вопроса выглядел плотнее */
+.seg--threekind .seg__btn{
+  font-size:12.5px;
+  padding: 10px 10px;
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+/* =============================================================================================
+  [28] MULTI-CARD SPREADS (3 CARDS / PAST-PRESENT-FUTURE)
+============================================================================================= */
+
+.threepage {
+  margin-top: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.threecards-row {
+  display: flex;
+  justify-content: center;
+  align-items: flex-end;
+  gap: 12px;
+  margin-top: 6px;
+}
+
+.threecard {
+  width: 96px;
+  aspect-ratio: 2 / 3;
+  border-radius: 14px;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  box-shadow: 0 18px 44px rgba(0, 0, 0, 0.45);
+}
+
+.threecard img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.threecards-row .threecard:nth-child(1) {
+  transform: translateY(8px) rotate(-7deg);
+}
+
+.threecards-row .threecard:nth-child(2) {
+  transform: translateY(0px) rotate(2deg);
+}
+
+.threecards-row .threecard:nth-child(3) {
+  transform: translateY(6px) rotate(8deg);
+}
+
+.threeform {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 8px;
+}
+
+.threehint {
+  margin-top: 6px;
+  font-size: 12px;
+  opacity: 0.75;
+  text-align: center;
+}
+
+.three-mix-area {
+  position: relative;
+  height: 240px;
+  margin-top: 4px;
+}
+
+.three-mix-card {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 112px;
+  aspect-ratio: 2 / 3;
+  border-radius: 16px;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.06);
+  box-shadow: 0 18px 44px rgba(0, 0, 0, 0.48);
+
+  transform:
+    translate(-50%, -50%)
+    translate(var(--x), var(--y))
+    rotate(var(--r))
+    scale(var(--s));
+  transition: transform 380ms cubic-bezier(.16, 1, .3, 1);
+}
+
+.three-mix-card img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.three-mix-area.is-shuffling .three-mix-card {
+  filter: saturate(1.12) contrast(1.05);
+}
+
+.spread-result {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding-bottom: 18px;
+}
+
+
+/* =================================================================================================
+   [29] SPREAD PAGES — full height + result pinned to bottom
+   (3 карты + Прошлое/Настоящее/Будущее)
+================================================================================================= */
+
+.threepage,
+.ppfpage {
+  width: 100%;
+
+  /* важное: растягиваем страницу на доступную высоту внутри .content */
+  flex: 1 0 auto;
+
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+
+  min-height: 0;
+}
+
+.three-result {
+  width: 100%;
+  margin-top: auto;
+  padding-bottom: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.three-result .result-layout__desc {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.three-result .result-card {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+/* =================================================================================================
+   [30] PHOTO ANALYSIS PAGE
+================================================================================================= */
+
+.photo-page {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.photo-top {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.photo-top__title {
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: rgba(255, 255, 255, 0.86);
+  text-shadow: 0 12px 28px rgba(0, 0, 0, 0.48);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.photo-actions {
+  width: 100%;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.photo-input {
+  display: none;
+}
+
+.photo-preview,
+.photo-placeholder {
+  border-radius: 18px;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.06);
+  box-shadow: 0 18px 44px rgba(0, 0, 0, 0.48);
+}
+
+.photo-preview img {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: cover;
+}
+
+.photo-placeholder {
+  padding: 16px 14px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+
+.photo-placeholder__icon {
+  width: 44px;
+  height: 44px;
+  display: grid;
+  place-items: center;
+  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.06);
+  color: rgba(255, 255, 255, 0.9);
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.42);
+}
+
+.photo-placeholder__icon svg {
+  width: 22px;
+  height: 22px;
+}
+
+.photo-placeholder__text {
+  font-size: 14px;
+  font-weight: 700;
+  color: rgba(255, 255, 255, 0.9);
+}
+
+.photo-placeholder__sub {
+  font-size: 12px;
+  opacity: 0.68;
+  max-width: 460px;
+  line-height: 1.35;
+}
+
+.photo-hint {
+  font-size: 12px;
+  opacity: 0.7;
+  line-height: 1.35;
+}
+
+.photo-cta {
+  width: 100%;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 10px;
+  align-items: center;
+}
+
+.photo-error {
+  width: 100%;
+  padding: 12px 14px;
+  border-radius: 16px;
+  border: 1px solid rgba(255, 115, 145, 0.22);
+  background: rgba(255, 105, 135, 0.10);
+  color: rgba(255, 210, 220, 0.95);
+  text-shadow: 0 12px 28px rgba(0, 0, 0, 0.48);
+  box-sizing: border-box;
+}
+
+.photo-result {
+  width: 100%;
+  padding-bottom: 18px;
+}
+
+/* =================================================================================================
+   [31] THEME REFRESH (GLASS, BUT NOT GRAY)
+================================================================================================= */
+
+.app {
+  background:
+    radial-gradient(1200px 560px at 50% -140px, rgba(96, 128, 255, 0.34), transparent 68%),
+    radial-gradient(980px 540px at 12% 112%, rgba(139, 84, 255, 0.26), transparent 72%),
+    linear-gradient(180deg, #07112c 0%, #0a1634 38%, #0f1f42 100%);
+}
+
+.content {
+  --glass-fill: linear-gradient(180deg, rgba(34, 51, 91, 0.52), rgba(27, 42, 79, 0.62));
+  --glass-stroke: rgba(164, 187, 255, 0.34);
+  --glass-stroke-2: rgba(255, 255, 255, 0.12);
+  --shadow-soft: 0 20px 46px rgba(4, 8, 24, 0.58);
+  --shadow-mid: 0 12px 28px rgba(5, 10, 30, 0.48);
+}
+
+.content h1 {
+  color: rgba(248, 251, 255, 0.96);
+  text-shadow: 0 14px 36px rgba(2, 8, 28, 0.64);
+}
+
+.content p {
+  color: rgba(218, 226, 247, 0.78);
+  text-shadow: 0 10px 24px rgba(4, 10, 30, 0.58);
+}
+
+.home-section-title {
+  width: 100%;
+  margin: 2px 0 2px;
+  font-size: 31px;
+  font-weight: 800;
+  line-height: 1.15;
+  letter-spacing: -0.01em;
+  text-align: left;
+  color: rgba(245, 249, 255, 0.96);
+  text-shadow: 0 10px 28px rgba(3, 9, 29, 0.56);
+}
+
+.seg {
+  border: 1px solid rgba(166, 189, 255, 0.34);
+  background:
+    linear-gradient(180deg, rgba(30, 46, 83, 0.72), rgba(22, 37, 68, 0.78));
+  box-shadow:
+    0 16px 34px rgba(2, 8, 24, 0.42),
+    0 0 0 1px rgba(255, 255, 255, 0.03) inset;
+}
+
+.seg__pill {
+  background: linear-gradient(180deg, rgba(138, 157, 197, 0.56), rgba(108, 126, 166, 0.52));
+  border: 1px solid rgba(205, 220, 255, 0.4);
+  box-shadow:
+    0 14px 30px rgba(4, 8, 23, 0.42),
+    inset 0 1px 0 rgba(255, 255, 255, 0.25);
+}
+
+.seg__btn {
+  color: rgba(214, 223, 245, 0.72);
+}
+
+.seg__btn.is-active {
+  color: rgba(255, 255, 255, 0.98);
+}
+
+.card-day {
+  border: 1px solid rgba(179, 201, 255, 0.26);
+  box-shadow:
+    0 18px 44px rgba(3, 8, 25, 0.45),
+    0 0 0 1px rgba(255, 255, 255, 0.06) inset;
+}
+
+.card-day:hover {
+  transform: translateY(-1px);
+}
+
+.card-day--sun {
+  background:
+    linear-gradient(94deg, rgba(255, 169, 23, 0.96) 0%, rgba(232, 125, 0, 0.94) 100%);
+  border-color: rgba(255, 205, 117, 0.46);
+}
+
+.card-day--photo {
+  background:
+    linear-gradient(98deg, rgba(153, 102, 255, 0.95) 0%, rgba(120, 66, 255, 0.93) 56%, rgba(96, 60, 255, 0.9) 100%);
+  border-color: rgba(188, 159, 255, 0.48);
+}
+
+.card-day--sun .card-day__media {
+  background: radial-gradient(100px 100px at 75% 50%, rgba(255, 255, 255, 0.2), rgba(255, 255, 255, 0));
+}
+
+.card-day--photo .card-day__media {
+  background: radial-gradient(100px 100px at 75% 50%, rgba(255, 255, 255, 0.2), rgba(255, 255, 255, 0));
+}
+
+.card-day__title {
+  color: rgba(255, 255, 255, 0.98);
+  text-shadow: 0 8px 22px rgba(8, 10, 22, 0.38);
+}
+
+.card-day__subtitle {
+  color: rgba(245, 247, 255, 0.88);
+  text-shadow: 0 8px 18px rgba(8, 10, 22, 0.3);
+}
+
+.card-day__img {
+  width: 56px;
+  filter: drop-shadow(0 8px 14px rgba(8, 10, 24, 0.36));
+}
+
+.ask-glass {
+  border: 1px solid rgba(152, 176, 246, 0.3);
+  background:
+    linear-gradient(180deg, rgba(30, 45, 80, 0.74), rgba(24, 36, 68, 0.78));
+  box-shadow:
+    0 18px 40px rgba(4, 9, 24, 0.42),
+    0 0 0 1px rgba(255, 255, 255, 0.04) inset;
+}
+
+.ask-input::placeholder {
+  color: rgba(207, 219, 246, 0.62);
+}
+
+.ask-mic {
+  border: 1px solid rgba(191, 167, 255, 0.42);
+  background: linear-gradient(180deg, rgba(145, 90, 255, 0.92), rgba(116, 70, 245, 0.95));
+  box-shadow:
+    0 14px 30px rgba(45, 18, 96, 0.42),
+    0 0 0 1px rgba(255, 255, 255, 0.12) inset;
+}
+
+.spread-card {
+  border: 1px solid rgba(146, 173, 240, 0.26);
+  background:
+    linear-gradient(180deg, rgba(33, 48, 83, 0.72), rgba(25, 38, 69, 0.8));
+  box-shadow:
+    0 12px 30px rgba(4, 10, 27, 0.36),
+    0 0 0 1px rgba(255, 255, 255, 0.03) inset;
+}
+
+.spread-card:hover {
+  border-color: rgba(190, 210, 255, 0.36);
+}
+
+.spread-card.is-active {
+  border-color: rgba(255, 190, 76, 0.98);
+  box-shadow:
+    0 20px 46px rgba(64, 42, 10, 0.34),
+    0 0 0 1px rgba(255, 214, 143, 0.46) inset,
+    0 0 0 2px rgba(255, 170, 40, 0.3);
+}
+
+.spread-title {
+  color: rgba(247, 250, 255, 0.96);
+}
+
+.spread-subtitle {
+  color: rgba(214, 224, 247, 0.74);
+}
+
+.spread-meta {
+  color: rgba(187, 201, 233, 0.64);
+}
+
+/* =================================================================================================
+   [32] HOME ALIGNMENT TUNING
+================================================================================================= */
+
+.content {
+  align-items: stretch;
+  gap: 16px;
+  padding-left: max(18px, 4vw);
+  padding-right: max(18px, 4vw);
+}
+
+.content > h1,
+.content > p {
+  text-align: center;
+}
+
+.home-section-title {
+  width: var(--block-w);
+  margin: 4px 0 0;
+  padding-left: 2px;
+  font-size: clamp(24px, 5.6vw, 30px);
+}
+
+.nav-pages,
+.seg,
+.ask-wrap,
+.spread-list,
+.glass-cta {
+  width: var(--block-w);
+}
+
+.nav-page {
+  align-items: stretch;
+  gap: 16px;
+}
+
+.seg__btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+}
+
+.card-day {
+  height: 126px;
+}
+
+.card-day__text {
+  top: 0;
+  bottom: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 4px;
+  padding-left: 16px;
+  padding-right: calc(16px + 124px);
+}
+
+.card-day__title {
+  line-height: 1.05;
+  white-space: normal;
+}
+
+.card-day__subtitle {
+  margin-top: 0;
+}
+
+.card-day__media {
+  width: 124px;
+}
+
+.ask-glass {
+  min-height: 92px;
+  align-items: center;
+}

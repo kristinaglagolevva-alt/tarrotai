@@ -622,9 +622,10 @@ body,
 .seg {
   width: 100%;
   --h: 44px;
+  --seg-cols: 3;
   height: var(--h);
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(var(--seg-cols), 1fr);
 
   position: relative;
   border-radius: 999px;
@@ -649,7 +650,7 @@ body,
   left: 2px;
   right: 2px;
   height: calc(100% - 6px);
-  width: calc((100% - 9px) / 3);
+  width: calc((100% - 4px) / var(--seg-cols));
   border-radius: 999px;
   z-index: 1;
 
@@ -2975,6 +2976,11 @@ body,
 .seg--threekind .seg__btn,
 .seg--ppf .seg__btn {
   padding: 0 10px 1px;
+}
+
+.seg--topics .seg__btn {
+  font-size: 13px;
+  padding: 0 6px 1px;
 }
 
 .card-day {

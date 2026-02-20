@@ -328,12 +328,13 @@ function MarkdownText({ text, className = '' }: { text?: string; className?: str
    [4] КОНФИГ UI (ТЕМЫ / РАСКЛАДЫ)
 ================================================================================================= */
 
-type Topic = 'relations' | 'career' | 'finance'
+type Topic = 'relations' | 'career' | 'finance' | 'other'
 
 const TOPICS: { id: Topic; label: string }[] = [
   { id: 'relations', label: 'Отношения' },
   { id: 'career', label: 'Карьера' },
   { id: 'finance', label: 'Финансы' },
+  { id: 'other', label: 'Другое' },
 ]
 
 type SpreadId = 'card_of_day' | 'past_present_future' | 'three_cards' | 'decision'
@@ -3922,9 +3923,10 @@ useEffect(() => {
                   <h2 className="home-section-title">Выберите категорию вопроса</h2>
 
                   <div
-                    className={`seg ${isBumping ? 'is-bump' : ''}`}
+                    className={`seg seg--topics ${isBumping ? 'is-bump' : ''}`}
                     data-bump={bump}
                     style={{
+                      ['--seg-cols' as any]: TOPICS.length,
                       ['--i' as any]: activeIndex,
                       ['--from' as any]: prevIndex,
                     }}
@@ -4337,9 +4339,10 @@ useEffect(() => {
 
               {/* темы (используем тот же переключатель) */}
               <div
-                className={`seg ${isBumping ? 'is-bump' : ''}`}
+                className={`seg seg--topics ${isBumping ? 'is-bump' : ''}`}
                 data-bump={bump}
                 style={{
+                  ['--seg-cols' as any]: TOPICS.length,
                   ['--i' as any]: activeIndex,
                   ['--from' as any]: prevIndex,
                 }}
@@ -4526,9 +4529,10 @@ useEffect(() => {
                     </div>
                     {/* [CARD DAY] SWITCHER ТЕМЫ: Отношения / Карьера / Финансы */}
                     <div
-                      className={`seg ${isBumping ? 'is-bump' : ''}`}
+                      className={`seg seg--topics ${isBumping ? 'is-bump' : ''}`}
                       data-bump={bump}
                       style={{
+                        ['--seg-cols' as any]: TOPICS.length,
                         ['--i' as any]: activeIndex,
                         ['--from' as any]: prevIndex,
                       }}

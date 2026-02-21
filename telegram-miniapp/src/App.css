@@ -3193,8 +3193,8 @@ body,
 .home-head.is-subtab {
   justify-content: center;
   align-items: center;
-  padding-top: calc(env(safe-area-inset-top, 0px) + 52px);
-  min-height: 48px;
+  padding-top: calc(env(safe-area-inset-top, 0px) + 42px);
+  min-height: 44px;
 }
 
 .home-head__center-title {
@@ -3204,6 +3204,10 @@ body,
   letter-spacing: -0.02em;
   color: rgba(247, 252, 255, 0.98);
   text-shadow: 0 14px 30px rgba(2, 8, 24, 0.56);
+}
+
+.home-head.is-subtab + .nav-pages {
+  margin-top: -12px;
 }
 
 .home-head__brand {
@@ -3297,7 +3301,7 @@ body,
   justify-content: flex-start;
   gap: 10px;
   min-height: 30px;
-  margin-top: -2px;
+  margin-top: -4px;
   margin-bottom: 8px;
 }
 
@@ -3329,6 +3333,20 @@ body,
   line-height: 1.05;
   font-weight: 730;
   letter-spacing: -0.01em;
+}
+
+.nav-page[data-page='profile'] {
+  padding-top: 0;
+  gap: 5px;
+}
+
+.nav-page[data-page='profile'] .subtab-toolbar {
+  margin-top: -18px;
+  margin-bottom: 0;
+}
+
+.nav-page[data-page='profile'] .profile-shell {
+  margin-top: -20px;
 }
 
 .subtab-back:active {

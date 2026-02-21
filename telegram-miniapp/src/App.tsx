@@ -23,6 +23,7 @@ import cameraIcon from './assets/icons/camera.png'
 import futureIcon from './assets/icons/future_icon.png'
 import threeCardIcon from './assets/icons/three_card_icon.png'
 import selectCardIcon from './assets/icons/select_icon.png'
+import spellBookIcon from './assets/icons/spell-book.png'
 
 // ✅ ЗАДНЯЯ СТОРОНА КАРТЫ — ВСЕГДА ТОЛЬКО ЭТА
 import backCardImg from './assets/cards/back/back.png'
@@ -534,18 +535,6 @@ function SpreadIcon({ kind }: { kind: 'sun' | 'clock' | 'cards' | 'branch' }) {
         strokeWidth="1.8"
         strokeLinecap="round"
       />
-    </svg>
-  )
-}
-
-function SpellbookIcon() {
-  return (
-    <svg viewBox="0 0 64 64" aria-hidden="true">
-      <path d="M12 37c5-3 10-5 20-5s15 2 20 5M12 37v13c5-3 10-5 20-5s15 2 20 5V37" fill="none" stroke="currentColor" strokeWidth="3.6" strokeLinecap="round" strokeLinejoin="round" />
-      <path d="M32 33v17" fill="none" stroke="currentColor" strokeWidth="3.4" strokeLinecap="round" />
-      <path d="M32 23c2.2-5.2 7.3-7.8 12.3-7.6M32 23c-2.2-5.2-7.3-7.8-12.3-7.6" fill="none" stroke="currentColor" strokeWidth="3.2" strokeLinecap="round" />
-      <path d="M32 8v6M22 11l2.8 2.8M42 11l-2.8 2.8M18 19h4M42 19h4" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
-      <circle cx="32" cy="21" r="1.8" fill="currentColor" />
     </svg>
   )
 }
@@ -4312,7 +4301,7 @@ useEffect(() => {
                     <span className="glass-cta__inner">
                       <span className="glass-cta__rim" aria-hidden="true" />
                       <span className="glass-cta__icon">
-                        <SpellbookIcon />
+                        <img src={spellBookIcon} alt="" />
                       </span>
                       <span className="glass-cta__text">Начать расклад</span>
                       <span className="glass-cta__spark" aria-hidden="true" />

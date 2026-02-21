@@ -617,6 +617,10 @@ body,
 }
 
 .glass-cta--hero .glass-cta__icon img {
+  width: 24px;
+  height: 24px;
+  display: block;
+  object-fit: contain;
   filter: drop-shadow(0 8px 16px rgba(9, 16, 42, 0.42));
 }
 

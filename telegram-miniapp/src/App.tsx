@@ -604,7 +604,10 @@ function PremiumFlipCard({
     return n
   }
 
-  const [front, setFront] = useState(() => pickNext())
+  const [front, setFront] = useState(() => {
+    if (lockFront && lockedFrontUrl) return lockedFrontUrl
+    return pickNext()
+  })
 
   const halfTimeoutRef = useRef<number | null>(null)
   const cycleIntervalRef = useRef<number | null>(null)
@@ -4924,7 +4927,7 @@ useEffect(() => {
               key={pflipMountKey}
               frontUrls={SHUFFLE_FRONT_URLS}
               backUrl={backCardImg}
-              active={!shakenOnce && !stopRequested && !cardDayLoading}
+              active={!shakenOnce && !stopRequested && !cardDayLoading && dailyFrontReady}
               durationMs={2600}
               intensity={cardDayLoading ? 0 : shakeEnabled ? shuffleProgress : 0}
               clickable={shakenOnce}
@@ -4936,9 +4939,9 @@ useEffect(() => {
               scale={pflipScale}
               top={pflipTop}
               onFrontChange={setSelectedFrontUrl}
-              // Всегда показываем рубашку до reveal, чтобы не было "подмены" фронта в середине вращения.
+              // Фиксируем одну карту (дневную), чтобы в анимации не было рандомной подмены лица.
               lockFront={true}
-              lockedFrontUrl={shakenOnce || cardRevealed ? (dailyFrontUrl || backCardImg) : backCardImg}
+              lockedFrontUrl={dailyFrontReady ? (dailyFrontUrl || backCardImg) : backCardImg}
             />
 
             {!isResult && !cardDayLoading && (

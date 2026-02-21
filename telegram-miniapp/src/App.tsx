@@ -608,6 +608,12 @@ type BillingStatus = {
 const BOT_USERNAME =
   ((import.meta as any).env?.VITE_BOT_USERNAME as string | undefined)?.trim() || 'Tarot_AI_Bot'
 const BOT_PAYMENT_URL = `https://t.me/${BOT_USERNAME}?start=menu`
+const SUPPORT_URL =
+  ((import.meta as any).env?.VITE_SUPPORT_URL as string | undefined)?.trim() || `https://t.me/${BOT_USERNAME}`
+const TERMS_URL =
+  ((import.meta as any).env?.VITE_TERMS_URL as string | undefined)?.trim() || 'https://tarrotai.ru/terms'
+const PRIVACY_URL =
+  ((import.meta as any).env?.VITE_PRIVACY_URL as string | undefined)?.trim() || 'https://tarrotai.ru/privacy'
 
 export default function App() {
   /* =============================================================================================
@@ -1524,6 +1530,18 @@ useEffect(() => {
 
   const toggleProfileTab = () => {
     onPickNav(navTab === 'profile' ? 'main' : 'profile')
+  }
+
+  const handleProfileLogout = () => {
+    try {
+      localStorage.removeItem('jwt')
+    } catch {}
+
+    setToken(null)
+    setUser(null)
+    setBilling(null)
+    setOpenedReadingId(null)
+    onPickNav('main')
   }
   useEffect(() => {
     let mounted = true
@@ -3777,6 +3795,19 @@ useEffect(() => {
      [26] RENDER
   ============================================================================================= */
 
+  const profileName =
+    user?.first_name || user?.last_name
+      ? `${user?.first_name || ''}${user?.last_name ? ` ${user.last_name}` : ''}`.trim()
+      : 'Профиль'
+  const profileUsername = user?.username ? `@${user.username}` : '@username'
+  const freeLimit = Math.max(1, Number(billing?.free_limit ?? 5))
+  const freeLeft = Math.max(0, Number(billing?.free_left ?? 0))
+  const paidBalance = Math.max(0, Number(billing?.paid_readings_balance ?? 0))
+  const subActive = !!billing?.has_active_subscription
+  const subLabel = subActive
+    ? `Активна до ${formatRuDate(billing?.subscription_until)}`
+    : 'Не активна'
+
   return (
     <div className="app" ref={appRef}>
       <canvas className="stars-canvas" ref={starsCanvasRef} aria-hidden="true" />
@@ -4247,78 +4278,105 @@ useEffect(() => {
                     <div className="subtab-title">Профиль</div>
                   </div>
 
-                  <div className="profile-card">
-                    <div className="profile-card__head">
-                      <div className="profile-card__avatar" aria-hidden={!user?.photo_url}>
+                  <div className="profile-shell">
+                    <div className="profile-hero">
+                      <div className="profile-hero__avatar" aria-hidden={!user?.photo_url}>
                         {user?.photo_url ? (
                           <img
                             src={user.photo_url}
                             alt=""
-                            className="profile-card__avatar-image"
+                            className="profile-hero__avatar-image"
                           />
                         ) : (
-                          <div className="profile-card__avatar-fallback">
+                          <div className="profile-hero__avatar-fallback">
                             {(user?.first_name?.[0] || user?.username?.[0] || 'U').toUpperCase()}
                           </div>
                         )}
                       </div>
 
-                      <div className="profile-card__identity">
-                        <div className="profile-card__name">
-                          {user?.first_name || user?.last_name
-                            ? `${user?.first_name || ''}${user?.last_name ? ` ${user.last_name}` : ''}`.trim()
-                            : 'Профиль'}
-                        </div>
-                        <div className="profile-card__username">
-                          {user?.username ? `@${user.username}` : 'username не указан'}
-                        </div>
-                      </div>
+                      <div className="profile-hero__name">{profileName}</div>
+                      <div className="profile-hero__username">{profileUsername}</div>
                     </div>
 
-                    <p className="profile-card__note">
-                      Карта дня доступна 1 раз в сутки. Остальные расклады: {billing?.free_limit ?? 5} бесплатных в месяц, далее по оплате.
-                    </p>
-
-                    <div className="profile-card__stats">
-                      <div className="profile-stat">
-                        <div className="profile-stat__label">Бесплатно в этом месяце</div>
-                        <div className="profile-stat__value">
-                          {Math.max(0, Number(billing?.free_left ?? 0))} из {billing?.free_limit ?? 5}
-                        </div>
+                    <section className="profile-panel profile-panel--premium" aria-label="Подписка">
+                      <div className="profile-panel__title">
+                        <span className="profile-panel__emoji" aria-hidden="true">💎</span>
+                        Premium / Подписка AI Tarot
+                      </div>
+                      <div className="profile-panel__status">
+                        Статус: <span className={`profile-status ${subActive ? 'is-active' : 'is-inactive'}`}>{subLabel}</span>
                       </div>
 
-                      <div className="profile-stat">
-                        <div className="profile-stat__label">Платный баланс</div>
-                        <div className="profile-stat__value">
-                          {Math.max(0, Number(billing?.paid_readings_balance ?? 0))} раскладов
-                        </div>
+                      <a href={BOT_PAYMENT_URL} target="_blank" rel="noreferrer" className="profile-link-row">
+                        <span className="profile-link-row__left">Управление подпиской</span>
+                        <span className="profile-link-row__chevron" aria-hidden="true">›</span>
+                      </a>
+
+                      <a href={BOT_PAYMENT_URL} target="_blank" rel="noreferrer" className="profile-link-row">
+                        <span className="profile-link-row__left">Как отменить подписку?</span>
+                        <span className="profile-link-row__chevron" aria-hidden="true">›</span>
+                      </a>
+                    </section>
+
+                    <section className="profile-piece" aria-label="Штучные расклады">
+                      <div className="profile-piece__info">
+                        <div className="profile-piece__title">🔮 Штучные расклады</div>
+                        <div className="profile-piece__meta">Доступно: {paidBalance} расклада</div>
+                        <div className="profile-piece__submeta">Бесплатно в этом месяце: {freeLeft} из {freeLimit}</div>
                       </div>
 
-                      <div className="profile-stat">
-                        <div className="profile-stat__label">Подписка</div>
-                        <div className="profile-stat__value">
-                          {billing?.has_active_subscription
-                            ? `Активна до ${formatRuDate(billing?.subscription_until)}`
-                            : 'Не активна'}
-                        </div>
+                      <a
+                        href={BOT_PAYMENT_URL}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="profile-piece__cta"
+                      >
+                        Докупить
+                        <br />
+                        расклады
+                      </a>
+                    </section>
+
+                    <section className="profile-panel" aria-label="Настройки">
+                      <div className="profile-group-title">Настройки</div>
+
+                      <div className="profile-link-row profile-link-row--static">
+                        <span className="profile-link-row__left">🌐 Язык приложения (Draft)</span>
+                        <span className="profile-link-row__right">Русский</span>
+                        <span className="profile-link-row__chevron" aria-hidden="true">›</span>
                       </div>
-                    </div>
 
-                    <div className="profile-card__badges">
-                      <span className="profile-pill profile-pill--ok">Telegram подключен</span>
-                      <span className={`profile-pill ${billing?.has_active_subscription ? 'profile-pill--sub' : 'profile-pill--muted'}`}>
-                        {billing?.has_active_subscription ? 'Подписка активна' : 'Подписки нет'}
-                      </span>
-                    </div>
+                      <div className="profile-link-row profile-link-row--static">
+                        <span className="profile-link-row__left">✈️ Привязка Telegram</span>
+                        <span className={`profile-link-row__right ${token ? 'is-ok' : 'is-muted'}`}>
+                          {token ? 'Подключен' : 'Не подключен'}
+                        </span>
+                        <span className="profile-link-row__chevron" aria-hidden="true">›</span>
+                      </div>
+                    </section>
 
-                    <a
-                      href={BOT_PAYMENT_URL}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="profile-card__cta"
-                    >
-                      Открыть бота для оплаты
-                    </a>
+                    <section className="profile-panel" aria-label="Информация и поддержка">
+                      <div className="profile-group-title">Информация и поддержка</div>
+
+                      <a href={SUPPORT_URL} target="_blank" rel="noreferrer" className="profile-link-row">
+                        <span className="profile-link-row__left">💬 Написать в поддержку</span>
+                        <span className="profile-link-row__chevron" aria-hidden="true">›</span>
+                      </a>
+
+                      <a href={TERMS_URL} target="_blank" rel="noreferrer" className="profile-link-row">
+                        <span className="profile-link-row__left">📄 Пользовательское соглашение</span>
+                        <span className="profile-link-row__chevron" aria-hidden="true">›</span>
+                      </a>
+
+                      <a href={PRIVACY_URL} target="_blank" rel="noreferrer" className="profile-link-row">
+                        <span className="profile-link-row__left">🔒 Политика конфиденциальности</span>
+                        <span className="profile-link-row__chevron" aria-hidden="true">›</span>
+                      </a>
+                    </section>
+
+                    <button type="button" className="profile-logout-btn" onClick={handleProfileLogout}>
+                      Выйти из аккаунта
+                    </button>
                   </div>
                 </div>
               </div>

@@ -283,7 +283,7 @@ class BillingStatusOut(BaseModel):
 
 
 class CardOfDayCreateIn(BaseModel):
-    topic: str = "relations"
+    topic: str = "other"
     question: str = ""
     consider_reversed: bool = True
     deck_size: int = 78
@@ -319,7 +319,7 @@ class ForcedReadingCardIn(BaseModel):
 
 class ReadingCreateIn(BaseModel):
     spread_type: Literal["ppf", "three_cards", "decision", "custom"] = "three_cards"
-    topic: str = "relations"
+    topic: str = "other"
     question: str = ""
     consider_reversed: bool = True
     deck_size: int = 78
@@ -364,7 +364,7 @@ class PhotoAnalysisOut(BaseModel):
     """
     description: str
     cards: List[ReadingCard] = Field(default_factory=list)
-    topic: str = "relations"
+    topic: str = "other"
     question: str = ""
     spread_type: str = "photo_analysis"
 
@@ -763,7 +763,7 @@ async def photo_analysis(
     db: AsyncSession = Depends(get_db),
     image: Optional[UploadFile] = File(default=None),
     file: Optional[UploadFile] = File(default=None),
-    topic: str = Form(default="relations"),
+    topic: str = Form(default="other"),
     question: str = Form(default=""),
     extra_context: str = Form(default=""),
     consider_reversed: bool = Form(default=True),

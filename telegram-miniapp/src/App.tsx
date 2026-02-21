@@ -18,7 +18,6 @@ import {
 
 
 import micIcon from './assets/icons/microphone.svg'
-import buttonIcon from './assets/icons/button_icon.png'
 import cardDayIcon from './assets/icons/card_day_icon.png'
 import cameraIcon from './assets/icons/camera.png'
 import futureIcon from './assets/icons/future_icon.png'
@@ -331,11 +330,120 @@ function MarkdownText({ text, className = '' }: { text?: string; className?: str
 type Topic = 'relations' | 'career' | 'finance' | 'other'
 
 const TOPICS: { id: Topic; label: string }[] = [
+  { id: 'other', label: 'Другое' },
   { id: 'relations', label: 'Отношения' },
   { id: 'career', label: 'Карьера' },
   { id: 'finance', label: 'Финансы' },
-  { id: 'other', label: 'Другое' },
 ]
+
+type SafetyKind = 'medical' | 'crisis'
+
+type SafetyNoticeData = {
+  kind: SafetyKind
+  title: string
+  message: string
+  contacts: string[]
+}
+
+const SELF_HARM_RE = /суицид|самоубий|поконч(ить|у)\s+с\s+собой|не\s+хочу\s+жить|убить\s+себя|самоповреж|self[-\s]?harm|suicid|kill\s+myself|end\s+my\s+life/i
+const MEDICAL_RE = /болезн|заболев|симптом|диагноз|лечени|лекарств|температур|боль|депресси|тревог|паник|врач|doctor|symptom|diagnos|disease|illness|medicine|panic|anxiety/i
+
+const RUSSIA_TZ_RE = /Europe\/(Moscow|Kaliningrad|Kirov|Samara|Volgograd|Astrakhan|Ulyanovsk)|Asia\/(Yekaterinburg|Omsk|Novosibirsk|Barnaul|Tomsk|Krasnoyarsk|Irkutsk|Yakutsk|Vladivostok|Magadan|Sakhalin|Kamchatka|Anadyr)/i
+const US_TZ_RE = /America\/(New_York|Chicago|Denver|Los_Angeles|Anchorage|Phoenix|Detroit|Indiana|Adak|Boise|Juneau|Sitka|Metlakatla|Yakutat|Nome)/i
+
+const getRuntimeLocale = () => {
+  const tgLang = String((window as any)?.Telegram?.WebApp?.initDataUnsafe?.user?.language_code || '').trim().toLowerCase()
+  if (tgLang) return tgLang
+  return String(navigator.language || '').trim().toLowerCase()
+}
+
+const getRuntimeTimeZone = () => {
+  try {
+    return String(Intl.DateTimeFormat().resolvedOptions().timeZone || '')
+  } catch {
+    return ''
+  }
+}
+
+const buildSafetyNotice = (questionRaw: string): SafetyNoticeData | null => {
+  const question = String(questionRaw || '').trim()
+  if (!question) return null
+
+  const isCrisis = SELF_HARM_RE.test(question)
+  const isMedical = isCrisis || MEDICAL_RE.test(question)
+  if (!isMedical) return null
+
+  const locale = getRuntimeLocale()
+  const tz = getRuntimeTimeZone()
+  const isRuRegion = locale.startsWith('ru') || RUSSIA_TZ_RE.test(tz)
+  const isUzRegion = locale.startsWith('uz') || /Asia\/Tashkent/i.test(tz)
+  const isUsRegion = locale.startsWith('en-us') || US_TZ_RE.test(tz)
+  const isEnglish = locale.startsWith('en')
+
+  if (isCrisis) {
+    if (isUsRegion) {
+      return {
+        kind: 'crisis',
+        title: 'Safety first',
+        message: 'This looks like a crisis topic. Please contact emergency help right now and talk to a live specialist.',
+        contacts: ['US/Canada Suicide & Crisis Lifeline: 988', 'Emergency services: 911'],
+      }
+    }
+    if (isUzRegion) {
+      return {
+        kind: 'crisis',
+        title: 'Важно',
+        message: 'Похоже на кризисный вопрос. Пожалуйста, срочно обратитесь за живой помощью к специалисту.',
+        contacts: ['Экстренные службы: 112', 'Скорая медицинская помощь: 103'],
+      }
+    }
+    if (isRuRegion || !isEnglish) {
+      return {
+        kind: 'crisis',
+        title: 'Важно',
+        message: 'Похоже на кризисный вопрос. Пожалуйста, срочно обратитесь за живой помощью к специалисту.',
+        contacts: ['Экстренные службы: 112', 'Скорая медицинская помощь: 103'],
+      }
+    }
+    return {
+      kind: 'crisis',
+      title: 'Safety first',
+      message: 'This looks like a crisis topic. Please contact your local emergency service now.',
+      contacts: ['Emergency services: local emergency number (for example 112/911)'],
+    }
+  }
+
+  if (isUsRegion) {
+    return {
+      kind: 'medical',
+      title: 'Medical note',
+      message: 'This question may need medical evaluation. Please contact a licensed doctor for diagnosis and treatment.',
+      contacts: ['Urgent emergency: 911'],
+    }
+  }
+  if (isUzRegion) {
+    return {
+      kind: 'medical',
+      title: 'Медицинская памятка',
+      message: 'Вопрос может требовать медицинской оценки. Пожалуйста, обратитесь к врачу для точной диагностики.',
+      contacts: ['Скорая медицинская помощь: 103', 'Экстренные службы: 112'],
+    }
+  }
+  if (isRuRegion || !isEnglish) {
+    return {
+      kind: 'medical',
+      title: 'Медицинская памятка',
+      message: 'Вопрос может требовать медицинской оценки. Пожалуйста, обратитесь к врачу для точной диагностики.',
+      contacts: ['Скорая медицинская помощь: 103', 'Экстренные службы: 112'],
+    }
+  }
+  return {
+    kind: 'medical',
+    title: 'Medical note',
+    message: 'This question may need medical evaluation. Please contact a licensed doctor for diagnosis and treatment.',
+    contacts: ['Emergency services: local emergency number'],
+  }
+}
 
 type SpreadId = 'card_of_day' | 'past_present_future' | 'three_cards' | 'decision'
 
@@ -426,6 +534,18 @@ function SpreadIcon({ kind }: { kind: 'sun' | 'clock' | 'cards' | 'branch' }) {
         strokeWidth="1.8"
         strokeLinecap="round"
       />
+    </svg>
+  )
+}
+
+function SpellbookIcon() {
+  return (
+    <svg viewBox="0 0 64 64" aria-hidden="true">
+      <path d="M12 37c5-3 10-5 20-5s15 2 20 5M12 37v13c5-3 10-5 20-5s15 2 20 5V37" fill="none" stroke="currentColor" strokeWidth="3.6" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M32 33v17" fill="none" stroke="currentColor" strokeWidth="3.4" strokeLinecap="round" />
+      <path d="M32 23c2.2-5.2 7.3-7.8 12.3-7.6M32 23c-2.2-5.2-7.3-7.8-12.3-7.6" fill="none" stroke="currentColor" strokeWidth="3.2" strokeLinecap="round" />
+      <path d="M32 8v6M22 11l2.8 2.8M42 11l-2.8 2.8M18 19h4M42 19h4" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
+      <circle cx="32" cy="21" r="1.8" fill="currentColor" />
     </svg>
   )
 }
@@ -872,9 +992,9 @@ useEffect(() => {
      [11] ВЫБОР ТЕМЫ (SEG)
   ============================================================================================= */
 
-  const [topic, setTopic] = useState<Topic>('relations')
-  const prevTopicRef = useRef<Topic>('relations')
-  const [prevTopic, setPrevTopic] = useState<Topic>('relations')
+  const [topic, setTopic] = useState<Topic>('other')
+  const prevTopicRef = useRef<Topic>('other')
+  const [prevTopic, setPrevTopic] = useState<Topic>('other')
 
   const [isBumping, setIsBumping] = useState(false)
   const bumpTRef = useRef<number | null>(null)
@@ -1481,7 +1601,23 @@ useEffect(() => {
   const onGlassPointerUp = () => setPressed(false)
 
   const shouldAttnSpreads = attnStage === 'spread' && !spread
-  const showKeyboardDone = askInputFocused
+  const showKeyboardToolbar = askInputFocused
+
+  const renderSafetyNotice = (sourceQuestion: string) => {
+    const note = buildSafetyNotice(sourceQuestion)
+    if (!note) return null
+    return (
+      <div className={`safety-notice ${note.kind === 'crisis' ? 'is-crisis' : 'is-medical'}`} role="note">
+        <div className="safety-notice__title">{note.title}</div>
+        <p className="safety-notice__text">{note.message}</p>
+        <ul className="safety-notice__contacts">
+          {note.contacts.map((line, i) => (
+            <li key={`safety-${i}`}>{line}</li>
+          ))}
+        </ul>
+      </div>
+    )
+  }
 
   /* =============================================================================================
      [20] “РОУТИНГ” + КАРТА ДНЯ + SHAKE (DAILY предвыбор)
@@ -4012,7 +4148,7 @@ useEffect(() => {
                         value={question}
                         onChange={(e) => setQuestion(e.target.value)}
                         placeholder="Что вас беспокоит? О чем хотели бы узнать?"
-                        enterKeyHint="done"
+                        enterKeyHint="search"
                         rows={2}
                       />
                       <button
@@ -4115,7 +4251,7 @@ useEffect(() => {
                     <span className="glass-cta__inner">
                       <span className="glass-cta__rim" aria-hidden="true" />
                       <span className="glass-cta__icon">
-                        <img src={buttonIcon} alt="" />
+                        <SpellbookIcon />
                       </span>
                       <span className="glass-cta__text">Начать расклад</span>
                       <span className="glass-cta__spark" aria-hidden="true" />
@@ -4534,7 +4670,7 @@ useEffect(() => {
                       value={question}
                       onChange={(e) => setQuestion(e.target.value)}
                       placeholder="Вопрос (необязательно). Например: «Что мне важно понять в отношениях?»"
-                      enterKeyHint="done"
+                      enterKeyHint="search"
                       rows={3}
                     />
                     <button
@@ -4617,6 +4753,8 @@ useEffect(() => {
                     <div className="result-card__name">Фото расклада</div>
 
                     <div className="result-card__scroll">
+                      {renderSafetyNotice(question)}
+
                       {photoResult.description
                         ? <MarkdownText text={photoResult.description || ''} />
                         : (
@@ -4734,7 +4872,7 @@ useEffect(() => {
                           value={question}
                           onChange={(e) => setQuestion(e.target.value)}
                           placeholder="Что вас беспокоит? О чем хотели бы узнать?"
-                          enterKeyHint="done"
+                          enterKeyHint="search"
                           rows={2}
                         />
                         <div className={`ask-mic ${isRecording ? 'recording' : ''}`} onClick={toggleRecording} role="button" tabIndex={0}>
@@ -4845,6 +4983,8 @@ useEffect(() => {
                         <p style={{ opacity: 0.72, marginTop: 0 }}>Карта дня: {dailyDayKey}</p>
                       ) : null}
 
+                      {renderSafetyNotice(question)}
+
                       {dailyDesc ? (
                         <MarkdownText text={dailyDesc} />
                       ) : (
@@ -4894,7 +5034,7 @@ useEffect(() => {
                           value={threeQuestion}
                           onChange={(e) => setThreeQuestion(e.target.value)}
                           placeholder="Ваш вопрос…"
-                          enterKeyHint="done"
+                          enterKeyHint="search"
                           rows={2}
                         />
                       </div>
@@ -5044,6 +5184,8 @@ useEffect(() => {
                             <p style={{ opacity: 0.8, marginTop: 10 }}>Карты раскрываются…</p>
                           ) : (
                             <>
+                              {renderSafetyNotice(threeQuestion)}
+
                               {/* Loading indicator while waiting for backend */}
                               {threeLoading && (
                                 <p style={{ opacity: 0.8, marginTop: 10 }}>
@@ -5123,7 +5265,7 @@ useEffect(() => {
                           value={ppfQuestion}
                           onChange={(e) => setPpfQuestion(e.target.value)}
                           placeholder="Ваш вопрос…"
-                          enterKeyHint="done"
+                          enterKeyHint="search"
                           rows={2}
                         />
                       </div>
@@ -5258,6 +5400,8 @@ useEffect(() => {
                             <b>Фокус:</b> {PPF_FOCUS.find((x) => x.id === ppfFocus)?.label || '—'}
                           </p>
 
+                          {renderSafetyNotice(ppfQuestion)}
+
                           {/* Loading indicator while waiting for backend */}
                           {ppfLoading && (
                             <p style={{ opacity: 0.8, marginTop: 10 }}>
@@ -5335,7 +5479,7 @@ useEffect(() => {
                           value={decisionQuestion}
                           onChange={(e) => setDecisionQuestion(e.target.value)}
                           placeholder="Сформулируйте вопрос и мысленно обозначьте Вариант A и Вариант B…"
-                          enterKeyHint="done"
+                          enterKeyHint="search"
                           rows={2}
                         />
                       </div>
@@ -5479,6 +5623,8 @@ useEffect(() => {
                             <b>Фокус:</b> {DECISION_FOCUS.find((x) => x.id === decisionFocus)?.label || '—'}
                           </p>
 
+                          {renderSafetyNotice(decisionQuestion)}
+
                           {/* Loading indicator while waiting for backend */}
                           {decisionLoading && (
                             <p style={{ opacity: 0.8, marginTop: 10 }}>
@@ -5530,18 +5676,38 @@ useEffect(() => {
         )}
       </div>
 
-      {showKeyboardDone && (
-        <button
-          type="button"
-          className="keyboard-done"
-          style={{ bottom: `calc(env(safe-area-inset-bottom, 0px) + ${Math.max(12, keyboardInset + 10)}px)` }}
-          onClick={() => {
-            const active = document.activeElement
-            if (active instanceof HTMLElement) active.blur()
-          }}
+      {showKeyboardToolbar && (
+        <div
+          className="keyboard-toolbar"
+          style={{ bottom: `calc(env(safe-area-inset-bottom, 0px) + ${Math.max(8, keyboardInset + 8)}px)` }}
         >
-          Готово
-        </button>
+          {view === 'home' ? (
+            <button
+              type="button"
+              className="keyboard-toolbar__btn keyboard-toolbar__btn--start"
+              onClick={() => {
+                const active = document.activeElement
+                if (active instanceof HTMLElement) active.blur()
+                onBeginReading()
+              }}
+            >
+              Начать расклад
+            </button>
+          ) : (
+            <span className="keyboard-toolbar__spacer" aria-hidden="true" />
+          )}
+
+          <button
+            type="button"
+            className="keyboard-toolbar__btn keyboard-toolbar__btn--done"
+            onClick={() => {
+              const active = document.activeElement
+              if (active instanceof HTMLElement) active.blur()
+            }}
+          >
+            Готово
+          </button>
+        </div>
       )}
     </div>
   )

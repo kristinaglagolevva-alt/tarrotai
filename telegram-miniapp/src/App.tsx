@@ -4308,8 +4308,13 @@ useEffect(() => {
 
                     <section className="profile-panel profile-panel--premium" aria-label="Подписка">
                       <div className="profile-panel__title">
-                        <span className="profile-panel__emoji" aria-hidden="true">💎</span>
-                        Premium / Подписка AI Tarot
+                        <span className="profile-icon profile-icon--premium" aria-hidden="true">
+                          <svg viewBox="0 0 24 24">
+                            <path d="M4 9.5 7.4 5h9.2L20 9.5l-8 9-8-9Z" fill="none" stroke="currentColor" strokeWidth="1.8" />
+                            <path d="M7.4 5 12 18.5 16.6 5" fill="none" stroke="currentColor" strokeWidth="1.4" />
+                          </svg>
+                        </span>
+                        <span>Premium / Подписка AI Tarot</span>
                       </div>
                       <div className="profile-panel__status">
                         Статус: <span className={`profile-status ${subActive ? 'is-active' : 'is-inactive'}`}>{subLabel}</span>
@@ -4328,7 +4333,15 @@ useEffect(() => {
 
                     <section className="profile-piece" aria-label="Штучные расклады">
                       <div className="profile-piece__info">
-                        <div className="profile-piece__title">🔮 Штучные расклады</div>
+                        <div className="profile-piece__title">
+                          <span className="profile-icon profile-icon--piece" aria-hidden="true">
+                            <svg viewBox="0 0 24 24">
+                              <circle cx="12" cy="12" r="7.2" fill="none" stroke="currentColor" strokeWidth="1.7" />
+                              <path d="M12 4.8V3M12 21v-1.8M4.8 12H3M21 12h-1.8" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+                            </svg>
+                          </span>
+                          <span>Штучные расклады</span>
+                        </div>
                         <div className="profile-piece__meta">Доступно: {paidBalance} расклада</div>
                         <div className="profile-piece__submeta">Бесплатно в этом месяце: {freeLeft} из {freeLimit}</div>
                       </div>
@@ -4349,13 +4362,29 @@ useEffect(() => {
                       <div className="profile-group-title">Настройки</div>
 
                       <div className="profile-link-row profile-link-row--static">
-                        <span className="profile-link-row__left">🌐 Язык приложения (Draft)</span>
+                        <span className="profile-link-row__left">
+                          <span className="profile-icon profile-icon--row" aria-hidden="true">
+                            <svg viewBox="0 0 24 24">
+                              <circle cx="12" cy="12" r="8.3" fill="none" stroke="currentColor" strokeWidth="1.7" />
+                              <path d="M3.7 12h16.6M12 3.7c2.4 2.2 3.7 5.2 3.7 8.3s-1.3 6.1-3.7 8.3M12 3.7c-2.4 2.2-3.7 5.2-3.7 8.3s1.3 6.1 3.7 8.3" fill="none" stroke="currentColor" strokeWidth="1.35" />
+                            </svg>
+                          </span>
+                          <span>Язык приложения (Draft)</span>
+                        </span>
                         <span className="profile-link-row__right">Русский</span>
                         <span className="profile-link-row__chevron" aria-hidden="true">›</span>
                       </div>
 
                       <div className="profile-link-row profile-link-row--static">
-                        <span className="profile-link-row__left">✈️ Привязка Telegram</span>
+                        <span className="profile-link-row__left">
+                          <span className="profile-icon profile-icon--row" aria-hidden="true">
+                            <svg viewBox="0 0 24 24">
+                              <path d="M21 3 10 13" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+                              <path d="m21 3-7 18-3.4-7.2L3 10l18-7Z" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" />
+                            </svg>
+                          </span>
+                          <span>Привязка Telegram</span>
+                        </span>
                         <span className={`profile-link-row__right ${token ? 'is-ok' : 'is-muted'}`}>
                           {token ? 'Подключен' : 'Не подключен'}
                         </span>
@@ -4367,17 +4396,40 @@ useEffect(() => {
                       <div className="profile-group-title">Информация и поддержка</div>
 
                       <a href={SUPPORT_URL} target="_blank" rel="noreferrer" className="profile-link-row">
-                        <span className="profile-link-row__left">💬 Написать в поддержку</span>
+                        <span className="profile-link-row__left">
+                          <span className="profile-icon profile-icon--row" aria-hidden="true">
+                            <svg viewBox="0 0 24 24">
+                              <path d="M6.2 18.4c-1.2 0-2.2-1-2.2-2.2V8.8c0-1.2 1-2.2 2.2-2.2h11.6c1.2 0 2.2 1 2.2 2.2v7.4c0 1.2-1 2.2-2.2 2.2H11l-4 2.7v-2.7H6.2Z" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" />
+                            </svg>
+                          </span>
+                          <span>Написать в поддержку</span>
+                        </span>
                         <span className="profile-link-row__chevron" aria-hidden="true">›</span>
                       </a>
 
                       <a href={TERMS_URL} target="_blank" rel="noreferrer" className="profile-link-row">
-                        <span className="profile-link-row__left">📄 Пользовательское соглашение</span>
+                        <span className="profile-link-row__left">
+                          <span className="profile-icon profile-icon--row" aria-hidden="true">
+                            <svg viewBox="0 0 24 24">
+                              <path d="M7 3.8h7l4 4v12.4H7z" fill="none" stroke="currentColor" strokeWidth="1.6" />
+                              <path d="M14 3.8v4h4M9.5 12h6.8M9.5 15.3h6.8" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+                            </svg>
+                          </span>
+                          <span>Пользовательское соглашение</span>
+                        </span>
                         <span className="profile-link-row__chevron" aria-hidden="true">›</span>
                       </a>
 
                       <a href={PRIVACY_URL} target="_blank" rel="noreferrer" className="profile-link-row">
-                        <span className="profile-link-row__left">🔒 Политика конфиденциальности</span>
+                        <span className="profile-link-row__left">
+                          <span className="profile-icon profile-icon--row" aria-hidden="true">
+                            <svg viewBox="0 0 24 24">
+                              <rect x="6.2" y="10.2" width="11.6" height="9.2" rx="2.2" fill="none" stroke="currentColor" strokeWidth="1.6" />
+                              <path d="M8.8 10.2V8a3.2 3.2 0 0 1 6.4 0v2.2" fill="none" stroke="currentColor" strokeWidth="1.6" />
+                            </svg>
+                          </span>
+                          <span>Политика конфиденциальности</span>
+                        </span>
                         <span className="profile-link-row__chevron" aria-hidden="true">›</span>
                       </a>
                     </section>

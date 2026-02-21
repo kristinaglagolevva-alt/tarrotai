@@ -1805,7 +1805,7 @@ body,
   width: var(--block-w);
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 13px;
 }
 
 .profile-hero {
@@ -1865,14 +1865,15 @@ body,
   position: relative;
   overflow: hidden;
   border-radius: 18px;
-  border: 1px solid rgba(164, 189, 255, 0.32);
+  border: 1px solid rgba(186, 209, 255, 0.3);
   background:
-    linear-gradient(180deg, rgba(44, 61, 110, 0.82), rgba(26, 41, 82, 0.88));
+    linear-gradient(180deg, rgba(58, 79, 136, 0.58), rgba(31, 47, 94, 0.64));
   box-shadow:
-    0 18px 40px rgba(4, 9, 25, 0.45),
-    0 0 0 1px rgba(255, 255, 255, 0.05) inset;
-  backdrop-filter: blur(18px) saturate(1.3);
-  -webkit-backdrop-filter: blur(18px) saturate(1.3);
+    0 24px 52px rgba(4, 9, 25, 0.46),
+    0 0 0 1px rgba(255, 255, 255, 0.08) inset,
+    0 10px 18px rgba(255, 255, 255, 0.04) inset;
+  backdrop-filter: blur(22px) saturate(1.45);
+  -webkit-backdrop-filter: blur(22px) saturate(1.45);
 }
 
 .profile-panel::before {
@@ -1884,14 +1885,28 @@ body,
   opacity: 0.62;
 }
 
+.profile-panel::after {
+  content: "";
+  position: absolute;
+  top: -28px;
+  right: -36px;
+  width: 180px;
+  height: 112px;
+  border-radius: 999px;
+  pointer-events: none;
+  background: radial-gradient(ellipse at center, rgba(220, 234, 255, 0.28), transparent 72%);
+  opacity: 0.56;
+}
+
 .profile-panel--premium {
   border-color: rgba(255, 214, 130, 0.42);
   background:
-    linear-gradient(130deg, rgba(132, 93, 205, 0.84), rgba(95, 70, 168, 0.8) 46%, rgba(71, 56, 128, 0.84));
+    linear-gradient(130deg, rgba(145, 104, 217, 0.6), rgba(109, 82, 184, 0.56) 46%, rgba(84, 67, 148, 0.6));
   box-shadow:
-    0 20px 42px rgba(15, 8, 40, 0.46),
-    0 0 0 1px rgba(255, 216, 142, 0.24) inset,
-    0 0 22px rgba(255, 196, 98, 0.22);
+    0 24px 52px rgba(15, 8, 40, 0.45),
+    0 0 0 1px rgba(255, 216, 142, 0.3) inset,
+    0 0 26px rgba(255, 196, 98, 0.22),
+    0 12px 18px rgba(255, 255, 255, 0.05) inset;
 }
 
 .profile-panel__title {
@@ -1947,7 +1962,7 @@ body,
   align-items: center;
   gap: 10px;
   padding: 12px 14px;
-  border-top: 1px solid rgba(170, 193, 255, 0.16);
+  border-top: 1px solid rgba(196, 214, 255, 0.18);
   text-decoration: none;
   color: inherit;
   transition: background-color 180ms ease;
@@ -1997,13 +2012,16 @@ body,
   align-items: center;
   gap: 12px;
   border-radius: 18px;
-  border: 1px solid rgba(164, 189, 255, 0.36);
+  border: 1px solid rgba(187, 210, 255, 0.34);
   background:
-    linear-gradient(180deg, rgba(41, 58, 104, 0.86), rgba(24, 38, 76, 0.9));
+    linear-gradient(180deg, rgba(59, 80, 136, 0.58), rgba(29, 45, 88, 0.64));
   box-shadow:
-    0 18px 38px rgba(3, 8, 24, 0.42),
-    0 0 0 1px rgba(255, 255, 255, 0.05) inset;
+    0 24px 48px rgba(3, 8, 24, 0.44),
+    0 0 0 1px rgba(255, 255, 255, 0.08) inset,
+    0 10px 18px rgba(255, 255, 255, 0.05) inset;
   padding: 12px 12px;
+  backdrop-filter: blur(22px) saturate(1.45);
+  -webkit-backdrop-filter: blur(22px) saturate(1.45);
 }
 
 .profile-piece__info {
@@ -3136,6 +3154,22 @@ body,
   padding-top: calc(env(safe-area-inset-top, 0px) + 44px);
 }
 
+.home-head.is-subtab {
+  justify-content: center;
+  align-items: center;
+  padding-top: calc(env(safe-area-inset-top, 0px) + 58px);
+  min-height: 54px;
+}
+
+.home-head__center-title {
+  font-size: clamp(34px, 8.2vw, 42px);
+  line-height: 1;
+  font-weight: 820;
+  letter-spacing: -0.02em;
+  color: rgba(247, 252, 255, 0.98);
+  text-shadow: 0 14px 30px rgba(2, 8, 24, 0.56);
+}
+
 .home-head__brand {
   min-width: 0;
   flex: 1 1 auto;
@@ -3225,25 +3259,39 @@ body,
   display: flex;
   align-items: center;
   justify-content: flex-start;
-  gap: 14px;
+  gap: 10px;
   min-height: 34px;
-  margin-bottom: 10px;
+  margin-bottom: 12px;
 }
 
 .subtab-back {
   border: 0;
   border-radius: 0;
   background: transparent;
-  color: rgba(211, 226, 255, 0.92);
-  font-size: 14px;
-  font-weight: 650;
-  line-height: 1.2;
+  color: rgba(232, 242, 255, 0.98);
   min-height: 0;
-  padding: 4px 0;
+  padding: 2px 0;
   box-shadow: none;
   cursor: pointer;
-  text-shadow: 0 8px 20px rgba(3, 8, 24, 0.42);
+  text-shadow: 0 10px 22px rgba(3, 8, 24, 0.48);
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
   transition: opacity 140ms ease, transform 140ms ease;
+}
+
+.subtab-back__arrow {
+  font-size: 31px;
+  line-height: 0.8;
+  font-weight: 760;
+  transform: translateY(-1px);
+}
+
+.subtab-back__label {
+  font-size: 19px;
+  line-height: 1.05;
+  font-weight: 730;
+  letter-spacing: -0.01em;
 }
 
 .subtab-back:active {

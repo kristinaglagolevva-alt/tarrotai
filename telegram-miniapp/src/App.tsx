@@ -3908,53 +3908,61 @@ useEffect(() => {
       <div className="content">
         {view === 'home' && (
           <>
-            <div className="home-head">
-              <div
-                className={`home-head__brand ${navTab !== 'main' ? 'is-clickable' : ''}`}
-                role={navTab !== 'main' ? 'button' : undefined}
-                tabIndex={navTab !== 'main' ? 0 : -1}
-                onClick={goToMainTab}
-                onKeyDown={(e) => {
-                  if (navTab === 'main') return
-                  if (e.key === 'Enter' || e.key === ' ') {
-                    e.preventDefault()
-                    goToMainTab()
-                  }
-                }}
-                aria-label={navTab !== 'main' ? 'Вернуться на главную' : undefined}
-              >
-                <h1>AI Taro</h1>
-                <p>Мудрость карт и искусственного интеллекта</p>
-              </div>
+            <div className={`home-head ${navTab !== 'main' ? 'is-subtab' : ''}`}>
+              {navTab === 'main' ? (
+                <>
+                  <div
+                    className={`home-head__brand ${navTab !== 'main' ? 'is-clickable' : ''}`}
+                    role={navTab !== 'main' ? 'button' : undefined}
+                    tabIndex={navTab !== 'main' ? 0 : -1}
+                    onClick={goToMainTab}
+                    onKeyDown={(e) => {
+                      if (navTab === 'main') return
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault()
+                        goToMainTab()
+                      }
+                    }}
+                    aria-label={navTab !== 'main' ? 'Вернуться на главную' : undefined}
+                  >
+                    <h1>AI Taro</h1>
+                    <p>Мудрость карт и искусственного интеллекта</p>
+                  </div>
 
-              <div className="home-head__actions" aria-label="Навигация">
-                <button
-                  type="button"
-                  className={`home-head__action ${navTab === 'history' ? 'is-active' : ''}`}
-                  onClick={toggleHistoryTab}
-                  aria-label={navTab === 'history' ? 'Вернуться на главную' : 'Открыть историю'}
-                  title={navTab === 'history' ? 'На главную' : 'История'}
-                >
-                  <svg viewBox="0 0 24 24" aria-hidden="true">
-                    <path d="M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20Z" fill="none" stroke="currentColor" strokeWidth="1.8" />
-                    <path d="M12 6v6l4 2" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-                  </svg>
-                </button>
+                  <div className="home-head__actions" aria-label="Навигация">
+                    <button
+                      type="button"
+                      className="home-head__action"
+                      onClick={toggleHistoryTab}
+                      aria-label="Открыть историю"
+                      title="История"
+                    >
+                      <svg viewBox="0 0 24 24" aria-hidden="true">
+                        <path d="M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20Z" fill="none" stroke="currentColor" strokeWidth="1.8" />
+                        <path d="M12 6v6l4 2" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+                      </svg>
+                    </button>
 
-                <button
-                  type="button"
-                  className={`home-head__action home-head__action--avatar ${navTab === 'profile' ? 'is-active' : ''}`}
-                  onClick={toggleProfileTab}
-                  aria-label={navTab === 'profile' ? 'Вернуться на главную' : 'Открыть профиль'}
-                  title={navTab === 'profile' ? 'На главную' : 'Профиль'}
-                >
-                  {user?.photo_url ? (
-                    <img src={user.photo_url} alt="" />
-                  ) : (
-                    <span>{(user?.first_name?.[0] || user?.username?.[0] || 'U').toUpperCase()}</span>
-                  )}
-                </button>
-              </div>
+                    <button
+                      type="button"
+                      className="home-head__action home-head__action--avatar"
+                      onClick={toggleProfileTab}
+                      aria-label="Открыть профиль"
+                      title="Профиль"
+                    >
+                      {user?.photo_url ? (
+                        <img src={user.photo_url} alt="" />
+                      ) : (
+                        <span>{(user?.first_name?.[0] || user?.username?.[0] || 'U').toUpperCase()}</span>
+                      )}
+                    </button>
+                  </div>
+                </>
+              ) : (
+                <div className="home-head__center-title" aria-live="polite">
+                  {navTab === 'profile' ? 'Профиль' : 'История'}
+                </div>
+              )}
             </div>
 
             {/* PAGES: slide left/right */}
@@ -4124,9 +4132,9 @@ useEffect(() => {
                         onClick={goToMainTab}
                         aria-label="Вернуться на главную"
                       >
-                        ← Назад на главную
+                        <span className="subtab-back__arrow" aria-hidden="true">←</span>
+                        <span className="subtab-back__label">Назад</span>
                       </button>
-                      <div className="subtab-title">История</div>
                     </div>
 
                     {!token && (
@@ -4273,9 +4281,9 @@ useEffect(() => {
                       onClick={goToMainTab}
                       aria-label="Вернуться на главную"
                     >
-                      ← Назад на главную
+                      <span className="subtab-back__arrow" aria-hidden="true">←</span>
+                      <span className="subtab-back__label">Назад</span>
                     </button>
-                    <div className="subtab-title">Профиль</div>
                   </div>
 
                   <div className="profile-shell">

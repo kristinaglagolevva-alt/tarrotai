@@ -4341,7 +4341,17 @@ useEffect(() => {
                         onClick={goToMainTab}
                         aria-label="Вернуться на главную"
                       >
-                        <span className="subtab-back__arrow" aria-hidden="true">←</span>
+                        <span className="subtab-back__arrow" aria-hidden="true">
+                          <svg viewBox="0 0 24 24" fill="none">
+                            <path
+                              d="M14.8 5.5 8.2 12l6.6 6.5M8.6 12h11"
+                              stroke="currentColor"
+                              strokeWidth="2.8"
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                            />
+                          </svg>
+                        </span>
                         <span className="subtab-back__label">Назад</span>
                       </button>
                     </div>
@@ -4490,7 +4500,17 @@ useEffect(() => {
                       onClick={goToMainTab}
                       aria-label="Вернуться на главную"
                     >
-                      <span className="subtab-back__arrow" aria-hidden="true">←</span>
+                      <span className="subtab-back__arrow" aria-hidden="true">
+                        <svg viewBox="0 0 24 24" fill="none">
+                          <path
+                            d="M14.8 5.5 8.2 12l6.6 6.5M8.6 12h11"
+                            stroke="currentColor"
+                            strokeWidth="2.8"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                          />
+                        </svg>
+                      </span>
                       <span className="subtab-back__label">Назад</span>
                     </button>
                   </div>
@@ -4515,79 +4535,83 @@ useEffect(() => {
                       <div className="profile-hero__username">{profileUsername}</div>
                     </div>
 
-                    <section className="profile-panel profile-panel--premium" aria-label="Подписка">
-                      <div className="profile-panel__title">
-                        <span className="profile-icon profile-icon--premium" aria-hidden="true">
-                          <svg viewBox="0 0 24 24">
-                            <path d="M4 9.5 7.4 5h9.2L20 9.5l-8 9-8-9Z" fill="none" stroke="currentColor" strokeWidth="1.8" />
-                            <path d="M7.4 5 12 18.5 16.6 5" fill="none" stroke="currentColor" strokeWidth="1.4" />
-                          </svg>
-                        </span>
-                        <span>Premium / Подписка AI Tarot</span>
-                      </div>
-                      <div className="profile-panel__status">
-                        Статус: <span className={`profile-status ${subActive ? 'is-active' : 'is-inactive'}`}>{subLabel}</span>
-                      </div>
-
-                      <a
-                        href={BOT_PAYMENT_URL}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="profile-link-row"
-                        onClick={(e) => {
-                          e.preventDefault()
-                          openTelegramUrl(BOT_PAYMENT_URL)
-                        }}
-                      >
-                        <span className="profile-link-row__left">Управление подпиской</span>
-                        <span className="profile-link-row__chevron" aria-hidden="true">›</span>
-                      </a>
-
-                      <a
-                        href={BOT_PAYMENT_URL}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="profile-link-row"
-                        onClick={(e) => {
-                          e.preventDefault()
-                          openTelegramUrl(BOT_PAYMENT_URL)
-                        }}
-                      >
-                        <span className="profile-link-row__left">Как отменить подписку?</span>
-                        <span className="profile-link-row__chevron" aria-hidden="true">›</span>
-                      </a>
-                    </section>
-
-                    <section className="profile-piece" aria-label="Подключить безлимит">
-                      <div className="profile-piece__info">
-                        <div className="profile-piece__title">
-                          <span className="profile-icon profile-icon--piece" aria-hidden="true">
+                    {subActive && (
+                      <section className="profile-panel profile-panel--premium" aria-label="Подписка">
+                        <div className="profile-panel__title">
+                          <span className="profile-icon profile-icon--premium" aria-hidden="true">
                             <svg viewBox="0 0 24 24">
-                              <circle cx="12" cy="12" r="7.2" fill="none" stroke="currentColor" strokeWidth="1.7" />
-                              <path d="M12 4.8V3M12 21v-1.8M4.8 12H3M21 12h-1.8" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+                              <path d="M4 9.5 7.4 5h9.2L20 9.5l-8 9-8-9Z" fill="none" stroke="currentColor" strokeWidth="1.8" />
+                              <path d="M7.4 5 12 18.5 16.6 5" fill="none" stroke="currentColor" strokeWidth="1.4" />
                             </svg>
                           </span>
-                          <span>Подключить безлимит</span>
+                          <span>Premium / Подписка AI Tarot</span>
                         </div>
-                        <div className="profile-piece__meta">Бесплатно в этом месяце: {freeLeft} из {freeLimit}</div>
-                        <div className="profile-piece__submeta">14 дней — 99 ₽, месяц — 179 ₽</div>
-                      </div>
+                        <div className="profile-panel__status">
+                          Статус: <span className={`profile-status ${subActive ? 'is-active' : 'is-inactive'}`}>{subLabel}</span>
+                        </div>
 
-                      <a
-                        href={BOT_PAYMENT_URL}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="profile-piece__cta"
-                        onClick={(e) => {
-                          e.preventDefault()
-                          openTelegramUrl(BOT_PAYMENT_URL)
-                        }}
-                      >
-                        Подключить
-                        <br />
-                        безлимит
-                      </a>
-                    </section>
+                        <a
+                          href={BOT_PAYMENT_URL}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="profile-link-row"
+                          onClick={(e) => {
+                            e.preventDefault()
+                            openTelegramUrl(BOT_PAYMENT_URL)
+                          }}
+                        >
+                          <span className="profile-link-row__left">Управление подпиской</span>
+                          <span className="profile-link-row__chevron" aria-hidden="true">›</span>
+                        </a>
+
+                        <a
+                          href={BOT_PAYMENT_URL}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="profile-link-row"
+                          onClick={(e) => {
+                            e.preventDefault()
+                            openTelegramUrl(BOT_PAYMENT_URL)
+                          }}
+                        >
+                          <span className="profile-link-row__left">Как отменить подписку?</span>
+                          <span className="profile-link-row__chevron" aria-hidden="true">›</span>
+                        </a>
+                      </section>
+                    )}
+
+                    {!subActive && (
+                      <section className="profile-piece" aria-label="Подключить безлимит">
+                        <div className="profile-piece__info">
+                          <div className="profile-piece__title">
+                            <span className="profile-icon profile-icon--piece" aria-hidden="true">
+                              <svg viewBox="0 0 24 24">
+                                <circle cx="12" cy="12" r="7.2" fill="none" stroke="currentColor" strokeWidth="1.7" />
+                                <path d="M12 4.8V3M12 21v-1.8M4.8 12H3M21 12h-1.8" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+                              </svg>
+                            </span>
+                            <span>Подключить безлимит</span>
+                          </div>
+                          <div className="profile-piece__meta">Бесплатно в этом месяце: {freeLeft} из {freeLimit}</div>
+                          <div className="profile-piece__submeta">14 дней — 99 ₽, месяц — 179 ₽</div>
+                        </div>
+
+                        <a
+                          href={BOT_PAYMENT_URL}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="profile-piece__cta"
+                          onClick={(e) => {
+                            e.preventDefault()
+                            openTelegramUrl(BOT_PAYMENT_URL)
+                          }}
+                        >
+                          Подключить
+                          <br />
+                          безлимит
+                        </a>
+                      </section>
+                    )}
 
                     <section className="profile-panel" aria-label="Настройки">
                       <div className="profile-group-title">Настройки</div>

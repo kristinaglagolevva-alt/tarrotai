@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
 import secrets
@@ -38,6 +39,11 @@ PROVIDER_TOKEN = (
 APP_URL_RAW = (os.environ.get("TELEGRAM_APP_URL") or "").strip()  # например https://tarrotai.ru
 APP_BUTTON_TEXT = os.environ.get("TELEGRAM_APP_BUTTON_TEXT") or "Открыть приложение"
 BOT_VERSION = os.environ.get("TELEGRAM_BOT_VERSION") or os.environ.get("APP_VERSION") or "unknown"
+YOOKASSA_REQUIRE_RECEIPT = str(os.environ.get("YOOKASSA_REQUIRE_RECEIPT", "1")).strip().lower() not in {"0", "false", "no"}
+YOOKASSA_VAT_CODE = int(os.environ.get("YOOKASSA_VAT_CODE", "1"))
+YOOKASSA_PAYMENT_MODE = (os.environ.get("YOOKASSA_PAYMENT_MODE") or "full_payment").strip() or "full_payment"
+YOOKASSA_PAYMENT_SUBJECT = (os.environ.get("YOOKASSA_PAYMENT_SUBJECT") or "service").strip() or "service"
+YOOKASSA_NEED_PHONE = str(os.environ.get("YOOKASSA_NEED_PHONE", "1")).strip().lower() not in {"0", "false", "no"}
 
 # ----- Тарифы -----
 # amount — в копейках (RUB * 100)
@@ -76,6 +82,35 @@ def _get_product(code: str) -> Optional[Dict[str, Any]]:
         if p["code"] == code:
             return p
     return None
+
+
+def _kopecks_to_rub_value(amount_kopecks: int) -> str:
+    return f"{max(0, int(amount_kopecks)) / 100:.2f}"
+
+
+def _build_provider_data_for_receipt(product: Dict[str, Any]) -> str:
+    amount_kopecks = int(product.get("amount") or 0)
+    title = str(product.get("title") or product.get("code") or "AI Tarot").strip() or "AI Tarot"
+    title = title[:128]
+
+    receipt_item: Dict[str, Any] = {
+        "description": title,
+        "quantity": "1.00",
+        "amount": {
+            "value": _kopecks_to_rub_value(amount_kopecks),
+            "currency": "RUB",
+        },
+        "vat_code": int(YOOKASSA_VAT_CODE),
+        "payment_mode": YOOKASSA_PAYMENT_MODE,
+        "payment_subject": YOOKASSA_PAYMENT_SUBJECT,
+    }
+
+    payload = {
+        "receipt": {
+            "items": [receipt_item],
+        }
+    }
+    return json.dumps(payload, ensure_ascii=False)
 
 
 def _products_for_mode(mode: str = "menu") -> List[Dict[str, Any]]:
@@ -392,21 +427,30 @@ async def buy_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
     prices = [LabeledPrice(label=label, amount=int(product["amount"]))]
 
+    invoice_kwargs: Dict[str, Any] = {
+        "chat_id": chat_id,
+        "title": product.get("title") or "AI Tarot",
+        "description": product.get("description") or "AI Tarot",
+        "payload": payload,
+        "provider_token": PROVIDER_TOKEN,
+        "currency": "RUB",
+        "prices": prices,
+    }
+
+    if YOOKASSA_REQUIRE_RECEIPT:
+        invoice_kwargs["provider_data"] = _build_provider_data_for_receipt(product)
+        if YOOKASSA_NEED_PHONE:
+            invoice_kwargs["need_phone_number"] = True
+            invoice_kwargs["send_phone_number_to_provider"] = True
+
     try:
-        await context.bot.send_invoice(
-            chat_id=chat_id,
-            title=product.get("title") or "AI Tarot",
-            description=product.get("description") or "AI Tarot",
-            payload=payload,
-            provider_token=PROVIDER_TOKEN,
-            currency="RUB",
-            prices=prices,
-        )
+        await context.bot.send_invoice(**invoice_kwargs)
         logger.info(
-            "Invoice sent: tg_user=%s product=%s amount=%s",
+            "Invoice sent: tg_user=%s product=%s amount=%s receipt=%s",
             getattr(query.from_user, "id", None),
             product_code,
             int(product["amount"]),
+            "on" if YOOKASSA_REQUIRE_RECEIPT else "off",
         )
     except Exception as exc:
         logger.exception("Failed to send invoice for %s: %s", product_code, exc)

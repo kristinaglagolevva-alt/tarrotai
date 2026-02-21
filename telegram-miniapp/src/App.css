@@ -1343,10 +1343,15 @@ body,
 /* BACK: чтобы не исчезала на iOS после shake */
 .pflip__back {
   transform: rotateY(180deg) translateZ(2px);
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+}
 
-  /* 🔥 ключевой iOS fix */
-  backface-visibility: visible;
-  -webkit-backface-visibility: visible;
+/* Фиолетовый тон рубашки (и до reveal для фронта, когда он тоже рубашка). */
+.pflip__back,
+.pflip:not(.is-done) .pflip__front {
+  filter: saturate(1.45) hue-rotate(236deg) brightness(1.08) contrast(1.06);
+  box-shadow: 0 0 0 1px rgba(210, 184, 255, 0.26) inset;
 }
 
 /* -------------------------------------------------------------------------------------------------
@@ -1381,6 +1386,7 @@ body,
   opacity: 1;
   visibility: visible;
   pointer-events: auto;
+  filter: none;
 }
 
 /* -------------------------------------------------------------------------------------------------

@@ -2051,6 +2051,7 @@ useEffect(() => {
 
   // ✅ NEW: “карта дня” — фиксированная на сутки для пользователя
   const [dailyFrontUrl, setDailyFrontUrl] = useState<string>('')
+  const [dailyFrontReady, setDailyFrontReady] = useState(false)
   // ✅ NEW: данные "карты дня" с бекенда
   const [dailyDesc, setDailyDesc] = useState<string>('')
   const [dailyCardName, setDailyCardName] = useState<string>('')
@@ -2058,13 +2059,38 @@ useEffect(() => {
 
   // Подогреваем конкретную карту дня заранее, чтобы reveal открывался без подгрузочного “фриза”.
   useEffect(() => {
-    if (!dailyFrontUrl) return
+    if (!dailyFrontUrl || dailyFrontUrl === backCardImg) {
+      setDailyFrontReady(false)
+      return
+    }
+
+    let cancelled = false
+    setDailyFrontReady(false)
+
     const im = new Image()
     im.decoding = 'async'
     im.src = dailyFrontUrl
+
+    const markReady = () => {
+      if (cancelled) return
+      setDailyFrontReady(true)
+    }
+
+    im.onload = markReady
+    im.onerror = () => {
+      if (cancelled) return
+      setDailyFrontReady(false)
+    }
+
     try {
-      ;(im as any).decode?.().catch(() => {})
+      ;(im as any).decode?.().then(markReady).catch(() => {})
     } catch {}
+
+    return () => {
+      cancelled = true
+      im.onload = null
+      im.onerror = null
+    }
   }, [dailyFrontUrl])
 
   // =================================================================================================
@@ -3553,8 +3579,18 @@ useEffect(() => {
     }, 60)
   }
 
-  const revealCard = () => {
+  const revealCard = async () => {
     if (!shakenOnce) return
+
+    if (!dailyFrontReady && dailyFrontUrl && dailyFrontUrl !== backCardImg) {
+      const im = new Image()
+      im.decoding = 'async'
+      im.src = dailyFrontUrl
+      try {
+        await (im as any).decode?.()
+      } catch {}
+    }
+
     setCardRevealed(true)
     hapticPulse(0.6)
   }
@@ -4900,9 +4936,9 @@ useEffect(() => {
               scale={pflipScale}
               top={pflipTop}
               onFrontChange={setSelectedFrontUrl}
-              // ✅ во время загрузки — рубашка, без рандомных фронтов
-              lockFront={cardDayLoading || stopRequested || shakenOnce || cardRevealed}
-              lockedFrontUrl={cardDayLoading ? backCardImg : dailyFrontUrl || backCardImg}
+              // Всегда показываем рубашку до reveal, чтобы не было "подмены" фронта в середине вращения.
+              lockFront={true}
+              lockedFrontUrl={shakenOnce || cardRevealed ? (dailyFrontUrl || backCardImg) : backCardImg}
             />
 
             {!isResult && !cardDayLoading && (

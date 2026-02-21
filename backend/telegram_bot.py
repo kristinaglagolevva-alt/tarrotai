@@ -88,6 +88,27 @@ PRODUCTS: List[Dict[str, Any]] = [
     },
 ]
 
+# Для тестового провайдера Telegram/YooMoney минимальная допустимая сумма счета в RUB.
+# По факту API возвращает CURRENCY_TOTAL_AMOUNT_INVALID для 20/50 RUB.
+TEST_MIN_AMOUNT_KOPEKS = int(os.environ.get("TELEGRAM_TEST_MIN_AMOUNT_KOPEKS", "9900"))
+
+
+def _is_test_provider_token() -> bool:
+    token = str(PROVIDER_TOKEN or "").upper()
+    return "TEST" in token
+
+
+def _invoice_amount_for_product(product: Dict[str, Any]) -> int:
+    amount = int(product.get("amount") or 0)
+    if _is_test_provider_token() and amount < TEST_MIN_AMOUNT_KOPEKS:
+        return TEST_MIN_AMOUNT_KOPEKS
+    return amount
+
+
+def _is_test_amount_override(product: Dict[str, Any], invoice_amount: int) -> bool:
+    return int(invoice_amount) != int(product.get("amount") or 0)
+
+
 # Простое хранилище заказов в памяти (для валидации precheckout и подтверждения оплаты)
 # В проде лучше хранить в БД, но ты просил “без server.py”.
 ORDERS: Dict[str, Dict[str, Any]] = {}
@@ -130,6 +151,9 @@ def _format_price_list(mode: str = "menu") -> str:
         hint = (product.get("menu_hint") or "").strip()
         if hint:
             parts.append(hint)
+        parts.append("")
+    if _is_test_provider_token():
+        parts.append("ℹ️ Тестовый провайдер: минимальная сумма счёта 99 ₽.")
         parts.append("")
     parts.append("Нажми на подходящий план, чтобы получить счёт.")
     return "\n".join(parts).strip()
@@ -400,6 +424,13 @@ async def buy_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             await query.message.reply_text("Этот план временно недоступен. Попробуйте другой вариант.")
         return
 
+    invoice_amount = _invoice_amount_for_product(product)
+    if _is_test_amount_override(product, invoice_amount) and query.message:
+        await query.message.reply_text(
+            "Тестовый YooMoney в Telegram не принимает суммы ниже 99 ₽. "
+            "Для проверки выставлен тестовый счёт на 99 ₽, пакет начислится как обычно."
+        )
+
     chat_id = query.message.chat.id if query.message else None
     if chat_id is None:
         return
@@ -411,17 +442,19 @@ async def buy_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     ORDERS[payload] = {
         "status": "pending",
         "product_code": product_code,
-        "amount": int(product["amount"]),
+        "amount": int(invoice_amount),
         "currency": "RUB",
         "tg_user_id": query.from_user.id if query.from_user else None,
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
 
     label = product.get("title") or product_code
+    if _is_test_amount_override(product, invoice_amount):
+        label = f"{label} (test)"
     if len(label) > 32:
         label = label[:32]
 
-    prices = [LabeledPrice(label=label, amount=int(product["amount"]))]
+    prices = [LabeledPrice(label=label, amount=int(invoice_amount))]
 
     try:
         await context.bot.send_invoice(
@@ -437,7 +470,7 @@ async def buy_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             "Invoice sent: tg_user=%s product=%s amount=%s",
             getattr(query.from_user, "id", None),
             product_code,
-            int(product["amount"]),
+            int(invoice_amount),
         )
     except Exception as exc:
         logger.exception("Failed to send invoice for %s: %s", product_code, exc)
@@ -458,7 +491,7 @@ async def precheckout_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
         await query.answer(ok=False, error_message="Заказ не найден. Пожалуйста, сформируйте счёт заново.")
         return
 
-    expected_amount = int(product.get("amount") or -1)
+    expected_amount = _invoice_amount_for_product(product)
     expected_currency = "RUB"
 
     # Валидация без зависимости от in-memory ORDERS (устойчиво к рестартам/нескольким воркерам).

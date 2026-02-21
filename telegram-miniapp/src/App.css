@@ -2801,6 +2801,12 @@ body,
   margin-top: 4px;
 }
 
+.three-mix-area--wide {
+  height: 318px;
+  margin-top: 8px;
+  margin-bottom: 10px;
+}
+
 .three-mix-card {
   position: absolute;
   left: 50%;
@@ -2819,6 +2825,11 @@ body,
     rotate(var(--r))
     scale(var(--s));
   transition: transform 380ms cubic-bezier(.16, 1, .3, 1);
+}
+
+.three-mix-area--wide .three-mix-card {
+  width: 132px;
+  border-radius: 18px;
 }
 
 .three-mix-card img {

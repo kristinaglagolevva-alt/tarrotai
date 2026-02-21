@@ -1818,6 +1818,13 @@ useEffect(() => {
     { x: 44,  y: 2,  r: 8,  s: 1.0,  z: 1 }, // правый
   ]
 
+  // расширенная геометрия для экрана перемешивания в "Расклад по 3 картам"
+  const THREE_SLOTS_WIDE: ThreeCardPos[] = [
+    { x: -64, y: 10, r: -9, s: 1.05, z: 1 },
+    { x: 0, y: -10, r: 2, s: 1.12, z: 2 },
+    { x: 64, y: 10, r: 9, s: 1.05, z: 1 },
+  ]
+
   // все перестановки (слот -> какая карта стоит в слоте)
   const THREE_PERMS: number[][] = [
     [0, 1, 2],
@@ -2602,22 +2609,28 @@ useEffect(() => {
   const openThreeCards = () => {
     resetThreeCardsState()
 
-    // удобно: подхватим уже введенный вопрос с главной
-    setThreeQuestion(question || '')
+    const seededQuestion = String(question || '').trim()
+    // подхватываем вопрос с главной и сразу открываем этап перемешивания
+    setThreeQuestion(seededQuestion)
+    setThreeScreen('shuffle')
     setView('three_cards_prep')
 
     try {
       hapticPulse(0.22)
     } catch {}
+
+    void beginThreeShuffle(seededQuestion)
   }
 
-  const beginThreeShuffle = async () => {
-    if (!threeQuestion.trim()) {
+  const beginThreeShuffle = async (questionOverride?: string) => {
+    const effectiveQuestion = String(questionOverride ?? threeQuestion).trim()
+    if (!effectiveQuestion) {
       try {
         hapticPulse(0.28)
       } catch {}
       return
     }
+    if (threeQuestion !== effectiveQuestion) setThreeQuestion(effectiveQuestion)
 
     if (needsMotionPermission) await requestMotion()
 
@@ -2653,7 +2666,7 @@ useEffect(() => {
     // Запрос запускаем сразу в момент начала шейка (до открытия карт), чтобы сократить ожидание результата.
     const requestSeq = threeRequestSeqRef.current + 1
     threeRequestSeqRef.current = requestSeq
-    buildThreeCardsReal(previewCards).then((cards) => {
+    buildThreeCardsReal(previewCards, effectiveQuestion).then((cards) => {
       if (threeRequestSeqRef.current !== requestSeq) return
       setThreeCards(cards)
       setThreeLoading(false)
@@ -2775,9 +2788,11 @@ useEffect(() => {
 
 
   const restartThreeCards = () => {
+    const carryQuestion = String(threeQuestion || question || '').trim()
     resetThreeCardsState()
-    // вопрос оставим — удобно перетасовать заново
-    setThreeScreen('setup')
+    setThreeQuestion(carryQuestion)
+    setThreeScreen('shuffle')
+    void beginThreeShuffle(carryQuestion)
   }
   // ---------------------------------------------------------------------------------------------
   // [PAST • PRESENT • FUTURE] routing + helpers (пока без бэка: рандом из FRONT_CARD_URLS)
@@ -3129,14 +3144,18 @@ useEffect(() => {
   // =================================================================================================
 
   // Build 3 cards reading with real LLM meanings
-  const buildThreeCardsReal = async (previewCards?: ThreeCardResult[]): Promise<ThreeCardResult[]> => {
+  const buildThreeCardsReal = async (
+    previewCards?: ThreeCardResult[],
+    questionText?: string,
+  ): Promise<ThreeCardResult[]> => {
     if (!token) {
       return (previewCards && previewCards.length ? previewCards : buildThreeCardsMock())
     }
+    const effectiveQuestion = String(questionText ?? threeQuestion).trim()
     const params = {
       spread_type: 'three_cards' as const,
       topic: topic,
-      question: threeQuestion.trim(),
+      question: effectiveQuestion,
       consider_reversed: true,
       forced_cards: toForcedCards(previewCards),
     }
@@ -5141,7 +5160,7 @@ useEffect(() => {
                       ))}
                     </div>
 
-                    <button type="button" className="glass-cta" onClick={beginThreeShuffle}>
+                    <button type="button" className="glass-cta" onClick={() => { void beginThreeShuffle() }}>
                       <span className="glass-cta__inner">
                         <span className="glass-cta__rim" aria-hidden="true" />
                         <span className="glass-cta__text">Продолжить</span>
@@ -5156,12 +5175,12 @@ useEffect(() => {
               {threeScreen === 'shuffle' && (
                 <>
                   <div
-                    className={`three-mix-area ${threeShuffleProgress < 1 ? 'is-shuffling' : 'is-done'}`}
+                    className={`three-mix-area three-mix-area--wide ${threeShuffleProgress < 1 ? 'is-shuffling' : 'is-done'}`}
                     aria-label="Перемешивание"
                   >
                     {[0, 1, 2].map((cardIdx) => {
                       const slot = Math.max(0, threeOrder.indexOf(cardIdx)) // 0..2
-                      const p = THREE_SLOTS[slot] || THREE_SLOTS[0]
+                      const p = THREE_SLOTS_WIDE[slot] || THREE_SLOTS_WIDE[0]
 
                       return (
                         <div

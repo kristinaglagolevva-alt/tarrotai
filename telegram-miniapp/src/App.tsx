@@ -1065,6 +1065,7 @@ useEffect(() => {
 
   const [ctaError, setCtaError] = useState(false)
   const ctaErrTRef = useRef<number | null>(null)
+  const toolbarStartTRef = useRef<number | null>(null)
 
   const [attnStage, setAttnStage] = useState<Stage | null>(null)
   const [attnNonce, setAttnNonce] = useState(0)
@@ -1161,8 +1162,8 @@ useEffect(() => {
     const spreadOk = !!spread
 
     if (!qOk || !spreadOk) {
+      pulseCtaRed()
       if (!qOk) {
-        pulseCtaRed()
         return flashStageBorder('question')
       }
       return flashStageBorder('spread')
@@ -1203,6 +1204,7 @@ useEffect(() => {
       if (ctaErrTRef.current) window.clearTimeout(ctaErrTRef.current)
       if (attnTRef.current) window.clearTimeout(attnTRef.current)
       if (bumpTRef.current) window.clearTimeout(bumpTRef.current)
+      if (toolbarStartTRef.current) window.clearTimeout(toolbarStartTRef.current)
     }
   }, [])
 
@@ -4259,10 +4261,14 @@ useEffect(() => {
 
                   <h2 className="home-section-title">Выберите тип расклада</h2>
                   <div className={`spread-soft-hint ${shouldAttnSpreads ? 'is-visible' : ''}`} aria-live="polite">
-                    Выберите тип расклада
+                    Сначала выберите тип расклада
                   </div>
 
-                  <div className={`spread-list ${shouldAttnSpreads ? 'is-attn' : ''}`} ref={spreadListRef}>
+                  <div
+                    className={`spread-list ${shouldAttnSpreads ? 'is-attn' : ''}`}
+                    data-attn={shouldAttnSpreads ? attnNonce : undefined}
+                    ref={spreadListRef}
+                  >
                     {SPREADS.map((s) => {
                       const isActive = spread === s.id
                       return (
@@ -5760,7 +5766,10 @@ useEffect(() => {
               onClick={() => {
                 const active = document.activeElement
                 if (active instanceof HTMLElement) active.blur()
-                onBeginReading()
+                if (toolbarStartTRef.current) window.clearTimeout(toolbarStartTRef.current)
+                toolbarStartTRef.current = window.setTimeout(() => {
+                  onBeginReading()
+                }, isIOS ? 140 : 80)
               }}
             >
               Начать расклад

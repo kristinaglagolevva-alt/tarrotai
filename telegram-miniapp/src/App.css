@@ -2801,6 +2801,11 @@ body,
   margin-top: 4px;
 }
 
+/* Убираем декоративный градиентный слой, который дает "угол" слева */
+.three-mix-area::before {
+  content: none;
+}
+
 .three-mix-area--wide {
   height: 318px;
   margin-top: 8px;
@@ -2828,7 +2833,7 @@ body,
 }
 
 .three-mix-area--wide .three-mix-card {
-  width: 132px;
+  width: 142px;
   border-radius: 18px;
 }
 

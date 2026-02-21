@@ -728,12 +728,34 @@ type BillingStatus = {
 const BOT_USERNAME =
   ((import.meta as any).env?.VITE_BOT_USERNAME as string | undefined)?.trim() || 'Tarot_AI_Bot'
 const BOT_PAYMENT_URL = `https://t.me/${BOT_USERNAME}?start=menu`
+const BOT_CREDITS_URL = `https://t.me/${BOT_USERNAME}?start=buy_credits`
 const SUPPORT_URL =
   ((import.meta as any).env?.VITE_SUPPORT_URL as string | undefined)?.trim() || `https://t.me/${BOT_USERNAME}`
 const TERMS_URL =
   ((import.meta as any).env?.VITE_TERMS_URL as string | undefined)?.trim() || 'https://tarrotai.ru/terms'
 const PRIVACY_URL =
   ((import.meta as any).env?.VITE_PRIVACY_URL as string | undefined)?.trim() || 'https://tarrotai.ru/privacy'
+
+const openTelegramUrl = (url: string) => {
+  const safeUrl = String(url || '').trim()
+  if (!safeUrl) return
+
+  try {
+    const tg = (window as any)?.Telegram?.WebApp
+    if (safeUrl.startsWith('https://t.me/') && typeof tg?.openTelegramLink === 'function') {
+      tg.openTelegramLink(safeUrl)
+      return
+    }
+    if (typeof tg?.openLink === 'function') {
+      tg.openLink(safeUrl)
+      return
+    }
+  } catch {}
+
+  try {
+    window.open(safeUrl, '_blank', 'noopener,noreferrer')
+  } catch {}
+}
 
 export default function App() {
   /* =============================================================================================
@@ -4456,12 +4478,30 @@ useEffect(() => {
                         Статус: <span className={`profile-status ${subActive ? 'is-active' : 'is-inactive'}`}>{subLabel}</span>
                       </div>
 
-                      <a href={BOT_PAYMENT_URL} target="_blank" rel="noreferrer" className="profile-link-row">
+                      <a
+                        href={BOT_PAYMENT_URL}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="profile-link-row"
+                        onClick={(e) => {
+                          e.preventDefault()
+                          openTelegramUrl(BOT_PAYMENT_URL)
+                        }}
+                      >
                         <span className="profile-link-row__left">Управление подпиской</span>
                         <span className="profile-link-row__chevron" aria-hidden="true">›</span>
                       </a>
 
-                      <a href={BOT_PAYMENT_URL} target="_blank" rel="noreferrer" className="profile-link-row">
+                      <a
+                        href={BOT_PAYMENT_URL}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="profile-link-row"
+                        onClick={(e) => {
+                          e.preventDefault()
+                          openTelegramUrl(BOT_PAYMENT_URL)
+                        }}
+                      >
                         <span className="profile-link-row__left">Как отменить подписку?</span>
                         <span className="profile-link-row__chevron" aria-hidden="true">›</span>
                       </a>
@@ -4483,10 +4523,14 @@ useEffect(() => {
                       </div>
 
                       <a
-                        href={BOT_PAYMENT_URL}
+                        href={BOT_CREDITS_URL}
                         target="_blank"
                         rel="noreferrer"
                         className="profile-piece__cta"
+                        onClick={(e) => {
+                          e.preventDefault()
+                          openTelegramUrl(BOT_CREDITS_URL)
+                        }}
                       >
                         Докупить
                         <br />

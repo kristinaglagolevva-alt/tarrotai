@@ -43,15 +43,37 @@ BOT_VERSION = os.environ.get("TELEGRAM_BOT_VERSION") or os.environ.get("APP_VERS
 # amount — в копейках (RUB * 100)
 PRODUCTS: List[Dict[str, Any]] = [
     {
+        "code": "readings_5",
+        "menu_label": "🔹 5 раскладов — 20 ₽",
+        "menu_hint": "Мини-пакет для быстрых вопросов.",
+        "title": "5 раскладов",
+        "description": "Пакет из 5 раскладов AI Tarot",
+        "amount": 20 * 100,
+        "kind": "credits",
+        "credits": 5,
+        "priority": 10,
+    },
+    {
         "code": "readings_15",
         "menu_label": "🔮 15 раскладов — 50 ₽",
-        "menu_hint": "Пакет из пятнадцати раскладов: удобно для частых вопросов или подарка другу.",
+        "menu_hint": "Оптимальный пакет для регулярного использования.",
         "title": "15 раскладов",
         "description": "Пакет из 15 раскладов AI Tarot",
         "amount": 50 * 100,
         "kind": "credits",
         "credits": 15,
-        "priority": 10,
+        "priority": 20,
+    },
+    {
+        "code": "readings_50",
+        "menu_label": "🧿 50 раскладов — 159 ₽",
+        "menu_hint": "Максимально выгодно по стоимости одного расклада.",
+        "title": "50 раскладов",
+        "description": "Пакет из 50 раскладов AI Tarot",
+        "amount": 159 * 100,
+        "kind": "credits",
+        "credits": 50,
+        "priority": 30,
     },
     {
         "code": "sub_2weeks",
@@ -62,7 +84,7 @@ PRODUCTS: List[Dict[str, Any]] = [
         "amount": 299 * 100,
         "kind": "subscription",
         "days": 14,
-        "priority": 20,
+        "priority": 40,
     },
     {
         "code": "sub_month",
@@ -73,7 +95,7 @@ PRODUCTS: List[Dict[str, Any]] = [
         "amount": 399 * 100,
         "kind": "subscription",
         "days": 30,
-        "priority": 30,
+        "priority": 50,
     },
 ]
 
@@ -89,13 +111,32 @@ def _get_product(code: str) -> Optional[Dict[str, Any]]:
     return None
 
 
-def _format_price_list() -> str:
+def _products_for_mode(mode: str = "menu") -> List[Dict[str, Any]]:
+    m = str(mode or "menu").strip().lower()
+    if m in {"buy_credits", "credits", "buy"}:
+        # Для "докупить расклады" показываем пакеты + месячный безлимит как альтернатива.
+        return [
+            p for p in sorted(PRODUCTS, key=lambda x: x.get("priority", 0))
+            if str(p.get("kind") or "") == "credits" or str(p.get("code") or "") == "sub_month"
+        ]
+    return sorted(PRODUCTS, key=lambda x: x.get("priority", 0))
+
+
+def _format_price_list(mode: str = "menu") -> str:
+    products = _products_for_mode(mode)
     parts: List[str] = [
         "<b>Тарифы AI Tarot</b>",
         "Плати внутри Telegram и получи доступ сразу после оплаты.",
         "",
     ]
-    for product in sorted(PRODUCTS, key=lambda x: x.get("priority", 0)):
+    if str(mode).lower() in {"buy_credits", "credits", "buy"}:
+        parts = [
+            "<b>Докупка раскладов</b>",
+            "Выберите пакет по количеству раскладов или безлимит на месяц:",
+            "",
+        ]
+
+    for product in products:
         parts.append(f"<b>{product['menu_label']}</b>")
         hint = (product.get("menu_hint") or "").strip()
         if hint:
@@ -105,10 +146,13 @@ def _format_price_list() -> str:
     return "\n".join(parts).strip()
 
 
-def _price_keyboard() -> InlineKeyboardMarkup:
+def _price_keyboard(mode: str = "menu") -> InlineKeyboardMarkup:
+    products = _products_for_mode(mode)
     rows: List[List[InlineKeyboardButton]] = []
-    for product in sorted(PRODUCTS, key=lambda x: x.get("priority", 0)):
+    for product in products:
         rows.append([InlineKeyboardButton(product["menu_label"], callback_data=f"buy:{product['code']}")])
+    if str(mode).lower() in {"buy_credits", "credits", "buy"}:
+        rows.append([InlineKeyboardButton("↩️ Показать все тарифы", callback_data="menu")])
     return InlineKeyboardMarkup(rows)
 
 
@@ -299,9 +343,10 @@ async def _send_menu(
     *,
     message=None,
     include_app_link: bool = False,
+    mode: str = "menu",
 ) -> None:
-    text = _format_price_list()
-    markup = _price_keyboard()
+    text = _format_price_list(mode)
+    markup = _price_keyboard(mode)
 
     if message:
         await message.edit_text(text, reply_markup=markup, parse_mode=ParseMode.HTML)
@@ -330,7 +375,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
 
     logger.info("start: tg_user=%s bot_version=%s", getattr(update.effective_user, "id", None), BOT_VERSION)
-    await _send_menu(update.effective_chat.id, context, include_app_link=True)
+    mode = str((context.args or ["menu"])[0] or "menu").strip().lower()
+    await _send_menu(update.effective_chat.id, context, include_app_link=True, mode=mode)
 
 
 async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -398,8 +444,12 @@ async def buy_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             currency="RUB",
             prices=prices,
         )
-        # Подсказываем пользователю
-        await query.answer("Счёт отправлен, посмотрите сообщение выше.")
+        logger.info(
+            "Invoice sent: tg_user=%s product=%s amount=%s",
+            getattr(query.from_user, "id", None),
+            product_code,
+            int(product["amount"]),
+        )
     except Exception as exc:
         logger.exception("Failed to send invoice for %s: %s", product_code, exc)
         ORDERS[payload]["status"] = "failed"
@@ -413,16 +463,18 @@ async def precheckout_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
     if not query:
         return
 
-    payload = query.invoice_payload
-    order = ORDERS.get(payload)
-
-    if not order or order.get("status") != "pending":
-        await query.answer(ok=False, error_message="Заказ не найден или уже обработан. Пожалуйста, оформите новый счёт.")
+    payload = str(query.invoice_payload or "")
+    product = _product_from_payload(payload)
+    if not product:
+        await query.answer(ok=False, error_message="Заказ не найден. Пожалуйста, сформируйте счёт заново.")
         return
 
-    # Можно проверить сумму/валюту
-    if query.total_amount != int(order.get("amount", -1)) or query.currency != order.get("currency", "RUB"):
-        await query.answer(ok=False, error_message="Данные заказа не совпадают. Попробуйте сформировать счёт заново.")
+    expected_amount = int(product.get("amount") or -1)
+    expected_currency = "RUB"
+
+    # Валидация без зависимости от in-memory ORDERS (устойчиво к рестартам/нескольким воркерам).
+    if int(query.total_amount or -1) != expected_amount or str(query.currency or "").upper() != expected_currency:
+        await query.answer(ok=False, error_message="Данные заказа не совпадают. Сформируйте счёт заново.")
         return
 
     await query.answer(ok=True)
@@ -436,6 +488,13 @@ def _product_code_from_payload(payload: str) -> str:
     if len(parts) < 2:
         return ""
     return str(parts[1] or "").strip()
+
+
+def _product_from_payload(payload: str) -> Optional[Dict[str, Any]]:
+    code = _product_code_from_payload(payload)
+    if not code:
+        return None
+    return _get_product(code)
 
 
 def _format_subscription_confirmation(

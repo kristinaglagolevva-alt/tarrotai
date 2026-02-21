@@ -720,7 +720,6 @@ type BillingStatus = {
 const BOT_USERNAME =
   ((import.meta as any).env?.VITE_BOT_USERNAME as string | undefined)?.trim() || 'Tarot_AI_Bot'
 const BOT_PAYMENT_URL = `https://t.me/${BOT_USERNAME}?start=menu`
-const BOT_CREDITS_URL = `https://t.me/${BOT_USERNAME}?start=buy_credits`
 const SUPPORT_URL =
   ((import.meta as any).env?.VITE_SUPPORT_URL as string | undefined)?.trim() || `https://t.me/${BOT_USERNAME}`
 const TERMS_URL =
@@ -3990,7 +3989,6 @@ useEffect(() => {
   const profileUsername = user?.username ? `@${user.username}` : '@username'
   const freeLimit = Math.max(1, Number(billing?.free_limit ?? 5))
   const freeLeft = Math.max(0, Number(billing?.free_left ?? 0))
-  const paidBalance = Math.max(0, Number(billing?.paid_readings_balance ?? 0))
   const subActive = !!billing?.has_active_subscription
   const subLabel = subActive
     ? `Активна до ${formatRuDate(billing?.subscription_until)}`
@@ -4541,7 +4539,7 @@ useEffect(() => {
                       </a>
                     </section>
 
-                    <section className="profile-piece" aria-label="Штучные расклады">
+                    <section className="profile-piece" aria-label="Подключить безлимит">
                       <div className="profile-piece__info">
                         <div className="profile-piece__title">
                           <span className="profile-icon profile-icon--piece" aria-hidden="true">
@@ -4550,25 +4548,25 @@ useEffect(() => {
                               <path d="M12 4.8V3M12 21v-1.8M4.8 12H3M21 12h-1.8" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
                             </svg>
                           </span>
-                          <span>Штучные расклады</span>
+                          <span>Подключить безлимит</span>
                         </div>
-                        <div className="profile-piece__meta">Доступно: {paidBalance} расклада</div>
-                        <div className="profile-piece__submeta">Бесплатно в этом месяце: {freeLeft} из {freeLimit}</div>
+                        <div className="profile-piece__meta">Бесплатно в этом месяце: {freeLeft} из {freeLimit}</div>
+                        <div className="profile-piece__submeta">14 дней — 99 ₽, месяц — 179 ₽</div>
                       </div>
 
                       <a
-                        href={BOT_CREDITS_URL}
+                        href={BOT_PAYMENT_URL}
                         target="_blank"
                         rel="noreferrer"
                         className="profile-piece__cta"
                         onClick={(e) => {
                           e.preventDefault()
-                          openTelegramUrl(BOT_CREDITS_URL)
+                          openTelegramUrl(BOT_PAYMENT_URL)
                         }}
                       >
-                        Докупить
+                        Подключить
                         <br />
-                        расклады
+                        безлимит
                       </a>
                     </section>
 

@@ -39,52 +39,30 @@ APP_URL_RAW = (os.environ.get("TELEGRAM_APP_URL") or "").strip()  # наприм
 APP_BUTTON_TEXT = os.environ.get("TELEGRAM_APP_BUTTON_TEXT") or "Открыть приложение"
 BOT_VERSION = os.environ.get("TELEGRAM_BOT_VERSION") or os.environ.get("APP_VERSION") or "unknown"
 
-# ----- Тарифы (как ты описал) -----
+# ----- Тарифы -----
 # amount — в копейках (RUB * 100)
 PRODUCTS: List[Dict[str, Any]] = [
     {
-        "code": "readings_5",
-        "menu_label": "🔹 5 раскладов — 20 ₽",
-        "menu_hint": "Мини-пакет для быстрых вопросов.",
-        "title": "5 раскладов",
-        "description": "Пакет из 5 раскладов AI Tarot",
-        "amount": 20 * 100,
-        "kind": "credits",
-        "credits": 5,
-        "priority": 10,
-    },
-    {
-        "code": "readings_15",
-        "menu_label": "🔮 15 раскладов — 50 ₽",
-        "menu_hint": "Оптимальный пакет для регулярного использования.",
-        "title": "15 раскладов",
-        "description": "Пакет из 15 раскладов AI Tarot",
-        "amount": 50 * 100,
-        "kind": "credits",
-        "credits": 15,
-        "priority": 20,
-    },
-    {
         "code": "sub_2weeks",
-        "menu_label": "✨ Безлимит на 2 недели — 299 ₽",
+        "menu_label": "✨ Безлимит на 2 недели — 99 ₽",
         "menu_hint": "14 дней без ограничений: идеальный старт, чтобы успеть задать все вопросы.",
         "title": "Безлимит на 2 недели",
         "description": "Подписка AI Tarot на 14 дней",
-        "amount": 299 * 100,
+        "amount": 99 * 100,
         "kind": "subscription",
         "days": 14,
-        "priority": 40,
+        "priority": 10,
     },
     {
         "code": "sub_month",
-        "menu_label": "🌟 Безлимит на месяц — 399 ₽",
+        "menu_label": "🌟 Безлимит на месяц — 179 ₽",
         "menu_hint": "30 дней полного доступа: безлимитные расклады и максимальная гибкость.",
         "title": "Безлимит на месяц",
         "description": "Подписка AI Tarot на 30 дней",
-        "amount": 399 * 100,
+        "amount": 179 * 100,
         "kind": "subscription",
         "days": 30,
-        "priority": 50,
+        "priority": 20,
     },
 ]
 
@@ -101,13 +79,6 @@ def _get_product(code: str) -> Optional[Dict[str, Any]]:
 
 
 def _products_for_mode(mode: str = "menu") -> List[Dict[str, Any]]:
-    m = str(mode or "menu").strip().lower()
-    if m in {"buy_credits", "credits", "buy"}:
-        # Для "докупить расклады" показываем пакеты + месячный безлимит как альтернатива.
-        return [
-            p for p in sorted(PRODUCTS, key=lambda x: x.get("priority", 0))
-            if str(p.get("kind") or "") == "credits" or str(p.get("code") or "") == "sub_month"
-        ]
     return sorted(PRODUCTS, key=lambda x: x.get("priority", 0))
 
 
@@ -120,8 +91,8 @@ def _format_price_list(mode: str = "menu") -> str:
     ]
     if str(mode).lower() in {"buy_credits", "credits", "buy"}:
         parts = [
-            "<b>Докупка раскладов</b>",
-            "Выберите пакет по количеству раскладов или безлимит на месяц:",
+            "<b>Подключение безлимита</b>",
+            "Выберите период подписки:",
             "",
         ]
 
@@ -140,8 +111,6 @@ def _price_keyboard(mode: str = "menu") -> InlineKeyboardMarkup:
     rows: List[List[InlineKeyboardButton]] = []
     for product in products:
         rows.append([InlineKeyboardButton(product["menu_label"], callback_data=f"buy:{product['code']}")])
-    if str(mode).lower() in {"buy_credits", "credits", "buy"}:
-        rows.append([InlineKeyboardButton("↩️ Показать все тарифы", callback_data="menu")])
     return InlineKeyboardMarkup(rows)
 
 

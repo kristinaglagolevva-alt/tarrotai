@@ -141,6 +141,12 @@ PRODUCTS: List[Dict[str, Any]] = [
     },
 ]
 
+PLAN_ORDER = ["sub_2weeks", "sub_month"]
+PLAN_TITLES = {
+    "sub_2weeks": "2 недели",
+    "sub_month": "Месяц",
+}
+
 # Простое хранилище заказов в памяти (для валидации precheckout и подтверждения оплаты)
 # В проде лучше хранить в БД, но ты просил “без server.py”.
 ORDERS: Dict[str, Dict[str, Any]] = {}
@@ -197,6 +203,124 @@ def _products_for_mode(mode: str = "menu") -> List[Dict[str, Any]]:
         items = [p for p in items if str(p.get("provider_mode") or "").lower() == "click"]
 
     return sorted(items, key=lambda x: x.get("priority", 0))
+
+
+def _plan_key_from_code(code: str) -> str:
+    raw = str(code or "").strip().lower()
+    if raw.endswith("_click"):
+        return raw[:-6]
+    if raw.endswith("_xtr"):
+        return raw[:-4]
+    return raw
+
+
+def _format_amount_label(product: Dict[str, Any]) -> str:
+    amount = int(product.get("amount") or 0)
+    currency = str(product.get("currency") or "RUB").upper()
+    if currency == "RUB":
+        rub = amount / 100
+        if float(rub).is_integer():
+            return f"{int(rub)} ₽"
+        return f"{rub:.2f} ₽".replace(".", ",")
+    if currency == "UZS":
+        return f"{amount:,}".replace(",", " ") + " UZS"
+    if currency == "XTR":
+        return f"{amount} Stars"
+    return f"{amount} {currency}"
+
+
+def _product_for_plan_and_provider(plan_key: str, provider_mode: str) -> Optional[Dict[str, Any]]:
+    for product in _products_for_mode("menu"):
+        if _plan_key_from_code(product.get("code") or "") != plan_key:
+            continue
+        if str(product.get("provider_mode") or "").strip().lower() == str(provider_mode or "").strip().lower():
+            return product
+    return None
+
+
+def _available_plan_keys() -> List[str]:
+    visible = _products_for_mode("menu")
+    keys = {_plan_key_from_code(p.get("code") or "") for p in visible}
+    return [k for k in PLAN_ORDER if k in keys]
+
+
+def _plan_summary_label(plan_key: str) -> str:
+    title = PLAN_TITLES.get(plan_key, plan_key)
+    values: List[str] = []
+    card_product = _product_for_plan_and_provider(plan_key, "yookassa")
+    click_product = _product_for_plan_and_provider(plan_key, "click")
+    if card_product:
+        values.append(_format_amount_label(card_product))
+    if click_product:
+        values.append(_format_amount_label(click_product))
+    if not values:
+        return title
+    return f"{title} — {' / '.join(values)}"
+
+
+def _plans_keyboard() -> InlineKeyboardMarkup:
+    rows: List[List[InlineKeyboardButton]] = []
+    for plan_key in _available_plan_keys():
+        rows.append([InlineKeyboardButton(_plan_summary_label(plan_key), callback_data=f"plan:{plan_key}")])
+    if not rows:
+        rows.append([InlineKeyboardButton("Обновить", callback_data="menu")])
+    return InlineKeyboardMarkup(rows)
+
+
+def _format_plan_list() -> str:
+    parts: List[str] = [
+        "<b>Тарифы AI Tarot</b>",
+        "Шаг 1 из 2: выберите план в рублях/сумах.",
+        "После выбора плана покажу способы оплаты: СБП, CLICK, по карте.",
+        "",
+    ]
+    for plan_key in _available_plan_keys():
+        parts.append(f"• <b>{_plan_summary_label(plan_key)}</b>")
+    parts.append("")
+    parts.append("Нажмите на подходящий план.")
+    return "\n".join(parts).strip()
+
+
+def _method_keyboard(plan_key: str) -> InlineKeyboardMarkup:
+    rows: List[List[InlineKeyboardButton]] = []
+
+    card_product = _product_for_plan_and_provider(plan_key, "yookassa")
+    click_product = _product_for_plan_and_provider(plan_key, "click")
+
+    if card_product:
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    f"💳 По карте или SberPay — {_format_amount_label(card_product)}",
+                    callback_data=f"buy:{card_product['code']}",
+                )
+            ]
+        )
+        rows.append([InlineKeyboardButton(f"🟢 СБП — {_format_amount_label(card_product)}", callback_data=f"sbp:{plan_key}")])
+
+    if click_product:
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    f"🇺🇿 CLICK — {_format_amount_label(click_product)}",
+                    callback_data=f"buy:{click_product['code']}",
+                )
+            ]
+        )
+
+    rows.append([InlineKeyboardButton("⬅️ Назад к планам", callback_data="menu")])
+    return InlineKeyboardMarkup(rows)
+
+
+def _format_methods_text(plan_key: str) -> str:
+    title = PLAN_TITLES.get(plan_key, plan_key)
+    return (
+        f"<b>{title}</b>\n"
+        f"Шаг 2 из 2: выберите способ оплаты.\n\n"
+        f"• СБП\n"
+        f"• CLICK\n"
+        f"• По карте / SberPay"
+    )
 
 
 def _format_price_list(mode: str = "menu") -> str:
@@ -433,8 +557,13 @@ async def _send_menu(
     include_app_link: bool = False,
     mode: str = "menu",
 ) -> None:
-    text = _format_price_list(mode)
-    markup = _price_keyboard(mode)
+    mode_l = str(mode or "menu").strip().lower()
+    if mode_l in {"menu", "buy_credits", "credits", "buy"}:
+        text = _format_plan_list()
+        markup = _plans_keyboard()
+    else:
+        text = _format_price_list(mode_l)
+        markup = _price_keyboard(mode_l)
 
     if message:
         await message.edit_text(text, reply_markup=markup, parse_mode=ParseMode.HTML)
@@ -473,7 +602,62 @@ async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         return
     await _safe_answer_query(query)
     if query.message:
-        await _send_menu(query.message.chat.id, context, message=query.message, include_app_link=False)
+        await _send_menu(query.message.chat.id, context, message=query.message, include_app_link=False, mode="menu")
+
+
+async def plan_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    if not query or not query.data:
+        return
+    await _safe_answer_query(query)
+
+    _, plan_key = (query.data.split(":", 1) + [""])[:2]
+    plan_key = str(plan_key or "").strip().lower()
+    if plan_key not in _available_plan_keys():
+        if query.message:
+            await query.message.reply_text("Этот план временно недоступен. Выберите другой.")
+        return
+
+    if query.message:
+        await query.message.edit_text(
+            _format_methods_text(plan_key),
+            reply_markup=_method_keyboard(plan_key),
+            parse_mode=ParseMode.HTML,
+        )
+
+
+async def sbp_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    if not query or not query.data:
+        return
+    await _safe_answer_query(query)
+
+    _, plan_key = (query.data.split(":", 1) + [""])[:2]
+    plan_key = str(plan_key or "").strip().lower()
+    card_product = _product_for_plan_and_provider(plan_key, "yookassa")
+    if not card_product:
+        if query.message:
+            await query.message.reply_text("СБП для этого плана временно недоступен.")
+        return
+
+    app_btn = _build_app_button()
+    rows: List[List[InlineKeyboardButton]] = []
+    if app_btn:
+        rows.append([app_btn])
+    rows.append([InlineKeyboardButton("⬅️ Назад к способам оплаты", callback_data=f"plan:{plan_key}")])
+
+    text = (
+        f"<b>СБП — {PLAN_TITLES.get(plan_key, plan_key)}</b>\n"
+        f"Сумма: {_format_amount_label(card_product)}\n\n"
+        "Оплата по СБП проходит в мини-приложении. Нажмите кнопку ниже, затем в профиле выберите оплату через СБП."
+    )
+
+    if query.message:
+        await query.message.edit_text(
+            text,
+            reply_markup=InlineKeyboardMarkup(rows),
+            parse_mode=ParseMode.HTML,
+        )
 
 
 async def buy_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -750,6 +934,8 @@ def create_application() -> Application:
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("menu", start))
     application.add_handler(CallbackQueryHandler(buy_handler, pattern=r"^buy:"))
+    application.add_handler(CallbackQueryHandler(plan_callback, pattern=r"^plan:"))
+    application.add_handler(CallbackQueryHandler(sbp_callback, pattern=r"^sbp:"))
     application.add_handler(CallbackQueryHandler(menu_callback, pattern=r"^menu"))
     application.add_handler(PreCheckoutQueryHandler(precheckout_handler))
     application.add_handler(MessageHandler(filters.SUCCESSFUL_PAYMENT, successful_payment_handler))

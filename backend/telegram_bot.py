@@ -63,8 +63,8 @@ CLICK_SUB_MONTH_LABEL = (os.environ.get("CLICK_SUB_MONTH_LABEL") or "🇺🇿 CL
 PRODUCTS: List[Dict[str, Any]] = [
     {
         "code": "sub_2weeks",
-        "menu_label": "✨ Безлимит на 2 недели — 99 ₽",
-        "menu_hint": "14 дней без ограничений: идеальный старт, чтобы успеть задать все вопросы.",
+        "menu_label": "💳 По карте или SberPay — 2 недели — 99 ₽",
+        "menu_hint": "14 дней без ограничений через стандартную оплату Telegram (карта/SberPay).",
         "title": "Безлимит на 2 недели",
         "description": "Подписка AI Tarot на 14 дней",
         "amount": 99 * 100,
@@ -76,8 +76,8 @@ PRODUCTS: List[Dict[str, Any]] = [
     },
     {
         "code": "sub_month",
-        "menu_label": "🌟 Безлимит на месяц — 179 ₽",
-        "menu_hint": "30 дней полного доступа: безлимитные расклады и максимальная гибкость.",
+        "menu_label": "💳 По карте или SberPay — месяц — 179 ₽",
+        "menu_hint": "30 дней полного доступа через стандартную оплату Telegram (карта/SberPay).",
         "title": "Безлимит на месяц",
         "description": "Подписка AI Tarot на 30 дней",
         "amount": 179 * 100,

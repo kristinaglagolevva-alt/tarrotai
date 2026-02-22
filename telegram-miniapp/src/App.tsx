@@ -4780,7 +4780,7 @@ useEffect(() => {
                               openTelegramUrl(BOT_PAYMENT_URL)
                             }}
                           >
-                            Оплата через Telegram-бота
+                            По карте или SberPay
                           </a>
                         </div>
                       </section>

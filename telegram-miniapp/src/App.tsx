@@ -326,6 +326,33 @@ function MarkdownText({ text, className = '' }: { text?: string; className?: str
   return <div className={`result-md ${className}`.trim()}>{blocks}</div>
 }
 
+function InterpretationLoader({ text = 'Получаем интерпретацию' }: { text?: string }) {
+  return (
+    <div className="interp-loader" role="status" aria-live="polite">
+      <div className="interp-loader__ring" aria-hidden="true">
+        {Array.from({ length: 12 }).map((_, i) => (
+          <span key={i} style={{ ['--i' as any]: i }} />
+        ))}
+      </div>
+
+      <div className="interp-loader__text">
+        {text}
+        <span className="interp-loader__dots" aria-hidden="true">
+          <span />
+          <span />
+          <span />
+        </span>
+      </div>
+
+      <div className="interp-loader__count" aria-hidden="true">
+        <span>3</span>
+        <span>2</span>
+        <span>1</span>
+      </div>
+    </div>
+  )
+}
+
 /* =================================================================================================
    [4] КОНФИГ UI (ТЕМЫ / РАСКЛАДЫ)
 ================================================================================================= */
@@ -5512,32 +5539,30 @@ useEffect(() => {
                             <>
                               {renderSafetyNotice(threeQuestion)}
 
-                              {/* Loading indicator while waiting for backend */}
-                              {threeLoading && (
-                                <p style={{ opacity: 0.8, marginTop: 10 }}>
-                                  Идёт анализ расклада...
-                                </p>
+                              {threeLoading ? (
+                                <InterpretationLoader text="Получаем интерпретацию" />
+                              ) : (
+                                <>
+                                  {!!threeDesc && (
+                                    <div style={{ marginTop: 10 }}>
+                                      <MarkdownText text={threeDesc} />
+                                      <div style={{ height: 10 }} />
+                                    </div>
+                                  )}
+
+                                  {threeCards.map((c, idx) => (
+                                    <div key={`${c.role}-${idx}`} style={{ marginTop: idx === 0 ? 0 : 14 }}>
+                                      <p style={{ marginTop: 0, marginBottom: 8 }}>
+                                        <b>
+                                          {c.role}: {c.name}
+                                        </b>
+                                      </p>
+
+                                      <MarkdownText text={c.text || ''} />
+                                    </div>
+                                  ))}
+                                </>
                               )}
-
-                              {/* Description from backend */}
-                              {!!threeDesc && (
-                                <div style={{ marginTop: 10 }}>
-                                  <MarkdownText text={threeDesc} />
-                                  <div style={{ height: 10 }} />
-                                </div>
-                              )}
-
-                              {threeCards.map((c, idx) => (
-                                <div key={`${c.role}-${idx}`} style={{ marginTop: idx === 0 ? 0 : 14 }}>
-                                  <p style={{ marginTop: 0, marginBottom: 8 }}>
-                                    <b>
-                                      {c.role}: {c.name}
-                                    </b>
-                                  </p>
-
-                                  <MarkdownText text={c.text || ''} />
-                                </div>
-                              ))}
                             </>
                           )}
                         </div>
@@ -5728,32 +5753,30 @@ useEffect(() => {
 
                           {renderSafetyNotice(ppfQuestion)}
 
-                          {/* Loading indicator while waiting for backend */}
-                          {ppfLoading && (
-                            <p style={{ opacity: 0.8, marginTop: 10 }}>
-                              Идет получение ответа от сервера...
-                            </p>
+                          {ppfLoading ? (
+                            <InterpretationLoader text="Получаем интерпретацию" />
+                          ) : (
+                            <>
+                              {!!ppfDesc && (
+                                <div style={{ marginTop: 10 }}>
+                                  <MarkdownText text={ppfDesc} />
+                                  <div style={{ height: 10 }} />
+                                </div>
+                              )}
+
+                              {ppfCards.map((c, idx) => (
+                                <div key={`${c.role}-${idx}`} style={{ marginTop: idx === 0 ? 0 : 14 }}>
+                                  <p style={{ marginTop: 0, marginBottom: 8 }}>
+                                    <b>
+                                      {c.role}: {c.name}
+                                    </b>
+                                  </p>
+
+                                  <MarkdownText text={c.text || ''} />
+                                </div>
+                              ))}
+                            </>
                           )}
-
-                          {/* Description from backend */}
-                          {!!ppfDesc && (
-                            <div style={{ marginTop: 10 }}>
-                              <MarkdownText text={ppfDesc} />
-                              <div style={{ height: 10 }} />
-                            </div>
-                          )}
-
-                          {ppfCards.map((c, idx) => (
-                            <div key={`${c.role}-${idx}`} style={{ marginTop: idx === 0 ? 0 : 14 }}>
-                              <p style={{ marginTop: 0, marginBottom: 8 }}>
-                                <b>
-                                  {c.role}: {c.name}
-                                </b>
-                              </p>
-
-                              <MarkdownText text={c.text || ''} />
-                            </div>
-                          ))}
                         </div>
                       </div>
                     </div>
@@ -5951,30 +5974,28 @@ useEffect(() => {
 
                           {renderSafetyNotice(decisionQuestion)}
 
-                          {/* Loading indicator while waiting for backend */}
-                          {decisionLoading && (
-                            <p style={{ opacity: 0.8, marginTop: 10 }}>
-                              Идет получение ответа от сервера...
-                            </p>
+                          {decisionLoading ? (
+                            <InterpretationLoader text="Получаем интерпретацию" />
+                          ) : (
+                            <>
+                              {!!decisionDesc && (
+                                <div style={{ marginTop: 10 }}>
+                                  <MarkdownText text={decisionDesc} />
+                                  <div style={{ height: 10 }} />
+                                </div>
+                              )}
+
+                              {decisionCards.map((c) => (
+                                <div key={c.role} style={{ marginTop: 14 }}>
+                                  <div style={{ fontWeight: 700, marginBottom: 6 }}>
+                                    {c.role}: {c.name}
+                                  </div>
+
+                                  <MarkdownText text={String(c.text || '')} />
+                                </div>
+                              ))}
+                            </>
                           )}
-
-                          {/* Description from backend */}
-                          {!!decisionDesc && (
-                            <div style={{ marginTop: 10 }}>
-                              <MarkdownText text={decisionDesc} />
-                              <div style={{ height: 10 }} />
-                            </div>
-                          )}
-
-                          {decisionCards.map((c) => (
-                            <div key={c.role} style={{ marginTop: 14 }}>
-                              <div style={{ fontWeight: 700, marginBottom: 6 }}>
-                                {c.role}: {c.name}
-                              </div>
-
-                              <MarkdownText text={String(c.text || '')} />
-                            </div>
-                          ))}
                         </div>
                       </div>
                     </div>

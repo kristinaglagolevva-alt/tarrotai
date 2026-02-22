@@ -563,6 +563,16 @@ body,
   margin-top: 8px;
 }
 
+/* iOS/WebKit: sticky внутри transform-контейнера иногда "обрубает" pill-кнопку.
+   Для Home CTA используем стабильный fallback без sticky. */
+@supports (-webkit-touch-callout: none) {
+  .nav-track .glass-cta--sticky {
+    position: relative;
+    bottom: auto;
+    z-index: 2;
+  }
+}
+
 .glass-cta--hero .glass-cta__inner {
   position: relative;
   overflow: hidden;
@@ -884,7 +894,8 @@ body,
 .nav-pages {
   width: var(--block-w);
   position: relative;
-  overflow: hidden;
+  overflow-x: hidden;
+  overflow-y: visible;
 
 }
 

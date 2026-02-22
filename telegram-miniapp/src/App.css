@@ -564,44 +564,78 @@ body,
 }
 
 .glass-cta--hero .glass-cta__inner {
-  height: 58px;
-  border-color: rgba(232, 219, 255, 0.74);
+  position: relative;
+  overflow: hidden;
+  isolation: isolate;
+  height: 62px;
+  border-color: rgba(255, 238, 168, 0.98);
   background:
     radial-gradient(
-      170px 106px at var(--rx, 50%) var(--ry, 50%),
-      rgba(255,255,255,0.32),
-      rgba(255,255,255,0.02) 72%
+      220px 120px at var(--rx, 50%) var(--ry, 50%),
+      rgba(255,255,255,0.48),
+      rgba(255,255,255,0.04) 72%
     ),
-    linear-gradient(115deg, rgba(255, 198, 92, 0.5) 0%, rgba(168, 96, 255, 0.46) 52%, rgba(96, 189, 255, 0.42) 100%),
-    linear-gradient(180deg, rgba(65, 86, 154, 0.72), rgba(39, 55, 107, 0.74));
+    linear-gradient(108deg, rgba(255, 206, 88, 0.96) 0%, rgba(255, 154, 68, 0.91) 34%, rgba(176, 108, 255, 0.9) 67%, rgba(94, 204, 255, 0.86) 100%),
+    linear-gradient(180deg, rgba(94, 113, 188, 0.84), rgba(56, 74, 145, 0.86));
   box-shadow:
-    0 22px 48px rgba(8, 15, 42, 0.52),
-    0 0 0 1px rgba(255, 255, 255, 0.16) inset,
-    0 0 32px rgba(156, 191, 255, 0.28);
-  backdrop-filter: blur(20px) saturate(1.35);
-  -webkit-backdrop-filter: blur(20px) saturate(1.35);
+    0 28px 58px rgba(9, 16, 45, 0.62),
+    0 0 0 1px rgba(255, 255, 255, 0.24) inset,
+    0 0 0 2px rgba(255, 214, 122, 0.22),
+    0 0 52px rgba(255, 197, 98, 0.56),
+    0 0 92px rgba(138, 103, 255, 0.44);
+  backdrop-filter: blur(20px) saturate(1.55);
+  -webkit-backdrop-filter: blur(20px) saturate(1.55);
+}
+
+.glass-cta--hero .glass-cta__inner::after {
+  content: '';
+  position: absolute;
+  inset: -2px;
+  border-radius: inherit;
+  pointer-events: none;
+  background: linear-gradient(
+    120deg,
+    rgba(255,255,255,0) 18%,
+    rgba(255,255,255,0.34) 37%,
+    rgba(255,255,255,0.08) 44%,
+    rgba(255,255,255,0) 58%
+  );
+  transform: translateX(-145%);
+  animation: cta-hero-sweep 2.7s ease-in-out infinite;
+  z-index: 0;
+}
+
+.glass-cta--hero:not(.is-error) .glass-cta__inner {
+  animation: cta-hero-pulse 2.1s ease-in-out infinite;
 }
 
 .glass-cta--hero .glass-cta__rim {
   background: linear-gradient(
     180deg,
-    rgba(255,255,255,0.3),
-    rgba(255,255,255,0.11) 45%,
+    rgba(255,255,255,0.36),
+    rgba(255,255,255,0.14) 45%,
     rgba(255,255,255,0.03)
   );
-  opacity: 0.74;
+  opacity: 0.84;
 }
 
 .glass-cta--hero .glass-cta__text {
-  color: rgba(250, 253, 255, 0.99);
-  font-weight: 760;
-  letter-spacing: 0.24px;
-  text-shadow: 0 12px 26px rgba(9, 18, 44, 0.52);
+  position: relative;
+  z-index: 2;
+  font-size: 22px;
+  color: rgba(255, 255, 255, 1);
+  font-weight: 800;
+  letter-spacing: 0.26px;
+  text-shadow:
+    0 12px 30px rgba(9, 18, 44, 0.58),
+    0 0 22px rgba(255, 233, 164, 0.42);
 }
 
 .glass-cta--hero .glass-cta__icon {
-  width: 24px;
-  height: 24px;
+  position: relative;
+  z-index: 2;
+  width: 25px;
+  height: 25px;
   margin-right: 10px;
   display: inline-flex;
   align-items: center;
@@ -610,25 +644,26 @@ body,
 }
 
 .glass-cta--hero .glass-cta__icon svg {
-  width: 24px;
-  height: 24px;
+  width: 25px;
+  height: 25px;
   display: block;
   filter: drop-shadow(0 8px 16px rgba(12, 18, 44, 0.46));
 }
 
 .glass-cta--hero .glass-cta__icon img {
-  width: 24px;
-  height: 24px;
+  width: 25px;
+  height: 25px;
   display: block;
   object-fit: contain;
   filter: drop-shadow(0 8px 16px rgba(9, 16, 42, 0.42));
 }
 
 .glass-cta--hero .glass-cta__spark {
-  opacity: 0.66;
+  z-index: 1;
+  opacity: 0.84;
   background:
-    radial-gradient(140px 54px at 22% 50%, rgba(255, 255, 255, 0.12), transparent 78%),
-    radial-gradient(170px 66px at 78% 50%, rgba(255, 255, 255, 0.08), transparent 78%);
+    radial-gradient(180px 64px at 18% 50%, rgba(255, 255, 255, 0.28), transparent 78%),
+    radial-gradient(200px 78px at 82% 50%, rgba(255, 242, 199, 0.26), transparent 78%);
 }
 
 .glass-cta.is-error .glass-cta__inner {
@@ -699,6 +734,43 @@ body,
   20%  { transform: translateY(1px) scale(0.992); }
   55%  { transform: translateY(-1px) scale(1.004); }
   100% { transform: translateY(0) scale(1); }
+}
+
+@keyframes cta-hero-pulse {
+  0%,
+  100% {
+    transform: translateY(0) scale(1);
+    box-shadow:
+      0 28px 58px rgba(9, 16, 45, 0.62),
+      0 0 0 1px rgba(255, 255, 255, 0.24) inset,
+      0 0 0 2px rgba(255, 214, 122, 0.22),
+      0 0 52px rgba(255, 197, 98, 0.56),
+      0 0 92px rgba(138, 103, 255, 0.44);
+  }
+  50% {
+    transform: translateY(-1px) scale(1.02);
+    box-shadow:
+      0 32px 68px rgba(8, 15, 44, 0.68),
+      0 0 0 1px rgba(255, 255, 255, 0.3) inset,
+      0 0 0 3px rgba(255, 214, 122, 0.28),
+      0 0 62px rgba(255, 198, 108, 0.66),
+      0 0 108px rgba(144, 106, 255, 0.5);
+  }
+}
+
+@keyframes cta-hero-sweep {
+  0% {
+    transform: translateX(-145%);
+  }
+  40% {
+    transform: translateX(-145%);
+  }
+  74% {
+    transform: translateX(145%);
+  }
+  100% {
+    transform: translateX(145%);
+  }
 }
 
 

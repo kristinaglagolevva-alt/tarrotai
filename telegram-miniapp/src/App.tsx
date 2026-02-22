@@ -5164,9 +5164,9 @@ useEffect(() => {
               scale={pflipScale}
               top={pflipTop}
               onFrontChange={setSelectedFrontUrl}
-              // Фиксируем одну карту (дневную), чтобы в анимации не было рандомной подмены лица.
-              lockFront={true}
-              lockedFrontUrl={dailyFrontReady ? (dailyFrontUrl || backCardImg) : backCardImg}
+              // До остановки: рандомные карты в перемешивании. После остановки: фикс выпавшей карты.
+              lockFront={shakenOnce}
+              lockedFrontUrl={dailyFrontUrl || backCardImg}
             />
 
             {!isResult && !cardDayLoading && (

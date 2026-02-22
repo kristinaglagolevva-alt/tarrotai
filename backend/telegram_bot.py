@@ -288,22 +288,22 @@ def _method_keyboard(plan_key: str) -> InlineKeyboardMarkup:
     click_product = _product_for_plan_and_provider(plan_key, "click")
 
     if card_product:
-        rows.append(
-            [
-                InlineKeyboardButton(
-                    f"💳 По карте или SberPay — {_format_amount_label(card_product)}",
-                    callback_data=f"buy:{card_product['code']}",
-                )
-            ]
-        )
         rows.append([InlineKeyboardButton(f"🟢 СБП — {_format_amount_label(card_product)}", callback_data=f"sbp:{plan_key}")])
-
     if click_product:
         rows.append(
             [
                 InlineKeyboardButton(
                     f"🇺🇿 CLICK — {_format_amount_label(click_product)}",
                     callback_data=f"buy:{click_product['code']}",
+                )
+            ]
+        )
+    if card_product:
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    f"💳 По карте или SberPay — {_format_amount_label(card_product)}",
+                    callback_data=f"buy:{card_product['code']}",
                 )
             ]
         )

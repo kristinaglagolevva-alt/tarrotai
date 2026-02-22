@@ -41,9 +41,7 @@ APP_BUTTON_TEXT = os.environ.get("TELEGRAM_APP_BUTTON_TEXT") or "Открыть 
 BOT_VERSION = os.environ.get("TELEGRAM_BOT_VERSION") or os.environ.get("APP_VERSION") or "unknown"
 YOOKASSA_REQUIRE_RECEIPT = str(os.environ.get("YOOKASSA_REQUIRE_RECEIPT", "1")).strip().lower() not in {"0", "false", "no"}
 YOOKASSA_VAT_CODE = int(os.environ.get("YOOKASSA_VAT_CODE", "1"))
-YOOKASSA_PAYMENT_MODE = (os.environ.get("YOOKASSA_PAYMENT_MODE") or "full_payment").strip() or "full_payment"
-YOOKASSA_PAYMENT_SUBJECT = (os.environ.get("YOOKASSA_PAYMENT_SUBJECT") or "service").strip() or "service"
-YOOKASSA_NEED_PHONE = str(os.environ.get("YOOKASSA_NEED_PHONE", "1")).strip().lower() not in {"0", "false", "no"}
+YOOKASSA_CONTACT_MODE = (os.environ.get("YOOKASSA_CONTACT_MODE") or "email").strip().lower()
 
 # ----- Тарифы -----
 # amount — в копейках (RUB * 100)
@@ -101,8 +99,6 @@ def _build_provider_data_for_receipt(product: Dict[str, Any]) -> str:
             "currency": "RUB",
         },
         "vat_code": int(YOOKASSA_VAT_CODE),
-        "payment_mode": YOOKASSA_PAYMENT_MODE,
-        "payment_subject": YOOKASSA_PAYMENT_SUBJECT,
     }
 
     payload = {
@@ -439,9 +435,15 @@ async def buy_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
     if YOOKASSA_REQUIRE_RECEIPT:
         invoice_kwargs["provider_data"] = _build_provider_data_for_receipt(product)
-        if YOOKASSA_NEED_PHONE:
+        # Для ЮKassa в LIVE-режиме обычно надежнее запрашивать email и передавать его провайдеру.
+        if YOOKASSA_CONTACT_MODE == "phone":
             invoice_kwargs["need_phone_number"] = True
             invoice_kwargs["send_phone_number_to_provider"] = True
+        elif YOOKASSA_CONTACT_MODE == "none":
+            pass
+        else:
+            invoice_kwargs["need_email"] = True
+            invoice_kwargs["send_email_to_provider"] = True
 
     try:
         await context.bot.send_invoice(**invoice_kwargs)

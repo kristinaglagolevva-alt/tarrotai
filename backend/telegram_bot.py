@@ -478,9 +478,25 @@ async def precheckout_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
 
     # Валидация без зависимости от in-memory ORDERS (устойчиво к рестартам/нескольким воркерам).
     if int(query.total_amount or -1) != expected_amount or str(query.currency or "").upper() != expected_currency:
+        logger.warning(
+            "Precheckout mismatch: tg_user=%s payload=%s amount=%s currency=%s expected_amount=%s expected_currency=%s",
+            getattr(query.from_user, "id", None),
+            payload,
+            int(query.total_amount or -1),
+            str(query.currency or ""),
+            expected_amount,
+            expected_currency,
+        )
         await query.answer(ok=False, error_message="Данные заказа не совпадают. Сформируйте счёт заново.")
         return
 
+    logger.info(
+        "Precheckout OK: tg_user=%s payload=%s amount=%s currency=%s",
+        getattr(query.from_user, "id", None),
+        payload,
+        int(query.total_amount or -1),
+        str(query.currency or ""),
+    )
     await query.answer(ok=True)
 
 
@@ -537,6 +553,16 @@ async def successful_payment_handler(update: Update, context: ContextTypes.DEFAU
     payment = message.successful_payment
     payload = payment.invoice_payload
     order = ORDERS.get(payload)
+
+    logger.info(
+        "Successful payment update: tg_user=%s payload=%s amount=%s currency=%s tg_charge=%s provider_charge=%s",
+        getattr(message.from_user, "id", None),
+        payload,
+        int(payment.total_amount or 0),
+        str(payment.currency or ""),
+        str(payment.telegram_payment_charge_id or ""),
+        str(payment.provider_payment_charge_id or ""),
+    )
 
     if order and order.get("status") != "paid":
         order["status"] = "paid"

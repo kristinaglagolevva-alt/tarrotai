@@ -565,6 +565,7 @@ function PremiumFlipCard({
   // ✅ фиксируем предвыбранную карту дня
   lockFront = false,
   lockedFrontUrl,
+  previewExcludeUrl,
 }: {
   frontUrls: string[]
   backUrl: string
@@ -582,15 +583,20 @@ function PremiumFlipCard({
   onFrontChange?: (url: string) => void
   lockFront?: boolean
   lockedFrontUrl?: string
+  previewExcludeUrl?: string
 }) {
   const safeFronts = frontUrls.length ? frontUrls : [backUrl]
+  const previewFronts = !lockFront && previewExcludeUrl
+    ? safeFronts.filter((u) => u !== previewExcludeUrl)
+    : safeFronts
+  const pool = previewFronts.length ? previewFronts : safeFronts
 
   const pickNext = (exclude?: string) => {
-    if (safeFronts.length === 1) return safeFronts[0]
-    let n = safeFronts[Math.floor(Math.random() * safeFronts.length)]
+    if (pool.length === 1) return pool[0]
+    let n = pool[Math.floor(Math.random() * pool.length)]
     if (exclude && n === exclude) {
-      const idx = safeFronts.indexOf(n)
-      n = safeFronts[(idx + 1) % safeFronts.length]
+      const idx = pool.indexOf(n)
+      n = pool[(idx + 1) % pool.length]
     }
     return n
   }
@@ -651,6 +657,17 @@ function PremiumFlipCard({
     setFront(lockedFrontUrl)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lockFront, lockedFrontUrl])
+
+  // Когда выходим из lockFront в режим preview — сразу уводим с финальной карты на рандомную.
+  useEffect(() => {
+    if (lockFront) return
+    if (!previewExcludeUrl) return
+    setFront((cur) => {
+      if (cur !== previewExcludeUrl) return cur
+      return pickNext(cur)
+    })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lockFront, previewExcludeUrl])
 
   // ✅ stopAtBack: ждём половину цикла и зовём onStoppedAtBack
   useEffect(() => {
@@ -5167,6 +5184,7 @@ useEffect(() => {
               // До остановки: рандомные карты в перемешивании. После остановки: фикс выпавшей карты.
               lockFront={shakenOnce}
               lockedFrontUrl={dailyFrontUrl || backCardImg}
+              previewExcludeUrl={dailyFrontUrl || ''}
             />
 
             {!isResult && !cardDayLoading && (

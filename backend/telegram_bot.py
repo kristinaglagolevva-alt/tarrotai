@@ -488,6 +488,9 @@ async def buy_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             else:
                 invoice_kwargs["need_email"] = True
                 invoice_kwargs["send_email_to_provider"] = True
+    else:
+        # В PTB параметр provider_token обязателен в сигнатуре даже для Telegram Stars.
+        invoice_kwargs["provider_token"] = ""
 
     try:
         await context.bot.send_invoice(**invoice_kwargs)

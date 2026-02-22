@@ -10,12 +10,13 @@ import random
 import secrets
 import uuid
 from datetime import date, datetime, timedelta, timezone
+from html import escape
 from typing import Optional, List, Literal, Dict, Any
 
 import httpx
 from fastapi import FastAPI, Depends, HTTPException, Header, UploadFile, File, Form, Query
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import select, desc, func
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -251,6 +252,37 @@ def _verify_sbp_bot_link_signature(*, tg_user_id: int, plan_code: str, exp: int,
     expected = _sbp_bot_link_signature(tg_user_id=tg_user_id, plan_code=plan_code, exp=exp)
     actual = str(sig or "").strip().lower()
     return bool(actual) and hmac.compare_digest(expected, actual)
+
+
+def _render_sbp_unavailable_html(*, plan_title: str, message: str) -> str:
+    safe_plan = escape(str(plan_title or "Подписка"))
+    safe_msg = escape(str(message or "СБП сейчас недоступен"))
+    return f"""<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Оплата СБП</title>
+  <style>
+    body {{ margin:0; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif; background:#0b153f; color:#e7ecff; }}
+    .wrap {{ max-width:560px; margin:0 auto; padding:24px 18px 28px; }}
+    .card {{ background:rgba(255,255,255,0.08); border:1px solid rgba(255,255,255,0.16); border-radius:16px; padding:16px; }}
+    h1 {{ margin:0 0 12px; font-size:24px; line-height:1.2; }}
+    p {{ margin:0 0 10px; font-size:16px; line-height:1.45; color:#d7ddf7; }}
+    .hint {{ margin-top:14px; color:#bfc8f8; font-size:14px; }}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>СБП временно недоступен</h1>
+    <div class="card">
+      <p><strong>{safe_plan}</strong></p>
+      <p>{safe_msg}</p>
+      <p class="hint">Вернитесь в бот и выберите оплату <strong>По карте или SberPay</strong> или <strong>CLICK</strong>.</p>
+    </div>
+  </div>
+</body>
+</html>"""
 
 
 async def _yookassa_request(
@@ -860,12 +892,22 @@ async def billing_sbp_bot_link(
         },
     }
 
-    provider = await _yookassa_request(
-        "POST",
-        "/payments",
-        payload=provider_request,
-        idempotence_key=idempotence_key,
-    )
+    try:
+        provider = await _yookassa_request(
+            "POST",
+            "/payments",
+            payload=provider_request,
+            idempotence_key=idempotence_key,
+        )
+    except HTTPException as exc:
+        detail = exc.detail if isinstance(exc.detail, dict) else {}
+        code = str(detail.get("code") or "")
+        msg = str(detail.get("message") or "").strip()
+        if code in {"SBP_PROVIDER_ERROR", "SBP_NOT_CONFIGURED"}:
+            text = msg or "СБП недоступен для вашего магазина ЮKassa."
+            html = _render_sbp_unavailable_html(plan_title=str(plan.get("title") or plan["code"]), message=text)
+            return HTMLResponse(content=html, status_code=200)
+        raise
 
     payment_id = str(provider.get("id") or "").strip()
     status = str(provider.get("status") or "pending").strip().lower()

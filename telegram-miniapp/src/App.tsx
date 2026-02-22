@@ -724,6 +724,8 @@ type SbpPlanCode = 'sub_2weeks' | 'sub_month'
 const BOT_USERNAME =
   ((import.meta as any).env?.VITE_BOT_USERNAME as string | undefined)?.trim() || 'Tarot_AI_Bot'
 const BOT_PAYMENT_URL = `https://t.me/${BOT_USERNAME}?start=menu`
+const BOT_CARD_URL = `https://t.me/${BOT_USERNAME}?start=card`
+const BOT_CLICK_URL = `https://t.me/${BOT_USERNAME}?start=click`
 const SUPPORT_URL =
   ((import.meta as any).env?.VITE_SUPPORT_URL as string | undefined)?.trim() || `https://t.me/${BOT_USERNAME}`
 const TERMS_URL =
@@ -4718,7 +4720,7 @@ useEffect(() => {
                     )}
 
                     {!subActive && (
-                      <section className="profile-piece" aria-label="Подключить безлимит">
+                      <section className="profile-piece profile-piece--stack" aria-label="Подключить безлимит">
                         <div className="profile-piece__info">
                           <div className="profile-piece__title">
                             <span className="profile-icon profile-icon--piece" aria-hidden="true">
@@ -4730,8 +4732,7 @@ useEffect(() => {
                             <span>Подключить безлимит</span>
                           </div>
                           <div className="profile-piece__meta">Бесплатно в этом месяце: {freeLeft} из {freeLimit}</div>
-                          <div className="profile-piece__submeta">СБП: 14 дней — 99 ₽, месяц — 179 ₽</div>
-                          {!!sbpStatusText && <div className="profile-piece__status">{sbpStatusText}</div>}
+                          <div className="profile-piece__submeta">Выберите удобный способ оплаты</div>
                         </div>
 
                         <div className="profile-piece__actions">
@@ -4743,7 +4744,7 @@ useEffect(() => {
                               void startSbpPayment('sub_2weeks')
                             }}
                           >
-                            {sbpBusyPlan === 'sub_2weeks' ? 'Создаю…' : 'СБП • 99 ₽'}
+                            {sbpBusyPlan === 'sub_2weeks' ? 'Создаю…' : 'СБП • 2 недели • 99 ₽'}
                           </button>
 
                           <button
@@ -4754,35 +4755,50 @@ useEffect(() => {
                               void startSbpPayment('sub_month')
                             }}
                           >
-                            {sbpBusyPlan === 'sub_month' ? 'Создаю…' : 'СБП • 179 ₽'}
+                            {sbpBusyPlan === 'sub_month' ? 'Создаю…' : 'СБП • месяц • 179 ₽'}
                           </button>
 
-                          {sbpOrderId && (
-                            <button
-                              type="button"
-                              className="profile-piece__check"
-                              disabled={sbpPolling}
-                              onClick={() => {
-                                void checkSbpStatus()
-                              }}
-                            >
-                              {sbpPolling ? 'Проверяю…' : 'Проверить оплату'}
-                            </button>
-                          )}
-
                           <a
-                            href={BOT_PAYMENT_URL}
+                            href={BOT_CARD_URL}
                             target="_blank"
                             rel="noreferrer"
-                            className="profile-piece__bot-link"
+                            className="profile-piece__cta profile-piece__cta--card"
                             onClick={(e) => {
                               e.preventDefault()
-                              openTelegramUrl(BOT_PAYMENT_URL)
+                              openTelegramUrl(BOT_CARD_URL)
                             }}
                           >
                             По карте или SberPay
                           </a>
+
+                          <a
+                            href={BOT_CLICK_URL}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="profile-piece__cta profile-piece__cta--click"
+                            onClick={(e) => {
+                              e.preventDefault()
+                              openTelegramUrl(BOT_CLICK_URL)
+                            }}
+                          >
+                            CLICK (Узбекистан)
+                          </a>
                         </div>
+
+                        {sbpOrderId && (
+                          <button
+                            type="button"
+                            className="profile-piece__check"
+                            disabled={sbpPolling}
+                            onClick={() => {
+                              void checkSbpStatus()
+                            }}
+                          >
+                            {sbpPolling ? 'Проверяю…' : 'Проверить оплату СБП'}
+                          </button>
+                        )}
+
+                        {!!sbpStatusText && <div className="profile-piece__status">{sbpStatusText}</div>}
                       </section>
                     )}
 

@@ -181,6 +181,7 @@ def _build_provider_data_for_receipt(product: Dict[str, Any]) -> str:
 
 
 def _products_for_mode(mode: str = "menu") -> List[Dict[str, Any]]:
+    mode_l = str(mode or "menu").strip().lower()
     items = PRODUCTS
     if not ENABLE_YOOKASSA_PAYMENTS:
         items = [p for p in items if str(p.get("provider_mode") or "").lower() != "yookassa"]
@@ -189,11 +190,18 @@ def _products_for_mode(mode: str = "menu") -> List[Dict[str, Any]]:
     if not ENABLE_CLICK_PAYMENTS or not CLICK_PROVIDER_TOKEN:
         items = [p for p in items if str(p.get("provider_mode") or "").lower() != "click"]
     items = [p for p in items if int(p.get("amount") or 0) > 0]
+
+    if mode_l in {"card", "cards", "sberpay", "card_sberpay"}:
+        items = [p for p in items if str(p.get("provider_mode") or "").lower() == "yookassa"]
+    elif mode_l in {"click", "uz", "uzbekistan"}:
+        items = [p for p in items if str(p.get("provider_mode") or "").lower() == "click"]
+
     return sorted(items, key=lambda x: x.get("priority", 0))
 
 
 def _format_price_list(mode: str = "menu") -> str:
     products = _products_for_mode(mode)
+    mode_l = str(mode or "menu").strip().lower()
     parts: List[str] = [
         "<b>Тарифы AI Tarot</b>",
         "Плати внутри Telegram и получи доступ сразу после оплаты.",
@@ -202,6 +210,18 @@ def _format_price_list(mode: str = "menu") -> str:
     if str(mode).lower() in {"buy_credits", "credits", "buy"}:
         parts = [
             "<b>Подключение безлимита</b>",
+            "Выберите период подписки:",
+            "",
+        ]
+    elif mode_l in {"card", "cards", "sberpay", "card_sberpay"}:
+        parts = [
+            "<b>По карте или SberPay</b>",
+            "Выберите период подписки:",
+            "",
+        ]
+    elif mode_l in {"click", "uz", "uzbekistan"}:
+        parts = [
+            "<b>Оплата через CLICK</b>",
             "Выберите период подписки:",
             "",
         ]

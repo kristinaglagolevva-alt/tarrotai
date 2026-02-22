@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import hmac
 import json
 import logging
 import os
@@ -13,6 +15,7 @@ from typing import Optional, List, Literal, Dict, Any
 import httpx
 from fastapi import FastAPI, Depends, HTTPException, Header, UploadFile, File, Form, Query
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import select, desc, func
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -58,6 +61,11 @@ YOOKASSA_SBP_RETURN_URL = (
     (os.getenv("YOOKASSA_SBP_RETURN_URL") or os.getenv("TELEGRAM_APP_URL") or "https://tarrotai.ru").strip()
 )
 YOOKASSA_WEBHOOK_TOKEN = (os.getenv("YOOKASSA_WEBHOOK_TOKEN") or "").strip()
+SBP_BOT_LINK_SECRET = (
+    os.getenv("SBP_BOT_LINK_SECRET")
+    or YOOKASSA_WEBHOOK_TOKEN
+    or ""
+).strip()
 YOOKASSA_HTTP_TIMEOUT = float(os.getenv("YOOKASSA_HTTP_TIMEOUT", "20"))
 
 
@@ -226,6 +234,23 @@ def _parse_provider_dt(value: Any) -> Optional[datetime]:
     except Exception:
         return None
     return _to_utc(parsed)
+
+
+def _sbp_bot_link_signature(*, tg_user_id: int, plan_code: str, exp: int) -> str:
+    payload = f"{int(tg_user_id)}:{str(plan_code).strip().lower()}:{int(exp)}"
+    return hmac.new(
+        SBP_BOT_LINK_SECRET.encode("utf-8"),
+        payload.encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
+
+
+def _verify_sbp_bot_link_signature(*, tg_user_id: int, plan_code: str, exp: int, sig: str) -> bool:
+    if not SBP_BOT_LINK_SECRET:
+        return False
+    expected = _sbp_bot_link_signature(tg_user_id=tg_user_id, plan_code=plan_code, exp=exp)
+    actual = str(sig or "").strip().lower()
+    return bool(actual) and hmac.compare_digest(expected, actual)
 
 
 async def _yookassa_request(
@@ -766,6 +791,109 @@ async def billing_sbp_create(
         "status": status or "pending",
         "confirmation_url": confirmation_url,
     }
+
+
+@app.get("/billing/sbp/bot-link")
+async def billing_sbp_bot_link(
+    tg_user_id: int = Query(..., ge=1),
+    plan_code: Literal["sub_2weeks", "sub_month"] = Query(...),
+    exp: int = Query(..., ge=1),
+    sig: str = Query(..., min_length=16, max_length=128),
+    db: AsyncSession = Depends(get_db),
+):
+    if not _yookassa_sbp_configured():
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "code": "SBP_NOT_CONFIGURED",
+                "message": "СБП ещё не настроен на сервере.",
+            },
+        )
+    if not SBP_BOT_LINK_SECRET:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "code": "SBP_LINK_SECRET_MISSING",
+                "message": "SBP_BOT_LINK_SECRET не задан.",
+            },
+        )
+
+    now_ts = int(datetime.now(timezone.utc).timestamp())
+    if exp < now_ts - 30:
+        raise HTTPException(status_code=401, detail={"code": "SBP_LINK_EXPIRED", "message": "Ссылка устарела."})
+    if exp > now_ts + 3600:
+        raise HTTPException(status_code=401, detail={"code": "SBP_LINK_INVALID", "message": "Некорректная ссылка."})
+    if not _verify_sbp_bot_link_signature(tg_user_id=tg_user_id, plan_code=plan_code, exp=exp, sig=sig):
+        raise HTTPException(status_code=401, detail={"code": "SBP_LINK_INVALID", "message": "Некорректная подпись."})
+
+    plan = _get_sbp_plan(plan_code)
+
+    q_user = await db.execute(select(User).where(User.telegram_id == int(tg_user_id)))
+    user = q_user.scalar_one_or_none()
+    if not user:
+        user = User(telegram_id=int(tg_user_id), paid_readings_balance=0)
+        db.add(user)
+        await db.flush()
+
+    order_id = f"sbp_tg_{user.id}_{secrets.token_hex(8)}"
+    idempotence_key = uuid.uuid4().hex
+    return_url = _append_query_param(YOOKASSA_SBP_RETURN_URL, "sbp_order_id", order_id)
+
+    provider_request = {
+        "amount": {
+            "value": _rub_value_from_kopecks(int(plan["amount"])),
+            "currency": str(plan.get("currency") or "RUB"),
+        },
+        "capture": True,
+        "description": str(plan.get("description") or plan["title"]),
+        "payment_method_data": {"type": "sbp"},
+        "confirmation": {
+            "type": "redirect",
+            "return_url": return_url,
+        },
+        "metadata": {
+            "order_id": order_id,
+            "plan_code": str(plan["code"]),
+            "user_id": str(user.id),
+            "telegram_id": str(user.telegram_id),
+            "source": "bot_sbp_link",
+        },
+    }
+
+    provider = await _yookassa_request(
+        "POST",
+        "/payments",
+        payload=provider_request,
+        idempotence_key=idempotence_key,
+    )
+
+    payment_id = str(provider.get("id") or "").strip()
+    status = str(provider.get("status") or "pending").strip().lower()
+    confirmation_url = str(((provider.get("confirmation") or {}).get("confirmation_url") or "")).strip()
+
+    if not payment_id or not confirmation_url:
+        raise HTTPException(
+            status_code=502,
+            detail={"code": "SBP_PROVIDER_BAD_RESPONSE", "message": "Провайдер не вернул ссылку для оплаты."},
+        )
+
+    row = SbpOrder(
+        user_id=int(user.id),
+        order_id=order_id,
+        plan_code=str(plan["code"]),
+        amount=int(plan["amount"]),
+        currency=str(plan.get("currency") or "RUB"),
+        status=status or "pending",
+        yookassa_payment_id=payment_id,
+        confirmation_url=confirmation_url,
+        idempotence_key=idempotence_key,
+        provider_payload=provider,
+        paid_at=_parse_provider_dt(provider.get("paid_at")),
+    )
+    db.add(row)
+    await db.commit()
+
+    return RedirectResponse(url=confirmation_url, status_code=302)
 
 
 @app.get("/billing/sbp/status", response_model=SbpStatusOut)

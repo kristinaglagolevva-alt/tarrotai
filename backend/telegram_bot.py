@@ -2,12 +2,16 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import hmac
 import json
 import logging
 import os
 import secrets
+import time
 from datetime import datetime, timedelta, timezone
 from typing import Dict, Any, List, Optional
+from urllib.parse import urlencode
 
 import asyncpg
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, LabeledPrice, Update, WebAppInfo
@@ -38,6 +42,16 @@ PROVIDER_TOKEN = (
 CLICK_PROVIDER_TOKEN = (
     os.environ.get("TELEGRAM_CLICK_PROVIDER_TOKEN")
     or os.environ.get("CLICK_PROVIDER_TOKEN")
+    or ""
+).strip()
+API_PUBLIC_BASE = (
+    os.environ.get("API_PUBLIC_BASE_URL")
+    or os.environ.get("API_BASE_URL")
+    or "https://api.tarrotai.ru"
+).strip().rstrip("/")
+SBP_BOT_LINK_SECRET = (
+    os.environ.get("SBP_BOT_LINK_SECRET")
+    or os.environ.get("YOOKASSA_WEBHOOK_TOKEN")
     or ""
 ).strip()
 
@@ -184,6 +198,27 @@ def _build_provider_data_for_receipt(product: Dict[str, Any]) -> str:
         }
     }
     return json.dumps(payload, ensure_ascii=False)
+
+
+def _build_sbp_payment_link(*, tg_user_id: int, plan_key: str) -> Optional[str]:
+    if not API_PUBLIC_BASE or not SBP_BOT_LINK_SECRET:
+        return None
+    exp = int(time.time()) + (15 * 60)
+    payload = f"{int(tg_user_id)}:{str(plan_key).strip().lower()}:{exp}"
+    sig = hmac.new(
+        SBP_BOT_LINK_SECRET.encode("utf-8"),
+        payload.encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
+    query = urlencode(
+        {
+            "tg_user_id": int(tg_user_id),
+            "plan_code": str(plan_key).strip().lower(),
+            "exp": exp,
+            "sig": sig,
+        }
+    )
+    return f"{API_PUBLIC_BASE}/billing/sbp/bot-link?{query}"
 
 
 def _products_for_mode(mode: str = "menu") -> List[Dict[str, Any]]:
@@ -640,23 +675,34 @@ async def sbp_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             await query.message.reply_text("СБП для этого плана временно недоступен.")
         return
 
-    app_btn = _build_app_button()
-    rows: List[List[InlineKeyboardButton]] = []
-    if app_btn:
-        rows.append([app_btn])
-    rows.append([InlineKeyboardButton("⬅️ Назад к способам оплаты", callback_data=f"plan:{plan_key}")])
+    tg_user_id = int(getattr(query.from_user, "id", 0) or 0)
+    if tg_user_id <= 0:
+        if query.message:
+            await query.message.reply_text("Не удалось определить профиль Telegram. Попробуйте ещё раз.")
+        return
 
+    payment_link = _build_sbp_payment_link(tg_user_id=tg_user_id, plan_key=plan_key)
+    if not payment_link:
+        if query.message:
+            await query.message.reply_text("СБП временно недоступен. Попробуйте позже.")
+        return
+
+    rows: List[List[InlineKeyboardButton]] = [
+        [InlineKeyboardButton("🟢 Открыть оплату СБП", url=payment_link)],
+        [InlineKeyboardButton("⬅️ Назад к способам оплаты", callback_data=f"plan:{plan_key}")],
+    ]
     text = (
         f"<b>СБП — {PLAN_TITLES.get(plan_key, plan_key)}</b>\n"
         f"Сумма: {_format_amount_label(card_product)}\n\n"
-        "Оплата по СБП проходит в мини-приложении. Нажмите кнопку ниже, затем в профиле выберите оплату через СБП."
+        "Нажмите кнопку ниже — откроется ссылка на оплату через СБП."
     )
 
     if query.message:
-        await query.message.edit_text(
+        await query.message.reply_text(
             text,
             reply_markup=InlineKeyboardMarkup(rows),
             parse_mode=ParseMode.HTML,
+            disable_web_page_preview=True,
         )
 
 

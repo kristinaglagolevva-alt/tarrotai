@@ -578,6 +578,7 @@ function PremiumFlipCard({
   backUrl,
   active,
   durationMs = 2600,
+  randomizeEveryMs,
   intensity = 0,
   className = '',
   scale = 1,
@@ -598,6 +599,7 @@ function PremiumFlipCard({
   backUrl: string
   active: boolean
   durationMs?: number
+  randomizeEveryMs?: number
   intensity?: number
   className?: string
   scale?: number
@@ -652,29 +654,28 @@ function PremiumFlipCard({
     onFrontChange?.(front)
   }, [front, onFrontChange])
 
-  // ✅ пока active и не lockFront — меняем фронт ТОЛЬКО на половине оборота
+  // ✅ пока active и не lockFront — меняем фронт рандомно по таймеру (быстрее, чтобы было заметно)
   useEffect(() => {
     clearTimers()
 
     if (!active) return
     if (lockFront) return
 
-    const dur = Math.max(300, durationMs)
-    const half = Math.floor(dur * 0.5)
+    const step = Math.max(420, Math.floor(randomizeEveryMs || durationMs * 0.5))
 
-    // 1) первая смена — когда впервые показали рубашку
+    // первая смена чуть раньше, чтобы пользователь сразу видел "рандом"
     halfTimeoutRef.current = window.setTimeout(() => {
       setFront((cur) => pickNext(cur))
 
-      // 2) дальше каждые dur — снова на момент рубашки (половина каждого оборота)
+      // дальше — равномерно, пока карта в режиме предпросмотра
       cycleIntervalRef.current = window.setInterval(() => {
         setFront((cur) => pickNext(cur))
-      }, dur)
-    }, half)
+      }, step)
+    }, step)
 
     return () => clearTimers()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [active, lockFront, durationMs])
+  }, [active, lockFront, durationMs, randomizeEveryMs])
 
   // ✅ когда нужно — жёстко фиксируем предвыбранный фронт (daily)
   useEffect(() => {
@@ -5198,6 +5199,7 @@ useEffect(() => {
               backUrl={backCardImg}
               active={!shakenOnce && !stopRequested && !cardDayLoading && dailyFrontReady}
               durationMs={2600}
+              randomizeEveryMs={720}
               intensity={cardDayLoading ? 0 : shakeEnabled ? shuffleProgress : 0}
               clickable={shakenOnce}
               onClick={revealCard}

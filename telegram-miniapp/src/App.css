@@ -578,45 +578,29 @@ body,
   overflow: hidden;
   isolation: isolate;
   height: 62px;
-  border-color: rgba(255, 238, 168, 0.98);
+  border-color: rgba(255, 230, 160, 0.88);
   background:
     radial-gradient(
       220px 120px at var(--rx, 50%) var(--ry, 50%),
-      rgba(255,255,255,0.48),
+      rgba(255,255,255,0.16),
       rgba(255,255,255,0.04) 72%
     ),
     linear-gradient(108deg, rgba(255, 206, 88, 0.96) 0%, rgba(255, 154, 68, 0.91) 34%, rgba(176, 108, 255, 0.9) 67%, rgba(94, 204, 255, 0.86) 100%),
     linear-gradient(180deg, rgba(94, 113, 188, 0.84), rgba(56, 74, 145, 0.86));
   box-shadow:
-    0 28px 58px rgba(9, 16, 45, 0.62),
-    0 0 0 1px rgba(255, 255, 255, 0.24) inset,
-    0 0 0 2px rgba(255, 214, 122, 0.22),
-    0 0 52px rgba(255, 197, 98, 0.56),
-    0 0 92px rgba(138, 103, 255, 0.44);
-  backdrop-filter: blur(20px) saturate(1.55);
-  -webkit-backdrop-filter: blur(20px) saturate(1.55);
+    0 8px 18px rgba(9, 16, 45, 0.34),
+    0 0 0 1px rgba(255, 255, 255, 0.18) inset,
+    0 0 0 1px rgba(255, 214, 122, 0.16);
+  backdrop-filter: blur(14px) saturate(1.2);
+  -webkit-backdrop-filter: blur(14px) saturate(1.2);
 }
 
 .glass-cta--hero .glass-cta__inner::after {
-  content: '';
-  position: absolute;
-  inset: -2px;
-  border-radius: inherit;
-  pointer-events: none;
-  background: linear-gradient(
-    120deg,
-    rgba(255,255,255,0) 18%,
-    rgba(255,255,255,0.34) 37%,
-    rgba(255,255,255,0.08) 44%,
-    rgba(255,255,255,0) 58%
-  );
-  transform: translateX(-145%);
-  animation: cta-hero-sweep 2.7s ease-in-out infinite;
-  z-index: 0;
+  content: none;
 }
 
 .glass-cta--hero:not(.is-error) .glass-cta__inner {
-  animation: cta-hero-pulse 2.1s ease-in-out infinite;
+  animation: none;
 }
 
 .glass-cta--hero .glass-cta__rim {
@@ -636,9 +620,7 @@ body,
   color: rgba(255, 255, 255, 1);
   font-weight: 800;
   letter-spacing: 0.26px;
-  text-shadow:
-    0 12px 30px rgba(9, 18, 44, 0.58),
-    0 0 22px rgba(255, 233, 164, 0.42);
+  text-shadow: 0 4px 10px rgba(9, 18, 44, 0.4);
 }
 
 .glass-cta--hero .glass-cta__icon {
@@ -670,10 +652,10 @@ body,
 
 .glass-cta--hero .glass-cta__spark {
   z-index: 1;
-  opacity: 0.84;
+  opacity: 0.18;
   background:
-    radial-gradient(180px 64px at 18% 50%, rgba(255, 255, 255, 0.28), transparent 78%),
-    radial-gradient(200px 78px at 82% 50%, rgba(255, 242, 199, 0.26), transparent 78%);
+    radial-gradient(140px 52px at 18% 50%, rgba(255, 255, 255, 0.22), transparent 78%),
+    radial-gradient(140px 56px at 82% 50%, rgba(255, 242, 199, 0.2), transparent 78%);
 }
 
 .glass-cta.is-error .glass-cta__inner {
@@ -2040,25 +2022,6 @@ body,
 .interp-loader__dots span:nth-child(2) { animation-delay: .2s; }
 .interp-loader__dots span:nth-child(3) { animation-delay: .4s; }
 
-.interp-loader__count {
-  display: inline-flex;
-  gap: 8px;
-  font-size: 13px;
-  font-weight: 700;
-  letter-spacing: 0.09em;
-  color: rgba(184, 214, 255, 0.66);
-  text-shadow: 0 6px 14px rgba(4, 10, 29, 0.42);
-}
-
-.interp-loader__count span {
-  opacity: 0.24;
-  animation: interp-count 0.9s ease-in-out infinite;
-}
-
-.interp-loader__count span:nth-child(1) { animation-delay: 0s; }
-.interp-loader__count span:nth-child(2) { animation-delay: .3s; }
-.interp-loader__count span:nth-child(3) { animation-delay: .6s; }
-
 @keyframes interp-petal {
   0% {
     background: rgba(186, 217, 255, 0.3);
@@ -2087,18 +2050,6 @@ body,
     transform: translateY(-1px) scale(1.18);
   }
 }
-
-@keyframes interp-count {
-  0%, 75%, 100% {
-    opacity: 0.24;
-    transform: translateY(0);
-  }
-  35% {
-    opacity: 0.92;
-    transform: translateY(-1px);
-  }
-}
-
 
 /* кнопка "вернуться в меню" */
 .result-back {
@@ -3164,6 +3115,15 @@ body,
   flex: 1 1 auto;
   min-height: 320px;
   max-height: min(66vh, 380px);
+}
+
+.result-loading-standalone {
+  width: 100%;
+  min-height: 156px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8px 0 4px;
 }
 /* =================================================================================================
    [30] PHOTO ANALYSIS PAGE

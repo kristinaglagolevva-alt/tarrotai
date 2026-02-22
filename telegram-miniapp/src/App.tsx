@@ -343,12 +343,6 @@ function InterpretationLoader({ text = 'Получаем интерпретац�
           <span />
         </span>
       </div>
-
-      <div className="interp-loader__count" aria-hidden="true">
-        <span>3</span>
-        <span>2</span>
-        <span>1</span>
-      </div>
     </div>
   )
 }
@@ -5512,64 +5506,64 @@ useEffect(() => {
 
                   {/* ✅ один большой блок результата со скроллом, как на "Карта дня" */}
                   <div className="three-result">
-                    <div className="result-layout__desc">
-                      <div className="result-card">
-                        <div className="result-card__title">Значение расклада</div>
-                        <div className="result-card__name">Расклад по 3 картам</div>
+                    {threeLoading ? (
+                      <div className="result-loading-standalone">
+                        <InterpretationLoader text="Получаем интерпретацию" />
+                      </div>
+                    ) : (
+                      <div className="result-layout__desc">
+                        <div className="result-card">
+                          <div className="result-card__title">Значение расклада</div>
+                          <div className="result-card__name">Расклад по 3 картам</div>
 
-                        <div className="result-card__scroll">
-                          {threeDayKey ? (
-                            <p style={{ opacity: 0.72, marginTop: 0 }}>Дата расклада: {threeDayKey}</p>
-                          ) : null}
+                          <div className="result-card__scroll">
+                            {threeDayKey ? (
+                              <p style={{ opacity: 0.72, marginTop: 0 }}>Дата расклада: {threeDayKey}</p>
+                            ) : null}
 
-                          {threeQuestion ? (
-                            <p style={{ opacity: 0.85, marginTop: 10, marginBottom: 0 }}>
-                              <b>Вопрос:</b> {threeQuestion}
+                            {threeQuestion ? (
+                              <p style={{ opacity: 0.85, marginTop: 10, marginBottom: 0 }}>
+                                <b>Вопрос:</b> {threeQuestion}
+                              </p>
+                            ) : null}
+
+                            <p style={{ opacity: 0.82, marginTop: 10, marginBottom: 0 }}>
+                              <b>Тип:</b>{' '}
+                              {threeKind === 'yesno' ? 'Да / Нет' : threeKind === 'advice' ? 'Совет' : 'Открытый вопрос'}
                             </p>
-                          ) : null}
 
-                          <p style={{ opacity: 0.82, marginTop: 10, marginBottom: 0 }}>
-                            <b>Тип:</b>{' '}
-                            {threeKind === 'yesno' ? 'Да / Нет' : threeKind === 'advice' ? 'Совет' : 'Открытый вопрос'}
-                          </p>
+                            <div style={{ height: 10 }} />
 
-                          <div style={{ height: 10 }} />
+                            {!threeShowMeaning ? (
+                              <p style={{ opacity: 0.8, marginTop: 10 }}>Карты раскрываются…</p>
+                            ) : (
+                              <>
+                                {renderSafetyNotice(threeQuestion)}
 
-                          {!threeShowMeaning ? (
-                            <p style={{ opacity: 0.8, marginTop: 10 }}>Карты раскрываются…</p>
-                          ) : (
-                            <>
-                              {renderSafetyNotice(threeQuestion)}
+                                {!!threeDesc && (
+                                  <div style={{ marginTop: 10 }}>
+                                    <MarkdownText text={threeDesc} />
+                                    <div style={{ height: 10 }} />
+                                  </div>
+                                )}
 
-                              {threeLoading ? (
-                                <InterpretationLoader text="Получаем интерпретацию" />
-                              ) : (
-                                <>
-                                  {!!threeDesc && (
-                                    <div style={{ marginTop: 10 }}>
-                                      <MarkdownText text={threeDesc} />
-                                      <div style={{ height: 10 }} />
-                                    </div>
-                                  )}
+                                {threeCards.map((c, idx) => (
+                                  <div key={`${c.role}-${idx}`} style={{ marginTop: idx === 0 ? 0 : 14 }}>
+                                    <p style={{ marginTop: 0, marginBottom: 8 }}>
+                                      <b>
+                                        {c.role}: {c.name}
+                                      </b>
+                                    </p>
 
-                                  {threeCards.map((c, idx) => (
-                                    <div key={`${c.role}-${idx}`} style={{ marginTop: idx === 0 ? 0 : 14 }}>
-                                      <p style={{ marginTop: 0, marginBottom: 8 }}>
-                                        <b>
-                                          {c.role}: {c.name}
-                                        </b>
-                                      </p>
-
-                                      <MarkdownText text={c.text || ''} />
-                                    </div>
-                                  ))}
-                                </>
-                              )}
-                            </>
-                          )}
+                                    <MarkdownText text={c.text || ''} />
+                                  </div>
+                                ))}
+                              </>
+                            )}
+                          </div>
                         </div>
                       </div>
-                    </div>
+                    )}
 
                     <button type="button" className="glass-cta" onClick={restartThreeCards}>
                       <span className="glass-cta__inner">
@@ -5736,52 +5730,52 @@ useEffect(() => {
                   </div>
 
                   <div className="three-result">
-                    <div className="result-layout__desc">
-                      <div className="result-card">
-                        <div className="result-card__title">Значение расклада</div>
+                    {ppfLoading ? (
+                      <div className="result-loading-standalone">
+                        <InterpretationLoader text="Получаем интерпретацию" />
+                      </div>
+                    ) : (
+                      <div className="result-layout__desc">
+                        <div className="result-card">
+                          <div className="result-card__title">Значение расклада</div>
 
-                        <div className="result-card__scroll">
-                          {ppfDayKey ? <p style={{ opacity: 0.72, marginTop: 0 }}>Дата расклада: {ppfDayKey}</p> : null}
+                          <div className="result-card__scroll">
+                            {ppfDayKey ? <p style={{ opacity: 0.72, marginTop: 0 }}>Дата расклада: {ppfDayKey}</p> : null}
 
-                          {!!ppfQuestion && (
+                            {!!ppfQuestion && (
+                              <p style={{ opacity: 0.86, marginTop: 10 }}>
+                                <b>Вопрос:</b> {ppfQuestion}
+                              </p>
+                            )}
+
                             <p style={{ opacity: 0.86, marginTop: 10 }}>
-                              <b>Вопрос:</b> {ppfQuestion}
+                              <b>Фокус:</b> {PPF_FOCUS.find((x) => x.id === ppfFocus)?.label || '—'}
                             </p>
-                          )}
 
-                          <p style={{ opacity: 0.86, marginTop: 10 }}>
-                            <b>Фокус:</b> {PPF_FOCUS.find((x) => x.id === ppfFocus)?.label || '—'}
-                          </p>
+                            {renderSafetyNotice(ppfQuestion)}
 
-                          {renderSafetyNotice(ppfQuestion)}
+                            {!!ppfDesc && (
+                              <div style={{ marginTop: 10 }}>
+                                <MarkdownText text={ppfDesc} />
+                                <div style={{ height: 10 }} />
+                              </div>
+                            )}
 
-                          {ppfLoading ? (
-                            <InterpretationLoader text="Получаем интерпретацию" />
-                          ) : (
-                            <>
-                              {!!ppfDesc && (
-                                <div style={{ marginTop: 10 }}>
-                                  <MarkdownText text={ppfDesc} />
-                                  <div style={{ height: 10 }} />
-                                </div>
-                              )}
+                            {ppfCards.map((c, idx) => (
+                              <div key={`${c.role}-${idx}`} style={{ marginTop: idx === 0 ? 0 : 14 }}>
+                                <p style={{ marginTop: 0, marginBottom: 8 }}>
+                                  <b>
+                                    {c.role}: {c.name}
+                                  </b>
+                                </p>
 
-                              {ppfCards.map((c, idx) => (
-                                <div key={`${c.role}-${idx}`} style={{ marginTop: idx === 0 ? 0 : 14 }}>
-                                  <p style={{ marginTop: 0, marginBottom: 8 }}>
-                                    <b>
-                                      {c.role}: {c.name}
-                                    </b>
-                                  </p>
-
-                                  <MarkdownText text={c.text || ''} />
-                                </div>
-                              ))}
-                            </>
-                          )}
+                                <MarkdownText text={c.text || ''} />
+                              </div>
+                            ))}
+                          </div>
                         </div>
                       </div>
-                    </div>
+                    )}
 
                     <button type="button" className="glass-cta" onClick={restartPpf}>
                       <span className="glass-cta__inner">
@@ -5957,50 +5951,50 @@ useEffect(() => {
                   </div>
 
                   <div className="three-result">
-                    <div className="result-layout__desc">
-                      <div className="result-card">
-                        <div className="result-card__title">Значение расклада</div>
+                    {decisionLoading ? (
+                      <div className="result-loading-standalone">
+                        <InterpretationLoader text="Получаем интерпретацию" />
+                      </div>
+                    ) : (
+                      <div className="result-layout__desc">
+                        <div className="result-card">
+                          <div className="result-card__title">Значение расклада</div>
 
-                        <div className="result-card__scroll">
-                          {decisionDayKey ? <p style={{ opacity: 0.72, marginTop: 0 }}>Расклад: {decisionDayKey}</p> : null}
+                          <div className="result-card__scroll">
+                            {decisionDayKey ? <p style={{ opacity: 0.72, marginTop: 0 }}>Расклад: {decisionDayKey}</p> : null}
 
-                          {decisionQuestion ? (
+                            {decisionQuestion ? (
+                              <p style={{ marginTop: 10, opacity: 0.86 }}>
+                                <b>Вопрос:</b> {decisionQuestion}
+                              </p>
+                            ) : null}
+
                             <p style={{ marginTop: 10, opacity: 0.86 }}>
-                              <b>Вопрос:</b> {decisionQuestion}
+                              <b>Фокус:</b> {DECISION_FOCUS.find((x) => x.id === decisionFocus)?.label || '—'}
                             </p>
-                          ) : null}
 
-                          <p style={{ marginTop: 10, opacity: 0.86 }}>
-                            <b>Фокус:</b> {DECISION_FOCUS.find((x) => x.id === decisionFocus)?.label || '—'}
-                          </p>
+                            {renderSafetyNotice(decisionQuestion)}
 
-                          {renderSafetyNotice(decisionQuestion)}
+                            {!!decisionDesc && (
+                              <div style={{ marginTop: 10 }}>
+                                <MarkdownText text={decisionDesc} />
+                                <div style={{ height: 10 }} />
+                              </div>
+                            )}
 
-                          {decisionLoading ? (
-                            <InterpretationLoader text="Получаем интерпретацию" />
-                          ) : (
-                            <>
-                              {!!decisionDesc && (
-                                <div style={{ marginTop: 10 }}>
-                                  <MarkdownText text={decisionDesc} />
-                                  <div style={{ height: 10 }} />
+                            {decisionCards.map((c) => (
+                              <div key={c.role} style={{ marginTop: 14 }}>
+                                <div style={{ fontWeight: 700, marginBottom: 6 }}>
+                                  {c.role}: {c.name}
                                 </div>
-                              )}
 
-                              {decisionCards.map((c) => (
-                                <div key={c.role} style={{ marginTop: 14 }}>
-                                  <div style={{ fontWeight: 700, marginBottom: 6 }}>
-                                    {c.role}: {c.name}
-                                  </div>
-
-                                  <MarkdownText text={String(c.text || '')} />
-                                </div>
-                              ))}
-                            </>
-                          )}
+                                <MarkdownText text={String(c.text || '')} />
+                              </div>
+                            ))}
+                          </div>
                         </div>
                       </div>
-                    </div>
+                    )}
 
                     <button type="button" className="glass-cta" onClick={restartDecision}>
                       <span className="glass-cta__inner">

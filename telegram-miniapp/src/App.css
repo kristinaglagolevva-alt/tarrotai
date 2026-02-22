@@ -588,8 +588,8 @@ body,
     linear-gradient(108deg, rgba(255, 206, 88, 0.96) 0%, rgba(255, 154, 68, 0.91) 34%, rgba(176, 108, 255, 0.9) 67%, rgba(94, 204, 255, 0.86) 100%),
     linear-gradient(180deg, rgba(94, 113, 188, 0.84), rgba(56, 74, 145, 0.86));
   box-shadow:
-    0 8px 18px rgba(9, 16, 45, 0.34),
-    0 0 0 1px rgba(255, 255, 255, 0.18) inset,
+    0 3px 8px rgba(9, 16, 45, 0.22),
+    0 0 0 1px rgba(255, 255, 255, 0.16) inset,
     0 0 0 1px rgba(255, 214, 122, 0.16);
   backdrop-filter: blur(14px) saturate(1.2);
   -webkit-backdrop-filter: blur(14px) saturate(1.2);
@@ -620,7 +620,7 @@ body,
   color: rgba(255, 255, 255, 1);
   font-weight: 800;
   letter-spacing: 0.26px;
-  text-shadow: 0 4px 10px rgba(9, 18, 44, 0.4);
+  text-shadow: 0 1px 3px rgba(9, 18, 44, 0.28);
 }
 
 .glass-cta--hero .glass-cta__icon {
@@ -652,10 +652,8 @@ body,
 
 .glass-cta--hero .glass-cta__spark {
   z-index: 1;
-  opacity: 0.18;
-  background:
-    radial-gradient(140px 52px at 18% 50%, rgba(255, 255, 255, 0.22), transparent 78%),
-    radial-gradient(140px 56px at 82% 50%, rgba(255, 242, 199, 0.2), transparent 78%);
+  opacity: 0;
+  background: none;
 }
 
 .glass-cta.is-error .glass-cta__inner {

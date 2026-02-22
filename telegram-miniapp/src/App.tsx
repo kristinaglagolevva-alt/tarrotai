@@ -1989,13 +1989,6 @@ useEffect(() => {
   type ThreeCardPos = { x: number; y: number; r: number; s: number; z: number }
   type ThreeCardResult = { idx: number; url: string; name: string; role: string; text: string; isReversed?: boolean }
 
-  // фиксированные 3 “слота” как на первом экране (места карт)
-  const THREE_SLOTS: ThreeCardPos[] = [
-    { x: -44, y: 6,  r: -7, s: 1.0,  z: 1 }, // левый
-    { x: 0,   y: -8, r: 3,  s: 1.03, z: 2 }, // центр (чуть выше/больше)
-    { x: 44,  y: 2,  r: 8,  s: 1.0,  z: 1 }, // правый
-  ]
-
   // расширенная геометрия для экрана перемешивания в "Расклад по 3 картам"
   const THREE_SLOTS_WIDE: ThreeCardPos[] = [
     { x: -64, y: 10, r: -9, s: 1.05, z: 1 },
@@ -2101,6 +2094,7 @@ useEffect(() => {
     { id: 'present', label: 'Настоящее' },
     { id: 'future', label: 'Будущее' },
   ]
+  const PPF_SLOT_LABELS = ['Прошлое', 'Настоящее', 'Будущее'] as const
 
   type PpfCardResult = { idx: number; url: string; name: string; role: string; text: string; isReversed?: boolean }
 
@@ -5596,60 +5590,64 @@ useEffect(() => {
               {/* 1) SETUP */}
               {ppfScreen === 'setup' && (
                 <>
-                  <div className="threecards-row" aria-label="Три карты (рубашка)">
-                    {[0, 1, 2].map((i) => (
-                      <div key={i} className="threecard">
-                        <img src={backCardImg} alt="" />
+                  <div className="ppf-practice">
+                    <div className="ppf-practice__panel">
+                      <div className="ppf-practice__title">Расклад на 3 карты</div>
+                      <div className="ppf-practice__subtitle">
+                        Сосредоточьтесь на вопросе и вытяните все три карты
                       </div>
-                    ))}
-                  </div>
 
-                  <div className="threeform">
-                    <div className="ask-wrap">
-                      <div className="ask-glass">
-                        <textarea
-                          className="ask-input"
-                          value={ppfQuestion}
-                          onChange={(e) => setPpfQuestion(e.target.value)}
-                          placeholder="Ваш вопрос…"
-                          enterKeyHint="search"
-                          rows={2}
-                        />
+                      <div className="ppf-practice__slots" aria-label="Слоты расклада">
+                        {PPF_SLOT_LABELS.map((label, idx) => (
+                          <div key={`${label}-${idx}`} className={`ppf-practice__slot ${idx === 0 ? 'is-accent' : ''}`}>
+                            <div className="ppf-practice__slot-label">{label}</div>
+                          </div>
+                        ))}
                       </div>
+
+                      <div className={`ppf-practice__question ${ppfQuestion.trim() ? '' : 'is-empty'}`}>
+                        {ppfQuestion.trim() || 'Сначала задайте вопрос на главной странице'}
+                      </div>
+
+                      <div
+                        className={`seg seg--threekind ${ppfFocusIsBumping ? 'is-bump' : ''}`}
+                        data-bump={ppfFocusBump}
+                        style={{
+                          ['--i' as any]: ppfFocusActiveIndex,
+                          ['--from' as any]: ppfFocusPrevIndex,
+                        }}
+                        role="tablist"
+                        aria-label="Фокус"
+                      >
+                        <div className="seg__pill" aria-hidden="true" />
+                        {PPF_FOCUS.map((k) => (
+                          <button
+                            key={k.id}
+                            type="button"
+                            className={`seg__btn ${ppfFocus === k.id ? 'is-active' : ''}`}
+                            onClick={() => onPickPpfFocus(k.id)}
+                            role="tab"
+                            aria-selected={ppfFocus === k.id}
+                          >
+                            {k.label}
+                          </button>
+                        ))}
+                      </div>
+
+                      <button type="button" className="glass-cta" onClick={beginPpfShuffle}>
+                        <span className="glass-cta__inner">
+                          <span className="glass-cta__rim" aria-hidden="true" />
+                          <span className="glass-cta__text">Вытянуть карты</span>
+                          <span className="glass-cta__spark" aria-hidden="true" />
+                        </span>
+                      </button>
                     </div>
 
-                    <div
-                      className={`seg seg--threekind ${ppfFocusIsBumping ? 'is-bump' : ''}`}
-                      data-bump={ppfFocusBump}
-                      style={{
-                        ['--i' as any]: ppfFocusActiveIndex,
-                        ['--from' as any]: ppfFocusPrevIndex,
-                      }}
-                      role="tablist"
-                      aria-label="Фокус"
-                    >
-                      <div className="seg__pill" aria-hidden="true" />
-                      {PPF_FOCUS.map((k) => (
-                        <button
-                          key={k.id}
-                          type="button"
-                          className={`seg__btn ${ppfFocus === k.id ? 'is-active' : ''}`}
-                          onClick={() => onPickPpfFocus(k.id)}
-                          role="tab"
-                          aria-selected={ppfFocus === k.id}
-                        >
-                          {k.label}
-                        </button>
+                    <div className="ppf-practice__fan" aria-hidden="true">
+                      {Array.from({ length: 7 }).map((_, i) => (
+                        <span key={i} />
                       ))}
                     </div>
-
-                    <button type="button" className="glass-cta" onClick={beginPpfShuffle}>
-                      <span className="glass-cta__inner">
-                        <span className="glass-cta__rim" aria-hidden="true" />
-                        <span className="glass-cta__text">Продолжить</span>
-                        <span className="glass-cta__spark" aria-hidden="true" />
-                      </span>
-                    </button>
                   </div>
                 </>
               )}
@@ -5659,61 +5657,68 @@ useEffect(() => {
               {/* 2) SHUFFLE */}
               {ppfScreen === 'shuffle' && (
                 <>
-                  <div className={`three-mix-area ${ppfShuffleProgress < 1 ? 'is-shuffling' : 'is-done'}`} aria-label="Перемешивание">
-                    {[0, 1, 2].map((cardIdx) => {
-                      const slot = Math.max(0, ppfOrder.indexOf(cardIdx))
-                      const p = THREE_SLOTS[slot] || THREE_SLOTS[0]
+                  <div className="ppf-practice ppf-practice--shuffle">
+                    <div className="ppf-practice__panel">
+                      <div className="ppf-practice__title">Прошлое • Настоящее • Будущее</div>
+                      <div className="ppf-practice__subtitle">
+                        {ppfShuffleProgress < 1
+                          ? 'Потрясите телефон или нажмите кнопку ниже'
+                          : 'Открываем карты…'}
+                      </div>
 
-                      return (
-                        <div
-                          key={cardIdx}
-                          className="three-mix-card"
-                          style={{
-                            ['--x' as any]: `${p.x}px`,
-                            ['--y' as any]: `${p.y}px`,
-                            ['--r' as any]: `${p.r}deg`,
-                            ['--s' as any]: `${p.s}`,
-                            zIndex: p.z,
-                          }}
-                        >
-                          <img src={backCardImg} alt="" />
-                        </div>
-                      )
-                    })}
-                  </div>
+                      <div className="ppf-practice__slots" aria-label="Перемешивание">
+                        {PPF_SLOT_LABELS.map((label, slotIdx) => {
+                          const mappedCardIdx = ppfOrder[slotIdx] ?? slotIdx
+                          const tilt = mappedCardIdx === 0 ? -8 : mappedCardIdx === 1 ? 2 : 8
+                          const isActive =
+                            ppfShuffleProgress < 1 && Math.floor(clamp(ppfShuffleProgress * 3, 0, 2.99)) === slotIdx
+                          return (
+                            <div
+                              key={`${label}-${slotIdx}`}
+                              className={`ppf-practice__slot is-filled ${slotIdx === 0 ? 'is-accent' : ''} ${
+                                isActive ? 'is-active' : ''
+                              }`}
+                            >
+                              <div className="ppf-practice__slot-card" style={{ ['--tilt' as any]: `${tilt}deg` }}>
+                                <img src={backCardImg} alt="" />
+                              </div>
+                              <div className="ppf-practice__slot-label">{label}</div>
+                            </div>
+                          )
+                        })}
+                      </div>
 
-                  <div className="bottom-panel bottom-panel--shake">
-                    {ppfShuffleProgress < 1 ? (
-                      <>
-                        <div className="shake__badge">
-                          <div className="shake__title">Потрясите телефон</div>
-                          <div className="shake__sub">Карты будут перемешиваться при тряске. Можно и автоматически — кнопкой ниже.</div>
-                        </div>
+                      {ppfShuffleProgress < 1 ? (
+                        <>
+                          {needsMotionPermission && (
+                            <button type="button" className="glassbtn" onClick={requestMotion}>
+                              Разрешить датчики
+                            </button>
+                          )}
 
-                        {needsMotionPermission && (
-                          <button type="button" className="glassbtn" onClick={requestMotion}>
-                            Разрешить датчики
+                          <div className="threehint">Прогресс: {Math.round(ppfShuffleProgress * 100)}%</div>
+
+                          <button type="button" className="glass-cta mini-cta" onClick={autoShufflePpf}>
+                            <span className="glass-cta__inner">
+                              <span className="glass-cta__rim" aria-hidden="true" />
+                              <span className="glass-cta__text">Перемешать автоматически</span>
+                              <span className="glass-cta__spark" aria-hidden="true" />
+                            </span>
                           </button>
-                        )}
-
-                        <div className="threehint">Прогресс: {Math.round(ppfShuffleProgress * 100)}%</div>
-
-                        <button type="button" className="glass-cta mini-cta" onClick={autoShufflePpf}>
-                          <span className="glass-cta__inner">
-                            <span className="glass-cta__rim" aria-hidden="true" />
-                            <span className="glass-cta__text">Перемешать автоматически</span>
-                            <span className="glass-cta__spark" aria-hidden="true" />
-                          </span>
-                        </button>
-                      </>
-                    ) : (
-                      <>
+                        </>
+                      ) : (
                         <div className="shake__badge is-done">
                           <div className="shake__title">Открываем карты…</div>
                           <div className="shake__sub">Сейчас покажем 3 карты и интерпретацию.</div>
                         </div>
-                      </>
-                    )}
+                      )}
+                    </div>
+
+                    <div className="ppf-practice__fan" aria-hidden="true">
+                      {Array.from({ length: 7 }).map((_, i) => (
+                        <span key={i} />
+                      ))}
+                    </div>
                   </div>
                 </>
               )}

@@ -1,20 +1,24 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
 import random
-from datetime import date, datetime, timezone
-from typing import Optional, List, Literal
+import secrets
+import uuid
+from datetime import date, datetime, timedelta, timezone
+from typing import Optional, List, Literal, Dict, Any
 
-from fastapi import FastAPI, Depends, HTTPException, Header, UploadFile, File, Form
+import httpx
+from fastapi import FastAPI, Depends, HTTPException, Header, UploadFile, File, Form, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from sqlalchemy import select, desc, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from db import engine, get_db, Base
-from models import User, CardOfDay, Reading
+from models import User, CardOfDay, Reading, PaymentTransaction, SbpOrder
 from telegram_auth import validate_init_data
 from jwt import create_jwt, decode_jwt
 
@@ -28,6 +32,34 @@ app = FastAPI(title="Telegram Mini App API")
 
 FREE_READINGS_PER_MONTH = int(os.getenv("FREE_READINGS_PER_MONTH", "5"))
 
+SBP_PLANS: Dict[str, Dict[str, Any]] = {
+    "sub_2weeks": {
+        "code": "sub_2weeks",
+        "title": "Безлимит на 2 недели",
+        "description": "Подписка AI Tarot на 14 дней",
+        "days": 14,
+        "amount": 99 * 100,
+        "currency": "RUB",
+    },
+    "sub_month": {
+        "code": "sub_month",
+        "title": "Безлимит на месяц",
+        "description": "Подписка AI Tarot на 30 дней",
+        "days": 30,
+        "amount": 179 * 100,
+        "currency": "RUB",
+    },
+}
+
+YOOKASSA_SHOP_ID = (os.getenv("YOOKASSA_SHOP_ID") or "").strip()
+YOOKASSA_SECRET_KEY = (os.getenv("YOOKASSA_SECRET_KEY") or "").strip()
+YOOKASSA_API_BASE = (os.getenv("YOOKASSA_API_BASE") or "https://api.yookassa.ru/v3").strip().rstrip("/")
+YOOKASSA_SBP_RETURN_URL = (
+    (os.getenv("YOOKASSA_SBP_RETURN_URL") or os.getenv("TELEGRAM_APP_URL") or "https://tarrotai.ru").strip()
+)
+YOOKASSA_WEBHOOK_TOKEN = (os.getenv("YOOKASSA_WEBHOOK_TOKEN") or "").strip()
+YOOKASSA_HTTP_TIMEOUT = float(os.getenv("YOOKASSA_HTTP_TIMEOUT", "20"))
+
 
 # ============================ CORS ============================
 def _parse_cors_origins(value: str) -> List[str]:
@@ -37,13 +69,16 @@ def _parse_cors_origins(value: str) -> List[str]:
 
 DEFAULT_CORS_ORIGINS = "https://tarrotai.ru,https://www.tarrotai.ru"
 CORS_ORIGINS = _parse_cors_origins(os.getenv("CORS_ORIGINS", DEFAULT_CORS_ORIGINS))
+if not CORS_ORIGINS:
+    CORS_ORIGINS = _parse_cors_origins(DEFAULT_CORS_ORIGINS)
+    log.warning("CORS_ORIGINS is empty, fallback to defaults: %s", CORS_ORIGINS)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=CORS_ORIGINS,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "Accept", "Origin", "X-Requested-With"],
 )
 
 # ============================ TELEGRAM BOT AUTOSTART ============================
@@ -128,7 +163,11 @@ async def on_shutdown() -> None:
 
 @app.get("/health")
 async def health() -> dict:
-    return {"status": "ok", "time": datetime.utcnow().isoformat()}
+    return {
+        "status": "ok",
+        "time": datetime.utcnow().isoformat(),
+        "sbp_configured": _yookassa_sbp_configured(),
+    }
 
 
 # ============================ HELPERS ============================
@@ -151,6 +190,152 @@ def _month_bounds_utc(now: datetime) -> tuple[datetime, datetime]:
     else:
         nxt = datetime(now.year, now.month + 1, 1, tzinfo=timezone.utc)
     return first, nxt
+
+
+def _get_sbp_plan(plan_code: str) -> Dict[str, Any]:
+    code = str(plan_code or "").strip().lower()
+    plan = SBP_PLANS.get(code)
+    if not plan:
+        raise HTTPException(status_code=400, detail={"code": "INVALID_PLAN", "message": "Неизвестный тариф подписки."})
+    return plan
+
+
+def _yookassa_sbp_configured() -> bool:
+    return bool(YOOKASSA_SHOP_ID and YOOKASSA_SECRET_KEY)
+
+
+def _rub_value_from_kopecks(kopecks: int) -> str:
+    value = max(0, int(kopecks or 0)) / 100.0
+    return f"{value:.2f}"
+
+
+def _append_query_param(url: str, key: str, value: str) -> str:
+    base = str(url or "").strip()
+    if not base:
+        return ""
+    sep = "&" if "?" in base else "?"
+    return f"{base}{sep}{key}={value}"
+
+
+def _parse_provider_dt(value: Any) -> Optional[datetime]:
+    raw = str(value or "").strip()
+    if not raw:
+        return None
+    try:
+        parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except Exception:
+        return None
+    return _to_utc(parsed)
+
+
+async def _yookassa_request(
+    method: str,
+    path: str,
+    *,
+    payload: Optional[Dict[str, Any]] = None,
+    idempotence_key: Optional[str] = None,
+) -> Dict[str, Any]:
+    if not _yookassa_sbp_configured():
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "code": "SBP_NOT_CONFIGURED",
+                "message": "СБП ещё не настроен: добавьте YOOKASSA_SHOP_ID и YOOKASSA_SECRET_KEY на сервере.",
+            },
+        )
+
+    url = f"{YOOKASSA_API_BASE}{path}"
+    headers = {"Content-Type": "application/json"}
+    if idempotence_key:
+        headers["Idempotence-Key"] = str(idempotence_key)
+
+    try:
+        async with httpx.AsyncClient(timeout=YOOKASSA_HTTP_TIMEOUT) as client:
+            response = await client.request(
+                method.upper(),
+                url,
+                auth=(YOOKASSA_SHOP_ID, YOOKASSA_SECRET_KEY),
+                headers=headers,
+                content=json.dumps(payload or {}, ensure_ascii=False).encode("utf-8") if payload is not None else None,
+            )
+    except httpx.HTTPError as exc:
+        log.exception("YooKassa request failed: %s %s err=%s", method, path, exc)
+        raise HTTPException(
+            status_code=502,
+            detail={"code": "SBP_PROVIDER_UNREACHABLE", "message": "Не удалось связаться с платёжным провайдером."},
+        )
+
+    body: Dict[str, Any] = {}
+    try:
+        body = response.json()
+    except Exception:
+        body = {"raw": response.text[:2000]}
+
+    if response.status_code >= 400:
+        log.warning("YooKassa error %s for %s %s: %s", response.status_code, method, path, body)
+        err_msg = ""
+        if isinstance(body, dict):
+            err_msg = str(body.get("description") or body.get("message") or "").strip()
+        raise HTTPException(
+            status_code=502,
+            detail={
+                "code": "SBP_PROVIDER_ERROR",
+                "message": err_msg or "Платёжный провайдер вернул ошибку.",
+            },
+        )
+
+    if not isinstance(body, dict):
+        raise HTTPException(
+            status_code=502,
+            detail={"code": "SBP_PROVIDER_BAD_RESPONSE", "message": "Некорректный ответ платёжного провайдера."},
+        )
+    return body
+
+
+async def _apply_subscription_from_sbp(
+    db: AsyncSession,
+    *,
+    user: User,
+    plan: Dict[str, Any],
+    provider_payment_id: str,
+    order_id: str,
+) -> tuple[bool, Optional[datetime]]:
+    provider_payment_id = str(provider_payment_id or "").strip()
+    if not provider_payment_id:
+        raise HTTPException(
+            status_code=502,
+            detail={"code": "SBP_PROVIDER_BAD_RESPONSE", "message": "Провайдер не вернул идентификатор платежа."},
+        )
+
+    provider_charge_id = f"yookassa_sbp:{provider_payment_id}"
+    exists_q = await db.execute(
+        select(PaymentTransaction.id).where(PaymentTransaction.provider_payment_charge_id == provider_charge_id)
+    )
+    exists = exists_q.scalar_one_or_none()
+    if exists:
+        sub_until = _to_utc(user.subscription_until)
+        return False, sub_until
+
+    now = datetime.now(timezone.utc)
+    sub_until = _to_utc(user.subscription_until)
+    base = sub_until if sub_until and sub_until > now else now
+    new_sub_until = base + timedelta(days=int(plan["days"]))
+    user.subscription_until = new_sub_until
+
+    tx = PaymentTransaction(
+        user_id=int(user.id),
+        invoice_payload=f"sbp:{order_id}",
+        product_code=str(plan["code"]),
+        kind="subscription",
+        amount=int(plan["amount"]),
+        currency=str(plan.get("currency") or "RUB"),
+        credits_delta=0,
+        subscription_days=int(plan["days"]),
+        telegram_payment_charge_id=None,
+        provider_payment_charge_id=provider_charge_id,
+    )
+    db.add(tx)
+    return True, new_sub_until
 
 
 async def _ensure_runtime_schema(conn) -> None:
@@ -280,6 +465,32 @@ class BillingStatusOut(BaseModel):
     subscription_until: Optional[datetime] = None
     has_active_subscription: bool = False
     can_create_reading: bool = False
+
+
+class SbpCreateIn(BaseModel):
+    plan_code: Literal["sub_2weeks", "sub_month"] = "sub_2weeks"
+
+
+class SbpCreateOut(BaseModel):
+    order_id: str
+    plan_code: str
+    amount: int
+    currency: str
+    payment_id: str
+    status: str
+    confirmation_url: str
+
+
+class SbpStatusOut(BaseModel):
+    order_id: str
+    plan_code: str
+    status: str
+    amount: int
+    currency: str
+    paid_at: Optional[datetime] = None
+    has_active_subscription: bool = False
+    subscription_until: Optional[datetime] = None
+    message: str = ""
 
 
 class CardOfDayCreateIn(BaseModel):
@@ -452,6 +663,228 @@ async def billing_status(
         "has_active_subscription": has_sub,
         "can_create_reading": bool(has_sub or free_left > 0 or balance > 0),
     }
+
+
+async def _refresh_sbp_order_from_provider(order: SbpOrder) -> str:
+    if not order.yookassa_payment_id or not _yookassa_sbp_configured():
+        return str(order.status or "pending")
+
+    provider = await _yookassa_request("GET", f"/payments/{order.yookassa_payment_id}")
+    status = str(provider.get("status") or order.status or "pending").strip().lower()
+    order.status = status
+    order.provider_payload = provider
+    if status == "succeeded" and not order.paid_at:
+        order.paid_at = _parse_provider_dt(provider.get("paid_at")) or datetime.now(timezone.utc)
+    return status
+
+
+def _sbp_status_message(status: str) -> str:
+    normalized = str(status or "").strip().lower()
+    if normalized == "succeeded":
+        return "Оплата подтверждена, подписка активирована."
+    if normalized in {"canceled", "cancelled"}:
+        return "Платёж отменён."
+    if normalized == "pending":
+        return "Ожидаем завершения оплаты в банке."
+    if normalized == "waiting_for_capture":
+        return "Платёж получен и подтверждается."
+    return "Статус платежа обновляется."
+
+
+@app.post("/billing/sbp/create", response_model=SbpCreateOut)
+async def billing_sbp_create(
+    payload: SbpCreateIn,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    plan = _get_sbp_plan(payload.plan_code)
+
+    order_id = f"sbp_{current_user.id}_{secrets.token_hex(8)}"
+    idempotence_key = uuid.uuid4().hex
+    return_url = _append_query_param(YOOKASSA_SBP_RETURN_URL, "sbp_order_id", order_id)
+
+    provider_request = {
+        "amount": {
+            "value": _rub_value_from_kopecks(int(plan["amount"])),
+            "currency": str(plan.get("currency") or "RUB"),
+        },
+        "capture": True,
+        "description": str(plan.get("description") or plan["title"]),
+        "payment_method_data": {"type": "sbp"},
+        "confirmation": {
+            "type": "redirect",
+            "return_url": return_url,
+        },
+        "metadata": {
+            "order_id": order_id,
+            "plan_code": str(plan["code"]),
+            "user_id": str(current_user.id),
+            "telegram_id": str(current_user.telegram_id),
+            "source": "miniapp_sbp",
+        },
+    }
+
+    provider = await _yookassa_request(
+        "POST",
+        "/payments",
+        payload=provider_request,
+        idempotence_key=idempotence_key,
+    )
+
+    payment_id = str(provider.get("id") or "").strip()
+    status = str(provider.get("status") or "pending").strip().lower()
+    confirmation_url = str(((provider.get("confirmation") or {}).get("confirmation_url") or "")).strip()
+
+    if not payment_id or not confirmation_url:
+        raise HTTPException(
+            status_code=502,
+            detail={"code": "SBP_PROVIDER_BAD_RESPONSE", "message": "Провайдер не вернул ссылку для оплаты."},
+        )
+
+    row = SbpOrder(
+        user_id=int(current_user.id),
+        order_id=order_id,
+        plan_code=str(plan["code"]),
+        amount=int(plan["amount"]),
+        currency=str(plan.get("currency") or "RUB"),
+        status=status or "pending",
+        yookassa_payment_id=payment_id,
+        confirmation_url=confirmation_url,
+        idempotence_key=idempotence_key,
+        provider_payload=provider,
+        paid_at=_parse_provider_dt(provider.get("paid_at")),
+    )
+    db.add(row)
+    await db.commit()
+
+    return {
+        "order_id": order_id,
+        "plan_code": str(plan["code"]),
+        "amount": int(plan["amount"]),
+        "currency": str(plan.get("currency") or "RUB"),
+        "payment_id": payment_id,
+        "status": status or "pending",
+        "confirmation_url": confirmation_url,
+    }
+
+
+@app.get("/billing/sbp/status", response_model=SbpStatusOut)
+async def billing_sbp_status(
+    order_id: str = Query(..., min_length=8, max_length=80),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    q = await db.execute(
+        select(SbpOrder).where(
+            SbpOrder.order_id == str(order_id),
+            SbpOrder.user_id == int(current_user.id),
+        )
+    )
+    order = q.scalar_one_or_none()
+    if not order:
+        raise HTTPException(status_code=404, detail={"code": "SBP_ORDER_NOT_FOUND", "message": "Счёт не найден."})
+
+    status = str(order.status or "pending").strip().lower()
+    if status not in {"succeeded", "canceled", "cancelled"}:
+        status = await _refresh_sbp_order_from_provider(order)
+
+    if status == "succeeded" and not bool(order.activation_applied):
+        plan = _get_sbp_plan(order.plan_code)
+        applied, new_sub_until = await _apply_subscription_from_sbp(
+            db,
+            user=current_user,
+            plan=plan,
+            provider_payment_id=str(order.yookassa_payment_id or ""),
+            order_id=str(order.order_id),
+        )
+        order.activation_applied = True
+        if not order.paid_at:
+            order.paid_at = datetime.now(timezone.utc)
+        if applied:
+            log.info(
+                "SBP activated: user_id=%s order_id=%s plan=%s until=%s",
+                current_user.id,
+                order.order_id,
+                plan["code"],
+                new_sub_until.isoformat() if new_sub_until else None,
+            )
+
+    await db.commit()
+    await db.refresh(current_user)
+    await db.refresh(order)
+
+    sub_until = _to_utc(current_user.subscription_until)
+    has_sub = bool(sub_until and sub_until > datetime.now(timezone.utc))
+    return {
+        "order_id": str(order.order_id),
+        "plan_code": str(order.plan_code),
+        "status": str(order.status or "pending"),
+        "amount": int(order.amount or 0),
+        "currency": str(order.currency or "RUB"),
+        "paid_at": _to_utc(order.paid_at),
+        "has_active_subscription": has_sub,
+        "subscription_until": sub_until,
+        "message": _sbp_status_message(str(order.status or "pending")),
+    }
+
+
+@app.post("/billing/sbp/webhook")
+async def billing_sbp_webhook(
+    payload: Dict[str, Any],
+    token: Optional[str] = Query(default=None),
+    db: AsyncSession = Depends(get_db),
+):
+    if YOOKASSA_WEBHOOK_TOKEN and str(token or "").strip() != YOOKASSA_WEBHOOK_TOKEN:
+        raise HTTPException(status_code=401, detail="Invalid webhook token")
+
+    event = str(payload.get("event") or "").strip()
+    obj = payload.get("object") or {}
+    if not isinstance(obj, dict):
+        return {"ok": True}
+
+    payment_id = str(obj.get("id") or "").strip()
+    status = str(obj.get("status") or "").strip().lower()
+    metadata = obj.get("metadata") or {}
+    order_id = str((metadata.get("order_id") if isinstance(metadata, dict) else "") or "").strip()
+
+    order: Optional[SbpOrder] = None
+    if payment_id:
+        q = await db.execute(select(SbpOrder).where(SbpOrder.yookassa_payment_id == payment_id))
+        order = q.scalar_one_or_none()
+    if not order and order_id:
+        q = await db.execute(select(SbpOrder).where(SbpOrder.order_id == order_id))
+        order = q.scalar_one_or_none()
+
+    if not order:
+        log.warning("SBP webhook ignored: order not found payment_id=%s order_id=%s event=%s", payment_id, order_id, event)
+        return {"ok": True}
+
+    if payment_id and not order.yookassa_payment_id:
+        order.yookassa_payment_id = payment_id
+    if status:
+        order.status = status
+    order.provider_notification = payload
+    order.provider_payload = obj
+    if status == "succeeded" and not order.paid_at:
+        order.paid_at = _parse_provider_dt(obj.get("paid_at")) or datetime.now(timezone.utc)
+
+    if status == "succeeded" and not bool(order.activation_applied):
+        user_q = await db.execute(select(User).where(User.id == int(order.user_id)))
+        user = user_q.scalar_one_or_none()
+        if user:
+            plan = _get_sbp_plan(order.plan_code)
+            await _apply_subscription_from_sbp(
+                db,
+                user=user,
+                plan=plan,
+                provider_payment_id=str(order.yookassa_payment_id or payment_id or ""),
+                order_id=str(order.order_id),
+            )
+            order.activation_applied = True
+            log.info("SBP webhook activation applied: user_id=%s order_id=%s", user.id, order.order_id)
+
+    await db.commit()
+    return {"ok": True}
 
 
 # ================================== CARD OF DAY ==================================

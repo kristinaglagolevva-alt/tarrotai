@@ -8,6 +8,8 @@ import {
   telegramAuth,
   getMe,
   getBillingStatus,
+  createSbpPayment,
+  getSbpPaymentStatus,
   getCardOfDayToday,
   createCardOfDay,
   getUnifiedHistory,
@@ -717,6 +719,8 @@ type BillingStatus = {
   can_create_reading?: boolean
 }
 
+type SbpPlanCode = 'sub_2weeks' | 'sub_month'
+
 const BOT_USERNAME =
   ((import.meta as any).env?.VITE_BOT_USERNAME as string | undefined)?.trim() || 'Tarot_AI_Bot'
 const BOT_PAYMENT_URL = `https://t.me/${BOT_USERNAME}?start=menu`
@@ -771,6 +775,17 @@ const [user, setUser] = useState<any>(null)
 const [billing, setBilling] = useState<BillingStatus | null>(null)
 const [authStatus, setAuthStatus] = useState<AuthStatus>('loading')
 const [authError, setAuthError] = useState<string>('')
+const [sbpOrderId, setSbpOrderId] = useState<string | null>(() => {
+  try {
+    const v = localStorage.getItem('sbp_pending_order_id')
+    return v && v.trim() ? v.trim() : null
+  } catch {
+    return null
+  }
+})
+const [sbpBusyPlan, setSbpBusyPlan] = useState<SbpPlanCode | null>(null)
+const [sbpStatusText, setSbpStatusText] = useState('')
+const [sbpPolling, setSbpPolling] = useState(false)
 
 useEffect(() => {
   let mounted = true
@@ -895,9 +910,131 @@ useEffect(() => {
     }
   }
 
+  const setPendingSbpOrder = (orderId: string | null) => {
+    const clean = String(orderId || '').trim()
+    const next = clean || null
+    setSbpOrderId(next)
+    try {
+      if (next) localStorage.setItem('sbp_pending_order_id', next)
+      else localStorage.removeItem('sbp_pending_order_id')
+    } catch {}
+  }
+
+  useEffect(() => {
+    try {
+      const qs = new URLSearchParams(window.location.search || '')
+      const fromQuery = String(qs.get('sbp_order_id') || '').trim()
+      if (fromQuery) {
+        setPendingSbpOrder(fromQuery)
+        qs.delete('sbp_order_id')
+        const queryLeft = qs.toString()
+        const nextUrl = `${window.location.pathname}${queryLeft ? `?${queryLeft}` : ''}${window.location.hash || ''}`
+        window.history.replaceState({}, '', nextUrl)
+      }
+    } catch {}
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  const checkSbpStatus = async (orderIdArg?: string | null, silent = false) => {
+    const jwt = token
+    const orderId = String(orderIdArg ?? sbpOrderId ?? '').trim()
+    if (!jwt || !orderId) return
+
+    try {
+      if (!silent) setSbpPolling(true)
+      const out = await getSbpPaymentStatus(jwt, orderId)
+      const status = String(out?.status || '').toLowerCase()
+      const msg = String(out?.message || '').trim()
+
+      if (status === 'succeeded') {
+        setPendingSbpOrder(null)
+        void refreshBilling(jwt)
+      } else if (status === 'canceled' || status === 'cancelled') {
+        setPendingSbpOrder(null)
+      }
+
+      if (!silent || msg) {
+        setSbpStatusText(msg || 'Статус платежа обновлён.')
+      }
+    } catch (err: any) {
+      if (!silent) {
+        const text = String(err?.message || '')
+        const parsed = readBackendErrorDetail(text)
+        const detail = parsed?.detail
+        if (detail?.code === 'SBP_ORDER_NOT_FOUND') {
+          setPendingSbpOrder(null)
+          setSbpStatusText('Счёт не найден или уже закрыт. Создайте новый платёж.')
+        } else {
+          setSbpStatusText('Не удалось проверить статус оплаты. Попробуйте ещё раз.')
+        }
+      }
+    } finally {
+      if (!silent) setSbpPolling(false)
+    }
+  }
+
+  const startSbpPayment = async (planCode: SbpPlanCode) => {
+    const jwt = token
+    if (!jwt) return
+
+    try {
+      setSbpBusyPlan(planCode)
+      setSbpStatusText('')
+
+      const out = await createSbpPayment(jwt, planCode)
+      const orderId = String(out?.order_id || '').trim()
+      const link = String(out?.confirmation_url || '').trim()
+
+      if (!orderId || !link) {
+        throw new Error('Провайдер не вернул ссылку оплаты.')
+      }
+
+      setPendingSbpOrder(orderId)
+      setSbpStatusText('Счёт СБП открыт. Завершите оплату и вернитесь в приложение.')
+      openTelegramUrl(link)
+      window.setTimeout(() => {
+        void checkSbpStatus(orderId, true)
+      }, 3500)
+    } catch (err: any) {
+      const text = String(err?.message || '')
+      const parsed = readBackendErrorDetail(text)
+      const detail = parsed?.detail
+
+      if (detail?.code === 'SBP_NOT_CONFIGURED') {
+        setSbpStatusText('СБП ещё не настроен на сервере. Нужны shop_id и secret_key ЮKassa.')
+      } else if (detail?.message) {
+        setSbpStatusText(String(detail.message))
+      } else {
+        setSbpStatusText('Не удалось создать счёт СБП. Попробуйте ещё раз.')
+      }
+    } finally {
+      setSbpBusyPlan(null)
+    }
+  }
+
+  useEffect(() => {
+    if (!token || !sbpOrderId) return
+
+    let stopped = false
+    const tick = async () => {
+      if (stopped) return
+      await checkSbpStatus(sbpOrderId, true)
+    }
+    void tick()
+    const t = window.setInterval(() => {
+      void tick()
+    }, 10000)
+
+    return () => {
+      stopped = true
+      window.clearInterval(t)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token, sbpOrderId])
+
   const readingLimitMessage =
     `Бесплатный лимит раскладов за месяц исчерпан.\n\n` +
-    `Оплатите пакет/подписку в боте: ${BOT_PAYMENT_URL}`
+    `Оплатите подписку в профиле (СБП) или в боте: ${BOT_PAYMENT_URL}`
 
   const formatRuDate = (value?: string | null) => {
     if (!value) return '—'
@@ -4593,23 +4730,59 @@ useEffect(() => {
                             <span>Подключить безлимит</span>
                           </div>
                           <div className="profile-piece__meta">Бесплатно в этом месяце: {freeLeft} из {freeLimit}</div>
-                          <div className="profile-piece__submeta">14 дней — 99 ₽, месяц — 179 ₽</div>
+                          <div className="profile-piece__submeta">СБП: 14 дней — 99 ₽, месяц — 179 ₽</div>
+                          {!!sbpStatusText && <div className="profile-piece__status">{sbpStatusText}</div>}
                         </div>
 
-                        <a
-                          href={BOT_PAYMENT_URL}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="profile-piece__cta"
-                          onClick={(e) => {
-                            e.preventDefault()
-                            openTelegramUrl(BOT_PAYMENT_URL)
-                          }}
-                        >
-                          Подключить
-                          <br />
-                          безлимит
-                        </a>
+                        <div className="profile-piece__actions">
+                          <button
+                            type="button"
+                            className="profile-piece__cta profile-piece__cta--sbp"
+                            disabled={sbpBusyPlan === 'sub_2weeks'}
+                            onClick={() => {
+                              void startSbpPayment('sub_2weeks')
+                            }}
+                          >
+                            {sbpBusyPlan === 'sub_2weeks' ? 'Создаю…' : 'СБП • 99 ₽'}
+                          </button>
+
+                          <button
+                            type="button"
+                            className="profile-piece__cta profile-piece__cta--sbp"
+                            disabled={sbpBusyPlan === 'sub_month'}
+                            onClick={() => {
+                              void startSbpPayment('sub_month')
+                            }}
+                          >
+                            {sbpBusyPlan === 'sub_month' ? 'Создаю…' : 'СБП • 179 ₽'}
+                          </button>
+
+                          {sbpOrderId && (
+                            <button
+                              type="button"
+                              className="profile-piece__check"
+                              disabled={sbpPolling}
+                              onClick={() => {
+                                void checkSbpStatus()
+                              }}
+                            >
+                              {sbpPolling ? 'Проверяю…' : 'Проверить оплату'}
+                            </button>
+                          )}
+
+                          <a
+                            href={BOT_PAYMENT_URL}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="profile-piece__bot-link"
+                            onClick={(e) => {
+                              e.preventDefault()
+                              openTelegramUrl(BOT_PAYMENT_URL)
+                            }}
+                          >
+                            Оплата через Telegram-бота
+                          </a>
+                        </div>
                       </section>
                     )}
 

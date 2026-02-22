@@ -52,6 +52,49 @@ export async function getBillingStatus(token: string): Promise<BillingStatusDto>
   })
 }
 
+export type SbpPlanCode = 'sub_2weeks' | 'sub_month'
+
+export type SbpCreateOutDto = {
+  order_id: string
+  plan_code: SbpPlanCode | string
+  amount: number
+  currency: string
+  payment_id: string
+  status: string
+  confirmation_url: string
+}
+
+export type SbpStatusOutDto = {
+  order_id: string
+  plan_code: SbpPlanCode | string
+  status: string
+  amount: number
+  currency: string
+  paid_at?: string | null
+  has_active_subscription?: boolean
+  subscription_until?: string | null
+  message?: string
+}
+
+export async function createSbpPayment(token: string, planCode: SbpPlanCode): Promise<SbpCreateOutDto> {
+  return apiJson(`${API_BASE}/billing/sbp/create`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({ plan_code: planCode }),
+  })
+}
+
+export async function getSbpPaymentStatus(token: string, orderId: string): Promise<SbpStatusOutDto> {
+  const q = new URLSearchParams({ order_id: String(orderId || '') }).toString()
+  return apiJson(`${API_BASE}/billing/sbp/status?${q}`, {
+    method: 'GET',
+    headers: { Authorization: `Bearer ${token}` },
+  })
+}
+
 /**
  * Telegram auth.
  * Можно вызывать без аргументов: возьмём initData из window.Telegram.WebApp.

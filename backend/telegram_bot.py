@@ -35,6 +35,11 @@ PROVIDER_TOKEN = (
     or os.environ.get("YOO_PROVIDER_TOKEN")
     or ""
 ).strip()
+CLICK_PROVIDER_TOKEN = (
+    os.environ.get("TELEGRAM_CLICK_PROVIDER_TOKEN")
+    or os.environ.get("CLICK_PROVIDER_TOKEN")
+    or ""
+).strip()
 
 APP_URL_RAW = (os.environ.get("TELEGRAM_APP_URL") or "").strip()  # например https://tarrotai.ru
 APP_BUTTON_TEXT = os.environ.get("TELEGRAM_APP_BUTTON_TEXT") or "Открыть приложение"
@@ -44,8 +49,14 @@ YOOKASSA_VAT_CODE = int(os.environ.get("YOOKASSA_VAT_CODE", "1"))
 YOOKASSA_CONTACT_MODE = (os.environ.get("YOOKASSA_CONTACT_MODE") or "email").strip().lower()
 ENABLE_YOOKASSA_PAYMENTS = str(os.environ.get("ENABLE_YOOKASSA_PAYMENTS", "1")).strip().lower() not in {"0", "false", "no"}
 ENABLE_STARS_FALLBACK = str(os.environ.get("ENABLE_STARS_FALLBACK", "1")).strip().lower() not in {"0", "false", "no"}
+ENABLE_CLICK_PAYMENTS = str(os.environ.get("ENABLE_CLICK_PAYMENTS", "0")).strip().lower() not in {"0", "false", "no"}
 STARS_SUB_2WEEKS = max(1, int(os.environ.get("STARS_SUB_2WEEKS", "120")))
 STARS_SUB_MONTH = max(1, int(os.environ.get("STARS_SUB_MONTH", "199")))
+CLICK_CURRENCY = (os.environ.get("CLICK_CURRENCY") or "UZS").strip().upper()
+CLICK_SUB_2WEEKS_AMOUNT = max(0, int(os.environ.get("CLICK_SUB_2WEEKS_AMOUNT", "0")))
+CLICK_SUB_MONTH_AMOUNT = max(0, int(os.environ.get("CLICK_SUB_MONTH_AMOUNT", "0")))
+CLICK_SUB_2WEEKS_LABEL = (os.environ.get("CLICK_SUB_2WEEKS_LABEL") or "🇺🇿 CLICK — 2 недели").strip()
+CLICK_SUB_MONTH_LABEL = (os.environ.get("CLICK_SUB_MONTH_LABEL") or "🇺🇿 CLICK — месяц").strip()
 
 # ----- Тарифы -----
 # amount — в копейках (RUB * 100)
@@ -102,6 +113,32 @@ PRODUCTS: List[Dict[str, Any]] = [
         "currency": "XTR",
         "provider_mode": "stars",
     },
+    {
+        "code": "sub_2weeks_click",
+        "menu_label": CLICK_SUB_2WEEKS_LABEL,
+        "menu_hint": "Оплата через CLICK (Узбекистан).",
+        "title": "Безлимит на 2 недели (CLICK)",
+        "description": "Подписка AI Tarot на 14 дней через CLICK",
+        "amount": CLICK_SUB_2WEEKS_AMOUNT,
+        "kind": "subscription",
+        "days": 14,
+        "priority": 210,
+        "currency": CLICK_CURRENCY,
+        "provider_mode": "click",
+    },
+    {
+        "code": "sub_month_click",
+        "menu_label": CLICK_SUB_MONTH_LABEL,
+        "menu_hint": "Оплата через CLICK (Узбекистан).",
+        "title": "Безлимит на месяц (CLICK)",
+        "description": "Подписка AI Tarot на 30 дней через CLICK",
+        "amount": CLICK_SUB_MONTH_AMOUNT,
+        "kind": "subscription",
+        "days": 30,
+        "priority": 220,
+        "currency": CLICK_CURRENCY,
+        "provider_mode": "click",
+    },
 ]
 
 # Простое хранилище заказов в памяти (для валидации precheckout и подтверждения оплаты)
@@ -149,6 +186,9 @@ def _products_for_mode(mode: str = "menu") -> List[Dict[str, Any]]:
         items = [p for p in items if str(p.get("provider_mode") or "").lower() != "yookassa"]
     if not ENABLE_STARS_FALLBACK:
         items = [p for p in items if str(p.get("currency") or "RUB").upper() != "XTR"]
+    if not ENABLE_CLICK_PAYMENTS or not CLICK_PROVIDER_TOKEN:
+        items = [p for p in items if str(p.get("provider_mode") or "").lower() != "click"]
+    items = [p for p in items if int(p.get("amount") or 0) > 0]
     return sorted(items, key=lambda x: x.get("priority", 0))
 
 
@@ -442,9 +482,16 @@ async def buy_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     if provider_mode == "yookassa" and not PROVIDER_TOKEN:
         if query.message:
             await query.message.reply_text(
-                "Оплата картой временно недоступна. Попробуйте вариант со Stars (⭐) ниже в списке."
+                "Оплата картой временно недоступна. Выберите другой способ оплаты."
             )
         logger.error("TELEGRAM_PROVIDER_TOKEN is not set for yookassa product=%s", product_code)
+        return
+    if provider_mode == "click" and not CLICK_PROVIDER_TOKEN:
+        if query.message:
+            await query.message.reply_text(
+                "Оплата через CLICK временно недоступна. Выберите другой способ оплаты."
+            )
+        logger.error("CLICK provider token is not set for product=%s", product_code)
         return
 
     # payload должен быть уникальным и <= 128 байт
@@ -488,6 +535,8 @@ async def buy_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             else:
                 invoice_kwargs["need_email"] = True
                 invoice_kwargs["send_email_to_provider"] = True
+    elif provider_mode == "click":
+        invoice_kwargs["provider_token"] = CLICK_PROVIDER_TOKEN
     else:
         # В PTB параметр provider_token обязателен в сигнатуре даже для Telegram Stars.
         invoice_kwargs["provider_token"] = ""

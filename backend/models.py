@@ -5,6 +5,7 @@ from sqlalchemy import (
     BigInteger,
     String,
     DateTime,
+    Boolean,
     func,
     ForeignKey,
     Integer,
@@ -46,6 +47,11 @@ class User(Base):
     )
 
     payment_transactions: Mapped[List["PaymentTransaction"]] = relationship(
+        back_populates="user",
+        cascade="all, delete-orphan",
+    )
+
+    sbp_orders: Mapped[List["SbpOrder"]] = relationship(
         back_populates="user",
         cascade="all, delete-orphan",
     )
@@ -139,3 +145,42 @@ class PaymentTransaction(Base):
     )
 
     user: Mapped["User"] = relationship(back_populates="payment_transactions")
+
+
+class SbpOrder(Base):
+    __tablename__ = "sbp_orders"
+    __table_args__ = (
+        UniqueConstraint("order_id", name="uq_sbp_orders_order_id"),
+        UniqueConstraint("yookassa_payment_id", name="uq_sbp_orders_payment_id"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+
+    order_id: Mapped[str] = mapped_column(String(64), index=True)
+    plan_code: Mapped[str] = mapped_column(String(64), index=True)
+    amount: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    currency: Mapped[str] = mapped_column(String(8), default="RUB")
+
+    status: Mapped[str] = mapped_column(String(32), default="pending", server_default="pending", index=True)
+    yookassa_payment_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    confirmation_url: Mapped[Optional[str]] = mapped_column(String(2048), nullable=True)
+    idempotence_key: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+
+    activation_applied: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+    paid_at: Mapped[Optional[DateTime]] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    provider_payload: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSON, nullable=True)
+    provider_notification: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSON, nullable=True)
+
+    created_at: Mapped[DateTime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+    )
+    updated_at: Mapped[DateTime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+    user: Mapped["User"] = relationship(back_populates="sbp_orders")

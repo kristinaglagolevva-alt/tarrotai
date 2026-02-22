@@ -4498,7 +4498,7 @@ useEffect(() => {
                   <button
                     ref={btnRef}
                     type="button"
-                    className={`glass-cta glass-cta--hero glass-cta--sticky ${pressed ? 'pressed' : ''} ${ctaError ? 'is-error' : ''}`}
+                    className={`glass-cta glass-cta--hero ${pressed ? 'pressed' : ''} ${ctaError ? 'is-error' : ''}`}
                     onPointerDown={onGlassPointerDown}
                     onPointerUp={onGlassPointerUp}
                     onPointerCancel={onGlassPointerUp}

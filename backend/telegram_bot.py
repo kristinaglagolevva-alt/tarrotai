@@ -42,6 +42,10 @@ BOT_VERSION = os.environ.get("TELEGRAM_BOT_VERSION") or os.environ.get("APP_VERS
 YOOKASSA_REQUIRE_RECEIPT = str(os.environ.get("YOOKASSA_REQUIRE_RECEIPT", "1")).strip().lower() not in {"0", "false", "no"}
 YOOKASSA_VAT_CODE = int(os.environ.get("YOOKASSA_VAT_CODE", "1"))
 YOOKASSA_CONTACT_MODE = (os.environ.get("YOOKASSA_CONTACT_MODE") or "email").strip().lower()
+ENABLE_YOOKASSA_PAYMENTS = str(os.environ.get("ENABLE_YOOKASSA_PAYMENTS", "1")).strip().lower() not in {"0", "false", "no"}
+ENABLE_STARS_FALLBACK = str(os.environ.get("ENABLE_STARS_FALLBACK", "1")).strip().lower() not in {"0", "false", "no"}
+STARS_SUB_2WEEKS = max(1, int(os.environ.get("STARS_SUB_2WEEKS", "120")))
+STARS_SUB_MONTH = max(1, int(os.environ.get("STARS_SUB_MONTH", "199")))
 
 # ----- Тарифы -----
 # amount — в копейках (RUB * 100)
@@ -56,6 +60,8 @@ PRODUCTS: List[Dict[str, Any]] = [
         "kind": "subscription",
         "days": 14,
         "priority": 10,
+        "currency": "RUB",
+        "provider_mode": "yookassa",
     },
     {
         "code": "sub_month",
@@ -67,6 +73,34 @@ PRODUCTS: List[Dict[str, Any]] = [
         "kind": "subscription",
         "days": 30,
         "priority": 20,
+        "currency": "RUB",
+        "provider_mode": "yookassa",
+    },
+    {
+        "code": "sub_2weeks_xtr",
+        "menu_label": f"⭐ Безлимит на 2 недели — {STARS_SUB_2WEEKS} Stars",
+        "menu_hint": "Резервный способ оплаты через Telegram Stars (обычно работает на iPhone/вне РФ).",
+        "title": "Безлимит на 2 недели (Stars)",
+        "description": "Подписка AI Tarot на 14 дней (Telegram Stars)",
+        "amount": STARS_SUB_2WEEKS,
+        "kind": "subscription",
+        "days": 14,
+        "priority": 110,
+        "currency": "XTR",
+        "provider_mode": "stars",
+    },
+    {
+        "code": "sub_month_xtr",
+        "menu_label": f"⭐ Безлимит на месяц — {STARS_SUB_MONTH} Stars",
+        "menu_hint": "Резервный способ оплаты через Telegram Stars (обычно работает на iPhone/вне РФ).",
+        "title": "Безлимит на месяц (Stars)",
+        "description": "Подписка AI Tarot на 30 дней (Telegram Stars)",
+        "amount": STARS_SUB_MONTH,
+        "kind": "subscription",
+        "days": 30,
+        "priority": 120,
+        "currency": "XTR",
+        "provider_mode": "stars",
     },
 ]
 
@@ -110,7 +144,12 @@ def _build_provider_data_for_receipt(product: Dict[str, Any]) -> str:
 
 
 def _products_for_mode(mode: str = "menu") -> List[Dict[str, Any]]:
-    return sorted(PRODUCTS, key=lambda x: x.get("priority", 0))
+    items = PRODUCTS
+    if not ENABLE_YOOKASSA_PAYMENTS:
+        items = [p for p in items if str(p.get("provider_mode") or "").lower() != "yookassa"]
+    if not ENABLE_STARS_FALLBACK:
+        items = [p for p in items if str(p.get("currency") or "RUB").upper() != "XTR"]
+    return sorted(items, key=lambda x: x.get("priority", 0))
 
 
 def _format_price_list(mode: str = "menu") -> str:
@@ -383,12 +422,6 @@ async def buy_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         return
     await _safe_answer_query(query)
 
-    if not PROVIDER_TOKEN:
-        if query.message:
-            await query.message.reply_text("Платёжный провайдер не настроен. Напишите в поддержку.")
-        logger.error("TELEGRAM_PROVIDER_TOKEN is not set")
-        return
-
     parts = query.data.split(":", 1)
     if len(parts) != 2:
         return
@@ -404,6 +437,16 @@ async def buy_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     if chat_id is None:
         return
 
+    currency = str(product.get("currency") or "RUB").upper()
+    provider_mode = str(product.get("provider_mode") or ("stars" if currency == "XTR" else "yookassa")).lower()
+    if provider_mode == "yookassa" and not PROVIDER_TOKEN:
+        if query.message:
+            await query.message.reply_text(
+                "Оплата картой временно недоступна. Попробуйте вариант со Stars (⭐) ниже в списке."
+            )
+        logger.error("TELEGRAM_PROVIDER_TOKEN is not set for yookassa product=%s", product_code)
+        return
+
     # payload должен быть уникальным и <= 128 байт
     payload = f"order:{product_code}:{secrets.token_hex(8)}"
 
@@ -412,7 +455,7 @@ async def buy_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         "status": "pending",
         "product_code": product_code,
         "amount": int(product["amount"]),
-        "currency": "RUB",
+        "currency": currency,
         "tg_user_id": query.from_user.id if query.from_user else None,
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
@@ -428,30 +471,33 @@ async def buy_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         "title": product.get("title") or "AI Tarot",
         "description": product.get("description") or "AI Tarot",
         "payload": payload,
-        "provider_token": PROVIDER_TOKEN,
-        "currency": "RUB",
+        "currency": currency,
         "prices": prices,
     }
 
-    if YOOKASSA_REQUIRE_RECEIPT:
-        invoice_kwargs["provider_data"] = _build_provider_data_for_receipt(product)
-        # Для ЮKassa в LIVE-режиме обычно надежнее запрашивать email и передавать его провайдеру.
-        if YOOKASSA_CONTACT_MODE == "phone":
-            invoice_kwargs["need_phone_number"] = True
-            invoice_kwargs["send_phone_number_to_provider"] = True
-        elif YOOKASSA_CONTACT_MODE == "none":
-            pass
-        else:
-            invoice_kwargs["need_email"] = True
-            invoice_kwargs["send_email_to_provider"] = True
+    if provider_mode == "yookassa":
+        invoice_kwargs["provider_token"] = PROVIDER_TOKEN
+        if YOOKASSA_REQUIRE_RECEIPT:
+            invoice_kwargs["provider_data"] = _build_provider_data_for_receipt(product)
+            # Для ЮKassa в LIVE-режиме обычно надежнее запрашивать email и передавать его провайдеру.
+            if YOOKASSA_CONTACT_MODE == "phone":
+                invoice_kwargs["need_phone_number"] = True
+                invoice_kwargs["send_phone_number_to_provider"] = True
+            elif YOOKASSA_CONTACT_MODE == "none":
+                pass
+            else:
+                invoice_kwargs["need_email"] = True
+                invoice_kwargs["send_email_to_provider"] = True
 
     try:
         await context.bot.send_invoice(**invoice_kwargs)
         logger.info(
-            "Invoice sent: tg_user=%s product=%s amount=%s receipt=%s",
+            "Invoice sent: tg_user=%s product=%s amount=%s currency=%s provider_mode=%s receipt=%s",
             getattr(query.from_user, "id", None),
             product_code,
             int(product["amount"]),
+            currency,
+            provider_mode,
             "on" if YOOKASSA_REQUIRE_RECEIPT else "off",
         )
     except Exception as exc:
@@ -474,7 +520,7 @@ async def precheckout_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
         return
 
     expected_amount = int(product.get("amount") or -1)
-    expected_currency = "RUB"
+    expected_currency = str(product.get("currency") or "RUB").upper()
 
     # Валидация без зависимости от in-memory ORDERS (устойчиво к рестартам/нескольким воркерам).
     if int(query.total_amount or -1) != expected_amount or str(query.currency or "").upper() != expected_currency:

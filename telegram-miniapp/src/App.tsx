@@ -2137,10 +2137,21 @@ useEffect(() => {
 
   // карты результата (пока mock)
   const [ppfCards, setPpfCards] = useState<PpfCardResult[]>([])
-  const [ppfDayKey, setPpfDayKey] = useState<string>('')
+  const [ppfDeckCards, setPpfDeckCards] = useState<PpfCardResult[]>([])
+  const [ppfPlacedCards, setPpfPlacedCards] = useState<Array<PpfCardResult | null>>([null, null, null])
+  const [ppfRevealMap, setPpfRevealMap] = useState<boolean[]>([false, false, false])
+  const [ppfPlacedCount, setPpfPlacedCount] = useState(0)
+  const ppfPlacedCountRef = useRef(0)
+  const ppfAutoDealTRef = useRef<number | null>(null)
+  const ppfSlotRefs = useRef<Array<HTMLDivElement | null>>([])
 
-  // порядок = какая карта (0/1/2) стоит в каком слоте (лев/центр/прав)
-  const [ppfOrder, setPpfOrder] = useState<number[]>([0, 1, 2])
+  const [ppfDragging, setPpfDragging] = useState(false)
+  const [ppfDragDelta, setPpfDragDelta] = useState({ x: 0, y: 0 })
+  const [ppfDragOverSlot, setPpfDragOverSlot] = useState<number | null>(null)
+  const ppfDragPointerRef = useRef<number | null>(null)
+  const ppfDragStartRef = useRef({ x: 0, y: 0 })
+
+  const [ppfDayKey, setPpfDayKey] = useState<string>('')
 
   const [ppfShakeEnabled, setPpfShakeEnabled] = useState(false)
   const [ppfShuffleProgress, setPpfShuffleProgress] = useState(0)
@@ -2159,6 +2170,18 @@ useEffect(() => {
 
   const PPF_SHAKE_THRESHOLD = 8.8
   const PPF_SHAKE_STEP_BASE = 0.085
+
+  useEffect(() => {
+    ppfPlacedCountRef.current = ppfPlacedCount
+  }, [ppfPlacedCount])
+
+  useEffect(() => {
+    return () => {
+      if (ppfAutoDealTRef.current) {
+        window.clearTimeout(ppfAutoDealTRef.current)
+      }
+    }
+  }, [])
 
 
   // ---------------------------------------------------------------------------------------------
@@ -3013,13 +3036,26 @@ useEffect(() => {
   }
 
   const resetPpfState = () => {
+    if (ppfAutoDealTRef.current) {
+      window.clearTimeout(ppfAutoDealTRef.current)
+      ppfAutoDealTRef.current = null
+    }
+
     setPpfScreen('setup')
     setPpfShakeEnabled(false)
     setPpfShuffleProgress(0)
     setPpfReadyToOpen(false)
 
     setPpfCards([])
-    setPpfOrder([0, 1, 2])
+    setPpfDeckCards([])
+    setPpfPlacedCards([null, null, null])
+    setPpfRevealMap([false, false, false])
+    setPpfPlacedCount(0)
+    ppfPlacedCountRef.current = 0
+    setPpfDragging(false)
+    setPpfDragDelta({ x: 0, y: 0 })
+    setPpfDragOverSlot(null)
+    ppfDragPointerRef.current = null
 
     // Reset description and loading state for PPF reading
     setPpfDesc('')
@@ -3053,8 +3089,6 @@ useEffect(() => {
       return
     }
 
-    if (needsMotionPermission) await requestMotion()
-
     ppfLastAccelRef.current = null
     ppfShakeCooldownRef.current = 0
     ppfLastPulseRef.current = 0
@@ -3062,6 +3096,7 @@ useEffect(() => {
     // Сразу показываем карты, чтобы не ждать сеть перед визуальным результатом.
     const previewCards = buildPpfCardsPreview()
     setPpfCards(previewCards)
+    setPpfDeckCards(previewCards)
     warmupCardImages(previewCards)
     // Reset description and mark as loading while we fetch from the backend
     setPpfDesc('')
@@ -3069,12 +3104,18 @@ useEffect(() => {
     setPpfDayKey(getVilniusDayKey())
 
     setPpfScreen('shuffle')
-    setPpfShakeEnabled(true)
+    setPpfShakeEnabled(false)
     setPpfReadyToOpen(false)
     setPpfShuffleProgress(0)
+    setPpfPlacedCards([null, null, null])
+    setPpfRevealMap([false, false, false])
+    setPpfPlacedCount(0)
+    ppfPlacedCountRef.current = 0
+    setPpfDragging(false)
+    setPpfDragDelta({ x: 0, y: 0 })
+    setPpfDragOverSlot(null)
+    ppfDragPointerRef.current = null
 
-    // стартуем всегда “123”
-    setPpfOrder([0, 1, 2])
     ppfFinishingRef.current = false
     ppfLastSwapAtRef.current = 0
 
@@ -3094,13 +3135,118 @@ useEffect(() => {
     })
   }
 
-  const pickNextPpfOrder = (cur: number[]) => {
-    const curKey = cur.join('')
-    for (let t = 0; t < 8; t++) {
-      const next = THREE_PERMS[Math.floor(Math.random() * THREE_PERMS.length)]
-      if (next.join('') !== curKey) return next
+  const ppfReleaseDeckPointer = (target: EventTarget | null, pointerId: number) => {
+    const el = target as HTMLElement | null
+    if (!el) return
+    try {
+      el.releasePointerCapture(pointerId)
+    } catch {}
+  }
+
+  const placePpfCardToNextSlot = (slotIndexArg?: number) => {
+    const slotIndex = typeof slotIndexArg === 'number' ? slotIndexArg : ppfPlacedCountRef.current
+    if (slotIndex < 0 || slotIndex > 2) return
+    const card = ppfDeckCards[slotIndex]
+    if (!card) return
+
+    setPpfPlacedCards((cur) => {
+      if (cur[slotIndex]) return cur
+      const next = [...cur]
+      next[slotIndex] = card
+      return next
+    })
+
+    const nextCount = slotIndex + 1
+    setPpfPlacedCount(nextCount)
+    ppfPlacedCountRef.current = nextCount
+    setPpfShuffleProgress(nextCount / 3)
+    setPpfDragging(false)
+    setPpfDragDelta({ x: 0, y: 0 })
+    setPpfDragOverSlot(null)
+
+    window.setTimeout(() => {
+      setPpfRevealMap((cur) => {
+        if (cur[slotIndex]) return cur
+        const next = [...cur]
+        next[slotIndex] = true
+        return next
+      })
+    }, 36)
+
+    try {
+      hapticPulse(0.34)
+    } catch {}
+
+    if (nextCount >= 3) {
+      if (ppfAutoDealTRef.current) {
+        window.clearTimeout(ppfAutoDealTRef.current)
+        ppfAutoDealTRef.current = null
+      }
+      window.setTimeout(() => finishPpfShuffle(), 320)
     }
-    return [cur[2], cur[1], cur[0]]
+  }
+
+  const onPpfDeckPointerDown = (e: any) => {
+    if (ppfPlacedCountRef.current >= 3) return
+    ppfDragPointerRef.current = e.pointerId
+    ppfDragStartRef.current = { x: e.clientX, y: e.clientY }
+    setPpfDragging(true)
+    setPpfDragDelta({ x: 0, y: 0 })
+    setPpfDragOverSlot(null)
+    try {
+      ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
+    } catch {}
+  }
+
+  const onPpfDeckPointerMove = (e: any) => {
+    if (!ppfDragging) return
+    if (ppfDragPointerRef.current !== e.pointerId) return
+
+    const dx = e.clientX - ppfDragStartRef.current.x
+    const dy = e.clientY - ppfDragStartRef.current.y
+    setPpfDragDelta({ x: dx, y: dy })
+
+    const activeSlot = ppfPlacedCountRef.current
+    const slotEl = ppfSlotRefs.current[activeSlot]
+    if (!slotEl) {
+      setPpfDragOverSlot(null)
+      return
+    }
+    const r = slotEl.getBoundingClientRect()
+    const inside = e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom
+    setPpfDragOverSlot(inside ? activeSlot : null)
+  }
+
+  const onPpfDeckPointerUp = (e: any) => {
+    if (ppfDragPointerRef.current !== e.pointerId) return
+    ppfReleaseDeckPointer(e.currentTarget, e.pointerId)
+    ppfDragPointerRef.current = null
+
+    const activeSlot = ppfPlacedCountRef.current
+    const slotEl = ppfSlotRefs.current[activeSlot]
+    let inside = false
+    if (slotEl) {
+      const r = slotEl.getBoundingClientRect()
+      inside = e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom
+    }
+
+    if (inside) {
+      placePpfCardToNextSlot(activeSlot)
+      return
+    }
+
+    setPpfDragging(false)
+    setPpfDragDelta({ x: 0, y: 0 })
+    setPpfDragOverSlot(null)
+  }
+
+  const onPpfDeckPointerCancel = (e: any) => {
+    if (ppfDragPointerRef.current !== e.pointerId) return
+    ppfReleaseDeckPointer(e.currentTarget, e.pointerId)
+    ppfDragPointerRef.current = null
+    setPpfDragging(false)
+    setPpfDragDelta({ x: 0, y: 0 })
+    setPpfDragOverSlot(null)
   }
 
   const finishPpfShuffle = () => {
@@ -3108,29 +3254,24 @@ useEffect(() => {
     ppfFinishingRef.current = true
 
     setPpfShakeEnabled(false)
-    setPpfOrder([0, 1, 2])
+    setPpfDragging(false)
+    setPpfDragDelta({ x: 0, y: 0 })
+    setPpfDragOverSlot(null)
+
+    setPpfReadyToOpen(true)
+    setPpfShuffleProgress(1)
 
     window.setTimeout(() => {
-      setPpfReadyToOpen(true)
-      setPpfShuffleProgress(1)
-
-      window.setTimeout(() => {
-        setPpfScreen('result')
-        try {
-          hapticPulse(0.7)
-        } catch {}
-      }, 180)
-    }, 420)
-  }
-
-  const swapPpfVisual = () => {
-    setPpfOrder((cur) => pickNextPpfOrder(cur))
+      setPpfScreen('result')
+      try {
+        hapticPulse(0.7)
+      } catch {}
+    }, 220)
   }
 
   const shufflePpfOnce = (power01: number) => {
     const p = clamp(power01, 0, 1)
-
-    swapPpfVisual()
+    ppfLastSwapAtRef.current = Date.now()
 
     setPpfShuffleProgress((cur) => {
       const step = PPF_SHAKE_STEP_BASE + p * 0.11
@@ -3143,48 +3284,27 @@ useEffect(() => {
     })
   }
 
-  const autoShufflePpf = async () => {
-    if (needsMotionPermission) await requestMotion()
-
-    setPpfShakeEnabled(true)
-    setPpfReadyToOpen(false)
-    ppfFinishingRef.current = false
-
-    const from = ppfShuffleProgress
-    const start = performance.now()
-    const dur = 1200
-
-    let lastPulse = 0
-    ppfLastSwapAtRef.current = 0
-
-    const tick = (now: number) => {
-      const t = Math.min(1, (now - start) / dur)
-      const eased = 1 - Math.pow(1 - t, 3)
-      const next = clamp(from + (1 - from) * eased, 0, 1)
-
-      if (now - ppfLastSwapAtRef.current > 140 && next < 1) {
-        ppfLastSwapAtRef.current = now
-        swapPpfVisual()
-      }
-
-      setPpfShuffleProgress(next)
-
-      if (now - lastPulse > 90) {
-        lastPulse = now
-        try {
-          hapticPulse(clamp(next, 0.12, 1))
-        } catch {}
-      }
-
-      if (t < 1) {
-        requestAnimationFrame(tick)
-        return
-      }
-
-      finishPpfShuffle()
+  const autoShufflePpf = () => {
+    if (ppfAutoDealTRef.current) {
+      window.clearTimeout(ppfAutoDealTRef.current)
+      ppfAutoDealTRef.current = null
     }
 
-    requestAnimationFrame(tick)
+    const step = () => {
+      const nextSlot = ppfPlacedCountRef.current
+      if (nextSlot >= 3) {
+        ppfAutoDealTRef.current = null
+        return
+      }
+      placePpfCardToNextSlot(nextSlot)
+      if (nextSlot < 2) {
+        ppfAutoDealTRef.current = window.setTimeout(step, 260)
+      } else {
+        ppfAutoDealTRef.current = null
+      }
+    }
+
+    step()
   }
 
   const restartPpf = () => {
@@ -5590,64 +5710,60 @@ useEffect(() => {
               {/* 1) SETUP */}
               {ppfScreen === 'setup' && (
                 <>
-                  <div className="ppf-practice">
-                    <div className="ppf-practice__panel">
-                      <div className="ppf-practice__title">Расклад на 3 карты</div>
-                      <div className="ppf-practice__subtitle">
-                        Сосредоточьтесь на вопросе и вытяните все три карты
+                  <div className="threecards-row" aria-label="Три карты (рубашка)">
+                    {[0, 1, 2].map((i) => (
+                      <div key={i} className="threecard">
+                        <img src={backCardImg} alt="" />
                       </div>
+                    ))}
+                  </div>
 
-                      <div className="ppf-practice__slots" aria-label="Слоты расклада">
-                        {PPF_SLOT_LABELS.map((label, idx) => (
-                          <div key={`${label}-${idx}`} className={`ppf-practice__slot ${idx === 0 ? 'is-accent' : ''}`}>
-                            <div className="ppf-practice__slot-label">{label}</div>
-                          </div>
-                        ))}
+                  <div className="threeform">
+                    <div className="ask-wrap">
+                      <div className="ask-glass">
+                        <textarea
+                          className="ask-input"
+                          value={ppfQuestion}
+                          onChange={(e) => setPpfQuestion(e.target.value)}
+                          placeholder="Ваш вопрос…"
+                          enterKeyHint="search"
+                          rows={2}
+                        />
                       </div>
-
-                      <div className={`ppf-practice__question ${ppfQuestion.trim() ? '' : 'is-empty'}`}>
-                        {ppfQuestion.trim() || 'Сначала задайте вопрос на главной странице'}
-                      </div>
-
-                      <div
-                        className={`seg seg--threekind ${ppfFocusIsBumping ? 'is-bump' : ''}`}
-                        data-bump={ppfFocusBump}
-                        style={{
-                          ['--i' as any]: ppfFocusActiveIndex,
-                          ['--from' as any]: ppfFocusPrevIndex,
-                        }}
-                        role="tablist"
-                        aria-label="Фокус"
-                      >
-                        <div className="seg__pill" aria-hidden="true" />
-                        {PPF_FOCUS.map((k) => (
-                          <button
-                            key={k.id}
-                            type="button"
-                            className={`seg__btn ${ppfFocus === k.id ? 'is-active' : ''}`}
-                            onClick={() => onPickPpfFocus(k.id)}
-                            role="tab"
-                            aria-selected={ppfFocus === k.id}
-                          >
-                            {k.label}
-                          </button>
-                        ))}
-                      </div>
-
-                      <button type="button" className="glass-cta" onClick={beginPpfShuffle}>
-                        <span className="glass-cta__inner">
-                          <span className="glass-cta__rim" aria-hidden="true" />
-                          <span className="glass-cta__text">Вытянуть карты</span>
-                          <span className="glass-cta__spark" aria-hidden="true" />
-                        </span>
-                      </button>
                     </div>
 
-                    <div className="ppf-practice__fan" aria-hidden="true">
-                      {Array.from({ length: 7 }).map((_, i) => (
-                        <span key={i} />
+                    <div
+                      className={`seg seg--threekind ${ppfFocusIsBumping ? 'is-bump' : ''}`}
+                      data-bump={ppfFocusBump}
+                      style={{
+                        ['--i' as any]: ppfFocusActiveIndex,
+                        ['--from' as any]: ppfFocusPrevIndex,
+                      }}
+                      role="tablist"
+                      aria-label="Фокус"
+                    >
+                      <div className="seg__pill" aria-hidden="true" />
+                      {PPF_FOCUS.map((k) => (
+                        <button
+                          key={k.id}
+                          type="button"
+                          className={`seg__btn ${ppfFocus === k.id ? 'is-active' : ''}`}
+                          onClick={() => onPickPpfFocus(k.id)}
+                          role="tab"
+                          aria-selected={ppfFocus === k.id}
+                        >
+                          {k.label}
+                        </button>
                       ))}
                     </div>
+
+                    <button type="button" className="glass-cta" onClick={beginPpfShuffle}>
+                      <span className="glass-cta__inner">
+                        <span className="glass-cta__rim" aria-hidden="true" />
+                        <span className="glass-cta__text">Продолжить</span>
+                        <span className="glass-cta__spark" aria-hidden="true" />
+                      </span>
+                    </button>
                   </div>
                 </>
               )}
@@ -5657,68 +5773,96 @@ useEffect(() => {
               {/* 2) SHUFFLE */}
               {ppfScreen === 'shuffle' && (
                 <>
-                  <div className="ppf-practice ppf-practice--shuffle">
-                    <div className="ppf-practice__panel">
-                      <div className="ppf-practice__title">Прошлое • Настоящее • Будущее</div>
-                      <div className="ppf-practice__subtitle">
-                        {ppfShuffleProgress < 1
-                          ? 'Потрясите телефон или нажмите кнопку ниже'
-                          : 'Открываем карты…'}
-                      </div>
-
-                      <div className="ppf-practice__slots" aria-label="Перемешивание">
-                        {PPF_SLOT_LABELS.map((label, slotIdx) => {
-                          const mappedCardIdx = ppfOrder[slotIdx] ?? slotIdx
-                          const tilt = mappedCardIdx === 0 ? -8 : mappedCardIdx === 1 ? 2 : 8
-                          const isActive =
-                            ppfShuffleProgress < 1 && Math.floor(clamp(ppfShuffleProgress * 3, 0, 2.99)) === slotIdx
-                          return (
-                            <div
-                              key={`${label}-${slotIdx}`}
-                              className={`ppf-practice__slot is-filled ${slotIdx === 0 ? 'is-accent' : ''} ${
-                                isActive ? 'is-active' : ''
-                              }`}
-                            >
-                              <div className="ppf-practice__slot-card" style={{ ['--tilt' as any]: `${tilt}deg` }}>
-                                <img src={backCardImg} alt="" />
+                  <div className="ppf-drag-board" aria-label="Расклад с перетаскиванием карт">
+                    <div className="ppf-drag-board__slots">
+                      {PPF_SLOT_LABELS.map((label, slotIdx) => {
+                        const placed = ppfPlacedCards[slotIdx]
+                        const isTarget = slotIdx === ppfPlacedCount
+                        const isOver = ppfDragOverSlot === slotIdx
+                        const cleanName = (placed?.name || '').replace(/\s*\(перевёрнутая\)\s*$/i, '')
+                        return (
+                          <div
+                            key={`${label}-${slotIdx}`}
+                            ref={(el) => {
+                              ppfSlotRefs.current[slotIdx] = el
+                            }}
+                            className={`ppf-drop-slot ${isTarget ? 'is-target' : ''} ${isOver ? 'is-over' : ''} ${
+                              placed ? 'is-filled' : ''
+                            }`}
+                          >
+                            {placed ? (
+                              <div className={`ppf-drop-card ${ppfRevealMap[slotIdx] ? 'is-revealed' : ''}`}>
+                                <div className="ppf-drop-card__face ppf-drop-card__face--back">
+                                  <img src={backCardImg} alt="" />
+                                </div>
+                                <div className="ppf-drop-card__face ppf-drop-card__face--front">
+                                  <img
+                                    className={placed.isReversed ? 'is-reversed' : ''}
+                                    src={placed.url || backCardImg}
+                                    alt={placed.name}
+                                  />
+                                </div>
                               </div>
-                              <div className="ppf-practice__slot-label">{label}</div>
-                            </div>
-                          )
-                        })}
-                      </div>
+                            ) : null}
 
-                      {ppfShuffleProgress < 1 ? (
-                        <>
-                          {needsMotionPermission && (
-                            <button type="button" className="glassbtn" onClick={requestMotion}>
-                              Разрешить датчики
-                            </button>
-                          )}
+                            {cleanName ? <div className="ppf-drop-slot__name">{cleanName}</div> : null}
+                            <div className="ppf-drop-slot__label">{label}</div>
+                          </div>
+                        )
+                      })}
+                    </div>
 
-                          <div className="threehint">Прогресс: {Math.round(ppfShuffleProgress * 100)}%</div>
-
-                          <button type="button" className="glass-cta mini-cta" onClick={autoShufflePpf}>
-                            <span className="glass-cta__inner">
-                              <span className="glass-cta__rim" aria-hidden="true" />
-                              <span className="glass-cta__text">Перемешать автоматически</span>
-                              <span className="glass-cta__spark" aria-hidden="true" />
-                            </span>
-                          </button>
-                        </>
-                      ) : (
-                        <div className="shake__badge is-done">
-                          <div className="shake__title">Открываем карты…</div>
-                          <div className="shake__sub">Сейчас покажем 3 карты и интерпретацию.</div>
+                    {ppfPlacedCount < 3 && (
+                      <div className="ppf-drag-deck" aria-hidden="true">
+                        <div className="ppf-drag-deck__fan">
+                          {Array.from({ length: 7 }).map((_, i) => (
+                            <span key={i} />
+                          ))}
                         </div>
-                      )}
-                    </div>
 
-                    <div className="ppf-practice__fan" aria-hidden="true">
-                      {Array.from({ length: 7 }).map((_, i) => (
-                        <span key={i} />
-                      ))}
-                    </div>
+                        <div
+                          className={`ppf-drag-card-live ${ppfDragging ? 'is-dragging' : ''}`}
+                          style={{
+                            ['--dx' as any]: `${ppfDragDelta.x}px`,
+                            ['--dy' as any]: `${ppfDragDelta.y}px`,
+                          }}
+                          onPointerDown={onPpfDeckPointerDown}
+                          onPointerMove={onPpfDeckPointerMove}
+                          onPointerUp={onPpfDeckPointerUp}
+                          onPointerCancel={onPpfDeckPointerCancel}
+                        >
+                          <img src={backCardImg} alt="" />
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="bottom-panel bottom-panel--shake">
+                    {ppfPlacedCount < 3 ? (
+                      <>
+                        <div className="shake__badge">
+                          <div className="shake__title">Вытащите карты из колоды</div>
+                          <div className="shake__sub">
+                            Зажмите карту снизу и перетащите в подсвеченный пунктирный слот.
+                          </div>
+                        </div>
+
+                        <div className="threehint">Выложено: {ppfPlacedCount} из 3</div>
+
+                        <button type="button" className="glass-cta mini-cta" onClick={autoShufflePpf}>
+                          <span className="glass-cta__inner">
+                            <span className="glass-cta__rim" aria-hidden="true" />
+                            <span className="glass-cta__text">Разложить автоматически</span>
+                            <span className="glass-cta__spark" aria-hidden="true" />
+                          </span>
+                        </button>
+                      </>
+                    ) : (
+                      <div className="shake__badge is-done">
+                        <div className="shake__title">Открываем карты…</div>
+                        <div className="shake__sub">Сейчас покажем 3 карты и интерпретацию.</div>
+                      </div>
+                    )}
                   </div>
                 </>
               )}

@@ -7,6 +7,9 @@ import './App.css'
 import {
   telegramAuth,
   getMe,
+  updateMePreferences,
+  getMemorySummary,
+  getSupportTicketsMe,
   getBillingStatus,
   createSbpPayment,
   getSbpPaymentStatus,
@@ -16,6 +19,17 @@ import {
   analyzeSpreadPhoto,
   createReading,
 } from './api'
+import type {
+  MeDto,
+  MePreferencesInDto,
+  MemorySummaryDto,
+  SupportTicketDto,
+} from './api'
+import MemorySettingsCard from './features/profile/MemorySettingsCard'
+import SubscriptionManageCard from './features/profile/SubscriptionManageCard'
+import InsightBanner from './features/readings/InsightBanner'
+import ContextHint from './features/readings/ContextHint'
+import SupportEntry from './features/support/SupportEntry'
 
 
 
@@ -221,6 +235,8 @@ function clamp(n: number, min: number, max: number) {
 function rand(min: number, max: number) {
   return min + Math.random() * (max - min)
 }
+
+const hiddenDragPoint = () => ({ x: -10000, y: -10000 })
 
 function renderMdInline(text: string, keyPrefix: string) {
   const nodes: any[] = []
@@ -572,7 +588,6 @@ function PremiumFlipCard({
   backUrl,
   active,
   durationMs = 2600,
-  randomizeEveryMs,
   intensity = 0,
   className = '',
   scale = 1,
@@ -587,13 +602,13 @@ function PremiumFlipCard({
   // ✅ фиксируем предвыбранную карту дня
   lockFront = false,
   lockedFrontUrl,
+  lockedFrontReversed = false,
   previewExcludeUrl,
 }: {
   frontUrls: string[]
   backUrl: string
   active: boolean
   durationMs?: number
-  randomizeEveryMs?: number
   intensity?: number
   className?: string
   scale?: number
@@ -606,6 +621,7 @@ function PremiumFlipCard({
   onFrontChange?: (url: string) => void
   lockFront?: boolean
   lockedFrontUrl?: string
+  lockedFrontReversed?: boolean
   previewExcludeUrl?: string
 }) {
   const safeFronts = frontUrls.length ? frontUrls : [backUrl]
@@ -648,28 +664,26 @@ function PremiumFlipCard({
     onFrontChange?.(front)
   }, [front, onFrontChange])
 
-  // ✅ пока active и не lockFront — меняем фронт рандомно по таймеру (быстрее, чтобы было заметно)
+  // ✅ пока active и не lockFront — меняем фронт строго в "слепой зоне" (90°/270°)
   useEffect(() => {
     clearTimers()
 
     if (!active) return
     if (lockFront) return
 
-    const step = Math.max(420, Math.floor(randomizeEveryMs || durationMs * 0.5))
-
-    // первая смена чуть раньше, чтобы пользователь сразу видел "рандом"
+    const firstSwap = Math.max(220, Math.floor(durationMs * 0.25))
+    const loopSwap = Math.max(420, Math.floor(durationMs * 0.5))
     halfTimeoutRef.current = window.setTimeout(() => {
       setFront((cur) => pickNext(cur))
 
-      // дальше — равномерно, пока карта в режиме предпросмотра
       cycleIntervalRef.current = window.setInterval(() => {
         setFront((cur) => pickNext(cur))
-      }, step)
-    }, step)
+      }, loopSwap)
+    }, firstSwap)
 
     return () => clearTimers()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [active, lockFront, durationMs, randomizeEveryMs])
+  }, [active, lockFront, durationMs])
 
   // ✅ когда нужно — жёстко фиксируем предвыбранный фронт (daily)
   useEffect(() => {
@@ -709,6 +723,7 @@ function PremiumFlipCard({
 
         ['--pflip-top' as any]: top,
         ['--pflip-s' as any]: scale.toFixed(3),
+        ['--front-rot' as any]: lockFront && lockedFrontReversed ? '180deg' : '0deg',
       }}
       role={clickable ? 'button' : undefined}
       tabIndex={clickable ? 0 : undefined}
@@ -760,17 +775,44 @@ type BillingStatus = {
 
 type SbpPlanCode = 'sub_2weeks' | 'sub_month'
 
-const BOT_USERNAME =
-  ((import.meta as any).env?.VITE_BOT_USERNAME as string | undefined)?.trim() || 'Tarot_AI_Bot'
+const BOT_USERNAME = 'Ttaarrroobot'
 const BOT_PAYMENT_URL = `https://t.me/${BOT_USERNAME}?start=menu`
 const BOT_CARD_URL = `https://t.me/${BOT_USERNAME}?start=card`
 const BOT_CLICK_URL = `https://t.me/${BOT_USERNAME}?start=click`
-const SUPPORT_URL =
-  ((import.meta as any).env?.VITE_SUPPORT_URL as string | undefined)?.trim() || `https://t.me/${BOT_USERNAME}`
-const TERMS_URL =
-  ((import.meta as any).env?.VITE_TERMS_URL as string | undefined)?.trim() || 'https://tarrotai.ru/terms'
-const PRIVACY_URL =
-  ((import.meta as any).env?.VITE_PRIVACY_URL as string | undefined)?.trim() || 'https://tarrotai.ru/privacy'
+const BOT_SUB_MANAGE_URL = `https://t.me/${BOT_USERNAME}?start=sub_manage`
+const SUPPORT_URL = `https://t.me/${BOT_USERNAME}?start=support`
+const TERMS_URL = `https://t.me/${BOT_USERNAME}?start=terms`
+const PRIVACY_URL = `https://t.me/${BOT_USERNAME}?start=privacy`
+const LEGAL_CONSENT_VERSION = '2026-02-25-v1'
+const TERMS_PDF_URL = '/docs/ai_taro_user_agreement_draft.pdf'
+const PRIVACY_PDF_URL = '/docs/ai_taro_privacy_policy_draft.pdf'
+
+type LegalDocKind = 'terms' | 'privacy'
+
+const LEGAL_DOCS: Record<LegalDocKind, { title: string; intro: string; body: string[]; pdf: string }> = {
+  terms: {
+    title: 'Пользовательское соглашение',
+    intro: 'Черновая версия документа. Финальная юридическая редакция будет добавлена позже без изменения структуры экрана.',
+    body: [
+      '1. AI Taro предоставляет информационные интерпретации раскладов и не является медицинской, юридической или финансовой консультацией.',
+      '2. Пользователь самостоятельно принимает решения на основе полученной информации.',
+      '3. Доступ к функциям приложения предоставляется по правилам тарифов и подписки.',
+      '4. Для вопросов поддержки используйте кнопку «Написать в поддержку» в профиле или команду /support в боте.',
+    ],
+    pdf: TERMS_PDF_URL,
+  },
+  privacy: {
+    title: 'Политика конфиденциальности',
+    intro: 'Черновая версия документа. Финальная редакция будет обновлена позже без изменения пользовательского пути.',
+    body: [
+      '1. Для работы сервиса обрабатываются данные Telegram-профиля (id, username, имя) и введённые пользователем запросы.',
+      '2. Данные используются только для авторизации, расчёта лимитов, оплаты и генерации ответов.',
+      '3. Сервис не продаёт персональные данные третьим лицам.',
+      '4. По вопросам удаления данных и приватности обращайтесь в поддержку через /support.',
+    ],
+    pdf: PRIVACY_PDF_URL,
+  },
+}
 
 const openTelegramUrl = (url: string) => {
   const safeUrl = String(url || '').trim()
@@ -793,6 +835,20 @@ const openTelegramUrl = (url: string) => {
   } catch {}
 }
 
+const openTelegramAndCloseMiniApp = (url: string) => {
+  openTelegramUrl(url)
+  try {
+    window.setTimeout(() => {
+      ;(window as any)?.Telegram?.WebApp?.close?.()
+    }, 120)
+  } catch {}
+}
+
+const LEGAL_DOC_BOT_DEEPLINK: Record<LegalDocKind, string> = {
+  terms: TERMS_URL,
+  privacy: PRIVACY_URL,
+}
+
 export default function App() {
   /* =============================================================================================
    АВТОРИЗАЦИЯ В ТГ (при запуске мини‑приложения)
@@ -812,7 +868,7 @@ const [token, setToken] = useState<string | null>(() => {
   }
 })
 
-const [user, setUser] = useState<any>(null)
+const [user, setUser] = useState<MeDto | null>(null)
 const [billing, setBilling] = useState<BillingStatus | null>(null)
 const [authStatus, setAuthStatus] = useState<AuthStatus>('loading')
 const [authError, setAuthError] = useState<string>('')
@@ -827,6 +883,32 @@ const [sbpOrderId, setSbpOrderId] = useState<string | null>(() => {
 const [sbpBusyPlan, setSbpBusyPlan] = useState<SbpPlanCode | null>(null)
 const [sbpStatusText, setSbpStatusText] = useState('')
 const [sbpPolling, setSbpPolling] = useState(false)
+const [showAccessPaywall, setShowAccessPaywall] = useState(false)
+const [showLegalConsent, setShowLegalConsent] = useState(false)
+const [legalConsentChecked, setLegalConsentChecked] = useState(false)
+const [activeLegalDoc, setActiveLegalDoc] = useState<LegalDocKind | null>(null)
+
+// vNext: AI memory/preferences (opt-in)
+const [memoryOptIn, setMemoryOptIn] = useState(false)
+const [nudgesOptIn, setNudgesOptIn] = useState(false)
+const [nudgeHour, setNudgeHour] = useState<number | null>(null)
+const [nudgeTz, setNudgeTz] = useState<string | null>(null)
+const [memorySummary, setMemorySummary] = useState<MemorySummaryDto | null>(null)
+const [memorySummaryLoading, setMemorySummaryLoading] = useState(false)
+const [memorySaveBusy, setMemorySaveBusy] = useState(false)
+const [memorySaveError, setMemorySaveError] = useState('')
+
+// vNext: support tickets list in profile (read-only from miniapp)
+const [supportTickets, setSupportTickets] = useState<SupportTicketDto[]>([])
+const [supportTicketsLoading, setSupportTicketsLoading] = useState(false)
+const [supportTicketsError, setSupportTicketsError] = useState('')
+
+// vNext: contextual hints in readings
+const [contextHint, setContextHint] = useState('')
+const [threeMemoryHint, setThreeMemoryHint] = useState('')
+const [ppfMemoryHint, setPpfMemoryHint] = useState('')
+const [decisionMemoryHint, setDecisionMemoryHint] = useState('')
+const [photoMemoryHint, setPhotoMemoryHint] = useState('')
 
 useEffect(() => {
   let mounted = true
@@ -926,6 +1008,191 @@ useEffect(() => {
      [9] БАЗОВОЕ СОСТОЯНИЕ UI
   ============================================================================================= */
 
+  useEffect(() => {
+    if (authStatus !== 'ready') {
+      setShowLegalConsent(false)
+      return
+    }
+    const tgId = Number(user?.telegram_id || 0)
+    if (!tgId) return
+    const key = `ai_taro_legal_consent:${LEGAL_CONSENT_VERSION}:${tgId}`
+    let accepted = false
+    try {
+      accepted = localStorage.getItem(key) === '1'
+    } catch {}
+    if (accepted) {
+      setShowLegalConsent(false)
+      return
+    }
+    setLegalConsentChecked(false)
+    setShowLegalConsent(true)
+  }, [authStatus, user?.telegram_id])
+
+  const acceptLegalConsent = () => {
+    const tgId = Number(user?.telegram_id || 0)
+    if (!tgId) return
+    const key = `ai_taro_legal_consent:${LEGAL_CONSENT_VERSION}:${tgId}`
+    try {
+      localStorage.setItem(key, '1')
+    } catch {}
+    setShowLegalConsent(false)
+  }
+
+  const openLegalDoc = (kind: LegalDocKind) => {
+    setActiveLegalDoc(kind)
+  }
+
+  const closeLegalDoc = () => {
+    setActiveLegalDoc(null)
+  }
+
+  useEffect(() => {
+    if (!activeLegalDoc) return
+    const onEsc = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') closeLegalDoc()
+    }
+    window.addEventListener('keydown', onEsc)
+    return () => window.removeEventListener('keydown', onEsc)
+  }, [activeLegalDoc])
+
+  const detectClientTimezone = () => {
+    try {
+      const tz = Intl.DateTimeFormat().resolvedOptions().timeZone
+      return String(tz || '').trim() || 'UTC'
+    } catch {
+      return 'UTC'
+    }
+  }
+
+  const hydrateMemoryPrefsFromUser = (me: MeDto | null) => {
+    const hasMemory = Boolean(me?.memory_opt_in)
+    const hasNudges = hasMemory && Boolean(me?.retention_nudges_opt_in)
+    const rawHour = me?.retention_nudge_hour_local
+    const nextHour =
+      typeof rawHour === 'number' && Number.isFinite(rawHour) && rawHour >= 0 && rawHour <= 23
+        ? rawHour
+        : null
+    const nextTz = String(me?.retention_nudge_tz || '').trim() || detectClientTimezone()
+
+    setMemoryOptIn(hasMemory)
+    setNudgesOptIn(hasNudges)
+    setNudgeHour(nextHour)
+    setNudgeTz(nextTz)
+  }
+
+  const loadMemorySummaryData = async (jwt: string, silent = false) => {
+    if (!jwt || !memoryOptIn) {
+      setMemorySummary(null)
+      setContextHint('')
+      return
+    }
+    if (!silent) setMemorySummaryLoading(true)
+    try {
+      const out = await getMemorySummary(jwt)
+      setMemorySummary(out)
+      const hint = String(out?.cycle_hints?.[0] || '').trim()
+      if (hint) {
+        setContextHint(hint)
+      } else {
+        const topTopic = out?.recurring_topics?.[0]
+        const topicLabel = String(topTopic?.topic || '').trim()
+        const count = Number(topTopic?.count || 0)
+        setContextHint(topicLabel && count > 1 ? `Вы уже возвращались к теме «${topicLabel}» ${count} раз.` : '')
+      }
+    } catch (err: any) {
+      if (!silent) {
+        setMemorySaveError(String(err?.message || 'Не удалось обновить память.'))
+      }
+      setMemorySummary(null)
+      setContextHint('')
+    } finally {
+      if (!silent) setMemorySummaryLoading(false)
+    }
+  }
+
+  const loadSupportTicketsData = async (jwt: string, silent = false) => {
+    if (!jwt) return
+    if (!silent) {
+      setSupportTicketsLoading(true)
+      setSupportTicketsError('')
+    }
+    try {
+      const out = await getSupportTicketsMe(jwt, 20)
+      setSupportTickets(Array.isArray(out?.items) ? out.items : [])
+    } catch (err: any) {
+      if (!silent) {
+        setSupportTicketsError(String(err?.message || 'Не удалось загрузить обращения.'))
+      }
+      setSupportTickets([])
+    } finally {
+      if (!silent) setSupportTicketsLoading(false)
+    }
+  }
+
+  const saveMemoryPreferences = async () => {
+    if (!token) return
+    setMemorySaveBusy(true)
+    setMemorySaveError('')
+
+    const payload: MePreferencesInDto = {
+      memory_opt_in: Boolean(memoryOptIn),
+      retention_nudges_opt_in: Boolean(memoryOptIn && nudgesOptIn),
+      retention_nudge_hour_local: memoryOptIn && nudgesOptIn ? nudgeHour : null,
+      retention_nudge_tz: memoryOptIn && nudgesOptIn ? (nudgeTz || detectClientTimezone()) : null,
+    }
+
+    try {
+      const out = await updateMePreferences(token, payload)
+      setMemoryOptIn(Boolean(out.memory_opt_in))
+      setNudgesOptIn(Boolean(out.memory_opt_in && out.retention_nudges_opt_in))
+      setNudgeHour(
+        typeof out.retention_nudge_hour_local === 'number' &&
+          out.retention_nudge_hour_local >= 0 &&
+          out.retention_nudge_hour_local <= 23
+          ? out.retention_nudge_hour_local
+          : null
+      )
+      setNudgeTz(String(out.retention_nudge_tz || '').trim() || detectClientTimezone())
+      setUser((prev) =>
+        prev
+          ? {
+              ...prev,
+              memory_opt_in: Boolean(out.memory_opt_in),
+              retention_nudges_opt_in: Boolean(out.retention_nudges_opt_in),
+              retention_nudge_hour_local: out.retention_nudge_hour_local ?? null,
+              retention_nudge_tz: out.retention_nudge_tz ?? null,
+            }
+          : prev
+      )
+      if (out.memory_opt_in) {
+        await loadMemorySummaryData(token, false)
+      } else {
+        setMemorySummary(null)
+        setContextHint('')
+      }
+    } catch (err: any) {
+      setMemorySaveError(String(err?.message || 'Не удалось сохранить настройки памяти.'))
+    } finally {
+      setMemorySaveBusy(false)
+    }
+  }
+
+  useEffect(() => {
+    hydrateMemoryPrefsFromUser(user)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.id, user?.memory_opt_in, user?.retention_nudges_opt_in, user?.retention_nudge_hour_local, user?.retention_nudge_tz])
+
+  useEffect(() => {
+    if (authStatus !== 'ready' || !token) return
+    if (memoryOptIn) {
+      void loadMemorySummaryData(token, true)
+    } else {
+      setMemorySummary(null)
+      setContextHint('')
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [authStatus, token, memoryOptIn])
+
   const refreshBilling = async (jwt: string | null | undefined = token) => {
     if (!jwt) {
       setBilling(null)
@@ -960,6 +1227,13 @@ useEffect(() => {
       else localStorage.removeItem('sbp_pending_order_id')
     } catch {}
   }
+
+  useEffect(() => {
+    if (!showAccessPaywall) return
+    if (billing?.can_create_reading) {
+      setShowAccessPaywall(false)
+    }
+  }, [showAccessPaywall, billing?.can_create_reading])
 
   useEffect(() => {
     try {
@@ -1077,6 +1351,14 @@ useEffect(() => {
     `Бесплатный лимит раскладов за месяц исчерпан.\n\n` +
     `Оплатите подписку в профиле (СБП) или в боте: ${BOT_PAYMENT_URL}`
 
+  const isReadingLimitExceeded = (raw: string) => {
+    const msg = String(raw || '').trim()
+    if (!msg) return false
+    const parsed = readBackendErrorDetail(msg)
+    const detail = parsed?.detail
+    return Boolean(detail?.code === 'READING_LIMIT_EXCEEDED' || /READING_LIMIT_EXCEEDED|402/i.test(msg))
+  }
+
   const formatRuDate = (value?: string | null) => {
     if (!value) return '—'
     const d = new Date(value)
@@ -1089,7 +1371,7 @@ useEffect(() => {
     const parsed = readBackendErrorDetail(msg)
     const detail = parsed?.detail
 
-    if (detail?.code === 'READING_LIMIT_EXCEEDED' || /READING_LIMIT_EXCEEDED|402/i.test(msg)) {
+    if (isReadingLimitExceeded(msg)) {
       return readingLimitMessage
     }
     if (/401|403/i.test(msg)) return 'Сессия устарела. Перезапустите мини-приложение и попробуйте снова.'
@@ -1233,7 +1515,7 @@ useEffect(() => {
     card_of_day: 'spread-card--sun',
     past_present_future: 'spread-card--violet',
     three_cards: 'spread-card--indigo',
-    decision: 'spread-card--azure',
+    decision: 'spread-card--emerald',
   }
 
   /* =============================================================================================
@@ -1872,6 +2154,13 @@ useEffect(() => {
     setOpenedReadingId(null)
     onPickNav('main')
   }
+
+  useEffect(() => {
+    if (authStatus !== 'ready' || !token || navTab !== 'profile') return
+    void loadSupportTicketsData(token, false)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [authStatus, token, navTab])
+
   useEffect(() => {
     let mounted = true
 
@@ -1892,7 +2181,7 @@ useEffect(() => {
         if (!mounted) return
 
         const mapped: HistoryListItem[] = (items || [])
-          .map((item: any) => {
+          .map((item: any): HistoryListItem | null => {
             if (item?.kind === 'card_of_day') {
               const p = item?.payload || {}
               return {
@@ -1902,6 +2191,7 @@ useEffect(() => {
                 question: String(p.question || ''),
                 card_index: Number(p.card_index ?? 0),
                 card_name: String(p.card_name || ''),
+                is_reversed: Boolean(p.is_reversed),
                 description: String(p.description || ''),
                 created_at: String(item?.created_at || ''),
               }
@@ -1937,7 +2227,7 @@ useEffect(() => {
 
             return null
           })
-          .filter((x): x is HistoryListItem => !!x)
+          .filter((x): x is HistoryListItem => x !== null)
 
         const sorted = [...mapped].sort((a, b) => {
           const aDayKey = a.kind === 'card_of_day' ? a.day_key : ''
@@ -2146,10 +2436,19 @@ useEffect(() => {
   const ppfSlotRefs = useRef<Array<HTMLDivElement | null>>([])
 
   const [ppfDragging, setPpfDragging] = useState(false)
-  const [ppfDragDelta, setPpfDragDelta] = useState({ x: 0, y: 0 })
+  const [ppfDragDelta, setPpfDragDelta] = useState(hiddenDragPoint())
   const [ppfDragOverSlot, setPpfDragOverSlot] = useState<number | null>(null)
+  const [ppfActiveFanIndex, setPpfActiveFanIndex] = useState(3)
+  const ppfDeckRef = useRef<HTMLDivElement | null>(null)
+  const ppfDragCardRef = useRef<HTMLDivElement | null>(null)
+  const ppfFanCardRefs = useRef<Array<HTMLSpanElement | null>>([])
+  const ppfDragOriginRef = useRef(hiddenDragPoint())
+  const ppfDragReturnTRef = useRef<number | null>(null)
   const ppfDragPointerRef = useRef<number | null>(null)
+  const ppfDragTouchIdRef = useRef<number | null>(null)
+  const ppfGlobalDragCleanupRef = useRef<null | (() => void)>(null)
   const ppfDragStartRef = useRef({ x: 0, y: 0 })
+  const ppfDragStartDeltaRef = useRef({ x: 0, y: 0 })
 
   const [ppfDayKey, setPpfDayKey] = useState<string>('')
 
@@ -2180,6 +2479,10 @@ useEffect(() => {
       if (ppfAutoDealTRef.current) {
         window.clearTimeout(ppfAutoDealTRef.current)
       }
+      if (ppfDragReturnTRef.current) {
+        window.clearTimeout(ppfDragReturnTRef.current)
+      }
+      unbindGlobalPpfDrag()
     }
   }, [])
 
@@ -2194,6 +2497,7 @@ useEffect(() => {
     question: string
     card_index: number
     card_name: string
+    is_reversed?: boolean
     description: string
     created_at: string
   }
@@ -2251,6 +2555,7 @@ useEffect(() => {
   const [dailyDesc, setDailyDesc] = useState<string>('')
   const [dailyCardName, setDailyCardName] = useState<string>('')
   const [dailyDayKey, setDailyDayKey] = useState<string>('')
+  const [dailyIsReversed, setDailyIsReversed] = useState(false)
 
   // Подогреваем конкретную карту дня заранее, чтобы reveal открывался без подгрузочного “фриза”.
   useEffect(() => {
@@ -2318,6 +2623,8 @@ useEffect(() => {
 
   // ✅ прогресс перемешивания: 0..1
   const [shuffleProgress, setShuffleProgress] = useState(0)
+  const cardDayShuffleStarted = shuffleProgress > 0.01 || stopRequested
+  const threeShuffleStarted = threeShuffleProgress > 0.01 || threeReadyToOpen
 
   // shake detection
   const lastAccelRef = useRef<{ x: number; y: number; z: number } | null>(null)
@@ -2390,6 +2697,26 @@ useEffect(() => {
     return url
   }
 
+  const getDailyOpenedStorageKey = (dayKey?: string) => {
+    const userId = getTelegramUserId()
+    const day = String(dayKey || getVilniusDayKey())
+    return `ai-tarot:card-day-opened:${userId}:${day}`
+  }
+
+  const wasDailyOpened = (dayKey?: string) => {
+    try {
+      return localStorage.getItem(getDailyOpenedStorageKey(dayKey)) === '1'
+    } catch {
+      return false
+    }
+  }
+
+  const markDailyOpened = (dayKey?: string) => {
+    try {
+      localStorage.setItem(getDailyOpenedStorageKey(dayKey), '1')
+    } catch {}
+  }
+
   // ---------------------------------------------------------------------------------------------
   // navigation
   // ---------------------------------------------------------------------------------------------
@@ -2409,42 +2736,85 @@ useEffect(() => {
     setDailyDesc('')
     setDailyCardName('')
     setDailyDayKey('')
+    setDailyIsReversed(false)
 
-    // ✅ важно: включаем loading ДО перехода на экран, чтобы не было "вспышки" формы
-    setCardDayLoading(!!token)
+    // сразу открываем шейк-сценарий без экрана вопроса/категории
+    setCardDayLoading(true)
     setView('card_day_prep')
+    let shouldOpenReadyResult = false
+    let resolvedDayKey = getVilniusDayKey()
 
-    // ✅ если токена нет — обычный сценарий (ввод/шейк)
-    if (!token) {
-      const dailyLocal = pickDailyCardUrl()
-      setDailyFrontUrl(dailyLocal)
-      return
-    }
-
-    try {
-      const dto = await getCardOfDayToday(token)
-
-      const idx = Math.max(0, Math.min(dto.card_index ?? 0, FRONT_CARD_URLS.length - 1))
+    const applyDailyDto = (dto: any) => {
+      const idx = Math.max(0, Math.min(Number(dto?.card_index ?? 0), FRONT_CARD_URLS.length - 1))
       const url = FRONT_CARD_URLS[idx] || backCardImg
+      const cardName = String(dto?.card_name || '')
+      const isReversed =
+        typeof dto?.is_reversed === 'boolean' ? Boolean(dto.is_reversed) : /\(перев[её]рнут/i.test(cardName)
+      const dayKey = String(dto?.day_key || getVilniusDayKey())
+      resolvedDayKey = dayKey
 
       setDailyFrontUrl(url)
       setSelectedFrontUrl(url)
+      setDailyDesc(String(dto?.description || ''))
+      setDailyCardName(cardName)
+      setDailyDayKey(dayKey)
+      setDailyIsReversed(isReversed)
+    }
 
-      setDailyDesc(dto.description || '')
-      setDailyCardName(dto.card_name || '')
-      setDailyDayKey(dto.day_key || '')
-
-      // ✅ сразу показываем результат
-      setShakenOnce(true)
-      setShuffleProgress(1)
-      setCardRevealed(true)
-      setShakeEnabled(false)
-      setStopRequested(false)
-    } catch (e) {
-      // 404 = карты нет -> обычный сценарий
+    const applyLocalFallback = () => {
       const dailyLocal = pickDailyCardUrl()
+      const day = getVilniusDayKey()
+      resolvedDayKey = day
       setDailyFrontUrl(dailyLocal)
+      setSelectedFrontUrl(dailyLocal)
+      setDailyDesc('')
+      setDailyCardName(cardNameFromUrl(dailyLocal))
+      setDailyDayKey(day)
+      setDailyIsReversed(false)
+      shouldOpenReadyResult = wasDailyOpened(day)
+    }
+
+    try {
+      if (!token) {
+        applyLocalFallback()
+      } else {
+        try {
+          const dto = await getCardOfDayToday(token)
+          applyDailyDto(dto)
+          // Уже есть карта дня: повторный вход сразу в результат, без шейка.
+          shouldOpenReadyResult = true
+        } catch {
+          const dto = await createCardOfDay(token, {
+            question: '',
+            topic: 'other',
+            deck_size: 78,
+            consider_reversed: true,
+          })
+          applyDailyDto(dto)
+          // Свежесозданная карта дня: первый вход, нужен шаг перемешивания.
+          shouldOpenReadyResult = false
+        }
+      }
+    } catch {
+      applyLocalFallback()
     } finally {
+      if (shouldOpenReadyResult) {
+        setStopRequested(false)
+        setShakeEnabled(false)
+        setShuffleProgress(1)
+        setShakenOnce(true)
+        setCardRevealed(true)
+        markDailyOpened(resolvedDayKey)
+      } else {
+        setStopRequested(false)
+        setShakeEnabled(true)
+        setShuffleProgress(0)
+        setShakenOnce(false)
+        setCardRevealed(false)
+        if (needsMotionPermission) {
+          void requestMotion()
+        }
+      }
       setCardDayLoading(false)
     }
   }
@@ -2469,6 +2839,7 @@ useEffect(() => {
     setSelectedFrontUrl(img)
     setDailyDesc(it.description || '')
     setDailyCardName(it.card_name || '')
+    setDailyIsReversed(Boolean(it.is_reversed) || /\(перев[её]рнут/i.test(String(it.card_name || '')))
     setDailyDayKey(it.day_key || '')
 
     // (опционально) восстановим вопрос/тему в state — удобно, если где-то показываешь/используешь
@@ -2534,6 +2905,7 @@ useEffect(() => {
   const openPhotoAnalysis = () => {
     setPhotoFile(null)
     setPhotoResult(null)
+    setPhotoMemoryHint('')
     setPhotoStatus('idle')
     setPhotoError('')
     setView('photo_analysis')
@@ -2548,6 +2920,7 @@ useEffect(() => {
     setPhotoError('')
     setPhotoStatus('idle')
     setPhotoResult(null)
+    setPhotoMemoryHint('')
     setPhotoFile(file)
   }
 
@@ -2624,7 +2997,7 @@ useEffect(() => {
     if (!msg) return 'Не удалось получить ответ от AI.'
     const parsed = readBackendErrorDetail(msg)
     const detail = parsed?.detail
-    if (detail?.code === 'READING_LIMIT_EXCEEDED' || /READING_LIMIT_EXCEEDED|402/i.test(msg)) {
+    if (isReadingLimitExceeded(msg)) {
       return readingLimitMessage
     }
     if (/401|403/i.test(msg)) return 'Сессия устарела. Перезапустите мини-приложение и попробуйте снова.'
@@ -2684,11 +3057,22 @@ useEffect(() => {
         description: (out as any)?.description || '',
         cards: (out as any)?.cards || [],
       })
+      setPhotoMemoryHint(String((out as any)?.memory_hint || '').trim())
       setPhotoStatus('done')
       void refreshBilling(token)
     } catch (err: any) {
+      const raw = String(err?.message || '')
+      if (isReadingLimitExceeded(raw)) {
+        setPhotoStatus('idle')
+        setPhotoError('')
+        setPhotoMemoryHint('')
+        setShowAccessPaywall(true)
+        void refreshBilling(token)
+        return
+      }
       setPhotoStatus('error')
-      setPhotoError(mapPhotoError(String(err?.message || '')))
+      setPhotoError(mapPhotoError(raw))
+      setPhotoMemoryHint('')
       void refreshBilling(token)
     }
   }
@@ -2789,6 +3173,7 @@ useEffect(() => {
 
     // Reset description and loading state for three card reading
     setThreeDesc('')
+    setThreeMemoryHint('')
     setThreeLoading(false)
 
     threeFinishingRef.current = false
@@ -2839,6 +3224,7 @@ useEffect(() => {
     warmupCardImages(previewCards)
     // Reset description and mark as loading while we fetch from the backend
     setThreeDesc('')
+    setThreeMemoryHint('')
     setThreeLoading(true)
     setThreeShowMeaning(false)
     // дата расклада (Europe/Vilnius) — используем уже существующий helper
@@ -2867,9 +3253,19 @@ useEffect(() => {
       setThreeLoading(false)
     }).catch((err: any) => {
       if (threeRequestSeqRef.current !== requestSeq) return
+      const raw = String(err?.message || err || '')
+      if (isReadingLimitExceeded(raw)) {
+        setThreeCards(previewCards)
+        setThreeDesc('')
+        setThreeMemoryHint('')
+        setThreeLoading(false)
+        setShowAccessPaywall(true)
+        return
+      }
       console.warn('[reading] three_cards failed:', err)
       setThreeCards(previewCards)
-      setThreeDesc(mapReadingError(String(err?.message || err || '')))
+      setThreeDesc(mapReadingError(raw))
+      setThreeMemoryHint('')
       setThreeLoading(false)
     })
   }
@@ -3036,6 +3432,10 @@ useEffect(() => {
   }
 
   const resetPpfState = () => {
+    if (ppfDragReturnTRef.current) {
+      window.clearTimeout(ppfDragReturnTRef.current)
+      ppfDragReturnTRef.current = null
+    }
     if (ppfAutoDealTRef.current) {
       window.clearTimeout(ppfAutoDealTRef.current)
       ppfAutoDealTRef.current = null
@@ -3053,12 +3453,17 @@ useEffect(() => {
     setPpfPlacedCount(0)
     ppfPlacedCountRef.current = 0
     setPpfDragging(false)
-    setPpfDragDelta({ x: 0, y: 0 })
+    setPpfDragDelta(hiddenDragPoint())
     setPpfDragOverSlot(null)
+    setPpfActiveFanIndex(3)
+    ppfDragOriginRef.current = hiddenDragPoint()
     ppfDragPointerRef.current = null
+    ppfDragTouchIdRef.current = null
+    unbindGlobalPpfDrag()
 
     // Reset description and loading state for PPF reading
     setPpfDesc('')
+    setPpfMemoryHint('')
     setPpfLoading(false)
 
     ppfFinishingRef.current = false
@@ -3073,21 +3478,31 @@ useEffect(() => {
     resetPpfState()
 
     // подхватим вопрос с главной
-    setPpfQuestion(question || '')
+    const seededQuestion = String(question || '').trim()
+    setPpfQuestion(seededQuestion)
+    setPpfScreen('shuffle')
     setView('past_present_future_prep')
 
     try {
       hapticPulse(0.22)
     } catch {}
+
+    void beginPpfShuffle(seededQuestion)
   }
 
-  const beginPpfShuffle = async () => {
-    if (!ppfQuestion.trim()) {
+  const beginPpfShuffle = async (questionOverride?: string) => {
+    if (ppfDragReturnTRef.current) {
+      window.clearTimeout(ppfDragReturnTRef.current)
+      ppfDragReturnTRef.current = null
+    }
+    const effectiveQuestion = String(questionOverride ?? ppfQuestion).trim()
+    if (!effectiveQuestion) {
       try {
         hapticPulse(0.28)
       } catch {}
       return
     }
+    if (effectiveQuestion !== ppfQuestion) setPpfQuestion(effectiveQuestion)
 
     ppfLastAccelRef.current = null
     ppfShakeCooldownRef.current = 0
@@ -3100,6 +3515,7 @@ useEffect(() => {
     warmupCardImages(previewCards)
     // Reset description and mark as loading while we fetch from the backend
     setPpfDesc('')
+    setPpfMemoryHint('')
     setPpfLoading(true)
     setPpfDayKey(getVilniusDayKey())
 
@@ -3112,9 +3528,13 @@ useEffect(() => {
     setPpfPlacedCount(0)
     ppfPlacedCountRef.current = 0
     setPpfDragging(false)
-    setPpfDragDelta({ x: 0, y: 0 })
+    setPpfDragDelta(hiddenDragPoint())
     setPpfDragOverSlot(null)
+    setPpfActiveFanIndex(3)
+    ppfDragOriginRef.current = hiddenDragPoint()
     ppfDragPointerRef.current = null
+    ppfDragTouchIdRef.current = null
+    unbindGlobalPpfDrag()
 
     ppfFinishingRef.current = false
     ppfLastSwapAtRef.current = 0
@@ -3124,13 +3544,23 @@ useEffect(() => {
     } catch {}
 
     // подгружаем реальные карты: fallback на мок при ошибках
-    buildPpfCardsReal(previewCards).then((cards) => {
+    buildPpfCardsReal(previewCards, effectiveQuestion).then((cards) => {
       setPpfCards(cards)
       setPpfLoading(false)
     }).catch((err: any) => {
+      const raw = String(err?.message || err || '')
+      if (isReadingLimitExceeded(raw)) {
+        setPpfCards(previewCards)
+        setPpfDesc('')
+        setPpfMemoryHint('')
+        setPpfLoading(false)
+        setShowAccessPaywall(true)
+        return
+      }
       console.warn('[reading] ppf failed:', err)
       setPpfCards(previewCards)
-      setPpfDesc(mapReadingError(String(err?.message || err || '')))
+      setPpfDesc(mapReadingError(raw))
+      setPpfMemoryHint('')
       setPpfLoading(false)
     })
   }
@@ -3141,6 +3571,42 @@ useEffect(() => {
     try {
       el.releasePointerCapture(pointerId)
     } catch {}
+  }
+
+  const unbindGlobalPpfDrag = () => {
+    if (!ppfGlobalDragCleanupRef.current) return
+    ppfGlobalDragCleanupRef.current()
+    ppfGlobalDragCleanupRef.current = null
+  }
+
+  const bindGlobalPpfDrag = () => {
+    if (ppfGlobalDragCleanupRef.current) return
+
+    const onPointerMove = (e: PointerEvent) => onPpfDeckPointerMove(e as any)
+    const onPointerUp = (e: PointerEvent) => onPpfDeckPointerUp(e as any)
+    const onPointerCancel = (e: PointerEvent) => onPpfDeckPointerCancel(e as any)
+
+    const onTouchMove = (e: TouchEvent) => onPpfDeckTouchMove(e as any)
+    const onTouchEnd = (e: TouchEvent) => onPpfDeckTouchEnd(e as any)
+    const onTouchCancel = () => onPpfDeckTouchCancel()
+
+    window.addEventListener('pointermove', onPointerMove, { passive: false })
+    window.addEventListener('pointerup', onPointerUp, { passive: false })
+    window.addEventListener('pointercancel', onPointerCancel, { passive: false })
+
+    window.addEventListener('touchmove', onTouchMove, { passive: false })
+    window.addEventListener('touchend', onTouchEnd, { passive: false })
+    window.addEventListener('touchcancel', onTouchCancel, { passive: false })
+
+    ppfGlobalDragCleanupRef.current = () => {
+      window.removeEventListener('pointermove', onPointerMove)
+      window.removeEventListener('pointerup', onPointerUp)
+      window.removeEventListener('pointercancel', onPointerCancel)
+
+      window.removeEventListener('touchmove', onTouchMove)
+      window.removeEventListener('touchend', onTouchEnd)
+      window.removeEventListener('touchcancel', onTouchCancel)
+    }
   }
 
   const placePpfCardToNextSlot = (slotIndexArg?: number) => {
@@ -3160,9 +3626,17 @@ useEffect(() => {
     setPpfPlacedCount(nextCount)
     ppfPlacedCountRef.current = nextCount
     setPpfShuffleProgress(nextCount / 3)
+    if (ppfDragReturnTRef.current) {
+      window.clearTimeout(ppfDragReturnTRef.current)
+      ppfDragReturnTRef.current = null
+    }
     setPpfDragging(false)
-    setPpfDragDelta({ x: 0, y: 0 })
     setPpfDragOverSlot(null)
+    setPpfActiveFanIndex(3)
+    ppfDragReturnTRef.current = window.setTimeout(() => {
+      setPpfDragDelta(hiddenDragPoint())
+      ppfDragReturnTRef.current = null
+    }, 140)
 
     window.setTimeout(() => {
       setPpfRevealMap((cur) => {
@@ -3186,25 +3660,89 @@ useEffect(() => {
     }
   }
 
+  const resolvePpfFanIndex = (target: EventTarget | null, clientX?: number) => {
+    const node = target instanceof HTMLElement
+      ? (target.closest('[data-ppf-fan-index]') as HTMLElement | null)
+      : null
+
+    if (node) {
+      const parsed = Number(node.dataset.ppfFanIndex ?? '')
+      if (Number.isFinite(parsed)) return clamp(Math.round(parsed), 0, 6)
+    }
+
+    const deckRect = ppfDeckRef.current?.getBoundingClientRect()
+    if (!deckRect || typeof clientX !== 'number') return 3
+
+    const rel = clamp((clientX - deckRect.left) / Math.max(1, deckRect.width), 0, 0.999)
+    return clamp(Math.floor(rel * 7), 0, 6)
+  }
+
+  const getPpfFanAnchor = (fanIndex: number, fallbackX: number, fallbackY: number) => {
+    const fanEl = ppfFanCardRefs.current[fanIndex]
+    if (fanEl) {
+      const r = fanEl.getBoundingClientRect()
+      return {
+        x: r.left + r.width / 2,
+        y: r.top + r.height * 0.52,
+      }
+    }
+
+    const deckRect = ppfDeckRef.current?.getBoundingClientRect()
+    if (deckRect) {
+      return {
+        x: deckRect.left + ((fanIndex + 0.5) / 7) * deckRect.width,
+        y: deckRect.top + deckRect.height * 0.38,
+      }
+    }
+
+    return { x: fallbackX, y: fallbackY }
+  }
+
+  const getPpfFanRect = (fanIndex: number, fallbackX: number, fallbackY: number) => {
+    const fanEl = ppfFanCardRefs.current[fanIndex]
+    if (fanEl) return fanEl.getBoundingClientRect()
+
+    const anchor = getPpfFanAnchor(fanIndex, fallbackX, fallbackY)
+    const w = 98
+    const h = 147
+    return new DOMRect(anchor.x - w / 2, anchor.y - h / 2, w, h)
+  }
+
   const onPpfDeckPointerDown = (e: any) => {
     if (ppfPlacedCountRef.current >= 3) return
+    if (e.pointerType === 'touch') return
+    if (typeof e.button === 'number' && e.button !== 0) return
+    if (ppfDragTouchIdRef.current != null) return
+
+    const fanIndex = resolvePpfFanIndex(e.target, e.clientX)
+    setPpfActiveFanIndex(fanIndex)
+
     ppfDragPointerRef.current = e.pointerId
+    const fanRect = getPpfFanRect(fanIndex, e.clientX, e.clientY)
+    ppfDragOriginRef.current = { x: fanRect.left, y: fanRect.top }
+    const grabX = clamp(e.clientX - fanRect.left, 0, fanRect.width)
+    const grabY = clamp(e.clientY - fanRect.top, 0, fanRect.height)
     ppfDragStartRef.current = { x: e.clientX, y: e.clientY }
+    ppfDragStartDeltaRef.current = { x: grabX, y: grabY }
     setPpfDragging(true)
-    setPpfDragDelta({ x: 0, y: 0 })
+    setPpfDragDelta({ x: fanRect.left, y: fanRect.top })
     setPpfDragOverSlot(null)
+    bindGlobalPpfDrag()
+    try {
+      e.preventDefault()
+    } catch {}
+    try {
+      e.stopPropagation()
+    } catch {}
     try {
       ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
     } catch {}
   }
 
-  const onPpfDeckPointerMove = (e: any) => {
-    if (!ppfDragging) return
-    if (ppfDragPointerRef.current !== e.pointerId) return
-
-    const dx = e.clientX - ppfDragStartRef.current.x
-    const dy = e.clientY - ppfDragStartRef.current.y
-    setPpfDragDelta({ x: dx, y: dy })
+  const updatePpfDragAt = (clientX: number, clientY: number) => {
+    const x = clientX - ppfDragStartDeltaRef.current.x
+    const y = clientY - ppfDragStartDeltaRef.current.y
+    setPpfDragDelta({ x, y })
 
     const activeSlot = ppfPlacedCountRef.current
     const slotEl = ppfSlotRefs.current[activeSlot]
@@ -3213,21 +3751,18 @@ useEffect(() => {
       return
     }
     const r = slotEl.getBoundingClientRect()
-    const inside = e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom
+    const inside = clientX >= r.left && clientX <= r.right && clientY >= r.top && clientY <= r.bottom
     setPpfDragOverSlot(inside ? activeSlot : null)
   }
 
-  const onPpfDeckPointerUp = (e: any) => {
-    if (ppfDragPointerRef.current !== e.pointerId) return
-    ppfReleaseDeckPointer(e.currentTarget, e.pointerId)
-    ppfDragPointerRef.current = null
-
+  const finishPpfDragAt = (clientX: number, clientY: number) => {
+    unbindGlobalPpfDrag()
     const activeSlot = ppfPlacedCountRef.current
     const slotEl = ppfSlotRefs.current[activeSlot]
     let inside = false
     if (slotEl) {
       const r = slotEl.getBoundingClientRect()
-      inside = e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom
+      inside = clientX >= r.left && clientX <= r.right && clientY >= r.top && clientY <= r.bottom
     }
 
     if (inside) {
@@ -3235,18 +3770,112 @@ useEffect(() => {
       return
     }
 
-    setPpfDragging(false)
-    setPpfDragDelta({ x: 0, y: 0 })
     setPpfDragOverSlot(null)
+    if (ppfDragReturnTRef.current) {
+      window.clearTimeout(ppfDragReturnTRef.current)
+      ppfDragReturnTRef.current = null
+    }
+    setPpfDragDelta({ ...ppfDragOriginRef.current })
+    ppfDragReturnTRef.current = window.setTimeout(() => {
+      setPpfDragging(false)
+      setPpfDragDelta(hiddenDragPoint())
+      setPpfActiveFanIndex(3)
+      ppfDragReturnTRef.current = null
+    }, 210)
+  }
+
+  const onPpfDeckPointerMove = (e: any) => {
+    if (ppfDragPointerRef.current !== e.pointerId) return
+    try {
+      e.preventDefault()
+    } catch {}
+    updatePpfDragAt(e.clientX, e.clientY)
+  }
+
+  const onPpfDeckPointerUp = (e: any) => {
+    if (ppfDragPointerRef.current !== e.pointerId) return
+    ppfReleaseDeckPointer(ppfDeckRef.current, e.pointerId)
+    ppfDragPointerRef.current = null
+    finishPpfDragAt(e.clientX, e.clientY)
   }
 
   const onPpfDeckPointerCancel = (e: any) => {
     if (ppfDragPointerRef.current !== e.pointerId) return
-    ppfReleaseDeckPointer(e.currentTarget, e.pointerId)
+    ppfReleaseDeckPointer(ppfDeckRef.current, e.pointerId)
     ppfDragPointerRef.current = null
+    unbindGlobalPpfDrag()
+    if (ppfDragReturnTRef.current) {
+      window.clearTimeout(ppfDragReturnTRef.current)
+      ppfDragReturnTRef.current = null
+    }
     setPpfDragging(false)
-    setPpfDragDelta({ x: 0, y: 0 })
+    setPpfDragDelta(hiddenDragPoint())
     setPpfDragOverSlot(null)
+    setPpfActiveFanIndex(3)
+  }
+
+  const findTouchById = (touches: TouchList, id: number) => {
+    for (let i = 0; i < touches.length; i += 1) {
+      const t = touches.item(i)
+      if (t && t.identifier === id) return t
+    }
+    return null
+  }
+
+  const onPpfDeckTouchStart = (e: any) => {
+    if (ppfPlacedCountRef.current >= 3) return
+    if (ppfDragPointerRef.current != null) return
+    const t = e.changedTouches.item(0)
+    if (!t) return
+
+    const fanIndex = resolvePpfFanIndex(e.target, t.clientX)
+    setPpfActiveFanIndex(fanIndex)
+
+    ppfDragTouchIdRef.current = t.identifier
+    const fanRect = getPpfFanRect(fanIndex, t.clientX, t.clientY)
+    ppfDragOriginRef.current = { x: fanRect.left, y: fanRect.top }
+    const grabX = clamp(t.clientX - fanRect.left, 0, fanRect.width)
+    const grabY = clamp(t.clientY - fanRect.top, 0, fanRect.height)
+    ppfDragStartRef.current = { x: t.clientX, y: t.clientY }
+    ppfDragStartDeltaRef.current = { x: grabX, y: grabY }
+    setPpfDragging(true)
+    setPpfDragDelta({ x: fanRect.left, y: fanRect.top })
+    setPpfDragOverSlot(null)
+    bindGlobalPpfDrag()
+    e.preventDefault()
+    e.stopPropagation()
+  }
+
+  const onPpfDeckTouchMove = (e: any) => {
+    const touchId = ppfDragTouchIdRef.current
+    if (touchId == null) return
+    const t = findTouchById(e.touches, touchId)
+    if (!t) return
+    updatePpfDragAt(t.clientX, t.clientY)
+    e.preventDefault()
+  }
+
+  const onPpfDeckTouchEnd = (e: any) => {
+    const touchId = ppfDragTouchIdRef.current
+    if (touchId == null) return
+    const t = findTouchById(e.changedTouches, touchId)
+    if (!t) return
+    ppfDragTouchIdRef.current = null
+    finishPpfDragAt(t.clientX, t.clientY)
+    e.preventDefault()
+  }
+
+  const onPpfDeckTouchCancel = () => {
+    unbindGlobalPpfDrag()
+    ppfDragTouchIdRef.current = null
+    if (ppfDragReturnTRef.current) {
+      window.clearTimeout(ppfDragReturnTRef.current)
+      ppfDragReturnTRef.current = null
+    }
+    setPpfDragging(false)
+    setPpfDragDelta(hiddenDragPoint())
+    setPpfDragOverSlot(null)
+    setPpfActiveFanIndex(3)
   }
 
   const finishPpfShuffle = () => {
@@ -3255,8 +3884,13 @@ useEffect(() => {
 
     setPpfShakeEnabled(false)
     setPpfDragging(false)
-    setPpfDragDelta({ x: 0, y: 0 })
+    setPpfDragDelta(hiddenDragPoint())
     setPpfDragOverSlot(null)
+    unbindGlobalPpfDrag()
+    if (ppfDragReturnTRef.current) {
+      window.clearTimeout(ppfDragReturnTRef.current)
+      ppfDragReturnTRef.current = null
+    }
 
     setPpfReadyToOpen(true)
     setPpfShuffleProgress(1)
@@ -3308,96 +3942,58 @@ useEffect(() => {
   }
 
   const restartPpf = () => {
+    const carryQuestion = String(ppfQuestion || question || '').trim()
     resetPpfState()
-    setPpfScreen('setup')
+    setPpfQuestion(carryQuestion)
+    setPpfScreen('shuffle')
+    void beginPpfShuffle(carryQuestion)
   }
   /* =============================================================================================
-    [20.4] РАСКЛАД "ПРИНЯТИЕ РЕШЕНИЯ" (2 КАРТЫ): 3 ЭКРАНА (SETUP → SHUFFLE → RESULT)
-    Логика 1:1 как three_cards, но 2 карты и 2 слота (меняются местами при тряске)
+    [20.4] РАСКЛАД "ПРИНЯТИЕ РЕШЕНИЯ" (2 КАРТЫ): колода снизу + drag/drop + tap flip
   ============================================================================================= */
 
-  type DecisionScreen = 'setup' | 'shuffle' | 'result'
-  type DecisionFocus = 'a' | 'b'
-
-  const DECISION_FOCUS: { id: DecisionFocus; label: string }[] = [
-    { id: 'a', label: 'Вариант A' },
-    { id: 'b', label: 'Вариант B' },
-  ]
-
+  type DecisionScreen = 'shuffle' | 'result'
   type DecisionCardResult = { idx: number; url: string; name: string; role: string; text: string; isReversed?: boolean }
 
-  // 2 “слота” (как две карты на первом экране)
-  const DECISION_SLOTS: ThreeCardPos[] = [
-    { x: -26, y: 2, r: -6, s: 1.0, z: 1 }, // левый
-    { x: 26, y: -2, r: 6, s: 1.0, z: 1 },  // правый
-  ]
+  const DECISION_SLOT_LABELS = ['Вариант A', 'Вариант B'] as const
+  const DECISION_FAN_CARDS = 9
+  const DECISION_TOP_INDEX = DECISION_FAN_CARDS - 1
 
-  const DECISION_PERMS: number[][] = [
-    [0, 1],
-    [1, 0],
-  ]
-
-  const [decisionScreen, setDecisionScreen] = useState<DecisionScreen>('setup')
+  const [decisionScreen, setDecisionScreen] = useState<DecisionScreen>('shuffle')
   const [decisionQuestion, setDecisionQuestion] = useState('')
-  const [decisionFocus, setDecisionFocus] = useState<DecisionFocus>('a')
-
-  // bump-анимация для свитчера фокуса
-  const [decisionPrevFocus, setDecisionPrevFocus] = useState<DecisionFocus>('a')
-  const prevDecisionFocusRef = useRef<DecisionFocus>('a')
-  const [decisionFocusIsBumping, setDecisionFocusIsBumping] = useState(false)
-  const decisionFocusBumpTRef = useRef<number | null>(null)
-  const [decisionFocusBump, setDecisionFocusBump] = useState(0)
-
-  const decisionFocusIndices = useMemo(() => {
-    const m = new Map<DecisionFocus, number>()
-    DECISION_FOCUS.forEach((k, i) => m.set(k.id, i))
-    return m
-  }, [])
-
-  const decisionFocusActiveIndex = decisionFocusIndices.get(decisionFocus) ?? 0
-  const decisionFocusPrevIndex = decisionFocusIndices.get(decisionPrevFocus) ?? 0
-
-  const onPickDecisionFocus = (next: DecisionFocus) => {
-    if (next === decisionFocus) return
-
-    setDecisionPrevFocus(prevDecisionFocusRef.current)
-    prevDecisionFocusRef.current = next
-    setDecisionFocus(next)
-
-    setDecisionFocusBump((n) => n + 1)
-
-    setDecisionFocusIsBumping(false)
-    if (decisionFocusBumpTRef.current) window.clearTimeout(decisionFocusBumpTRef.current)
-    requestAnimationFrame(() => {
-      setDecisionFocusIsBumping(true)
-      decisionFocusBumpTRef.current = window.setTimeout(() => setDecisionFocusIsBumping(false), 440)
-    })
-  }
-
   const [decisionCards, setDecisionCards] = useState<DecisionCardResult[]>([])
-  const [decisionOrder, setDecisionOrder] = useState<number[]>([0, 1])
-
-  const [decisionShakeEnabled, setDecisionShakeEnabled] = useState(false)
-  const [decisionShuffleProgress, setDecisionShuffleProgress] = useState(0)
-  const [decisionReadyToOpen, setDecisionReadyToOpen] = useState(false)
-
+  const [decisionDeckCards, setDecisionDeckCards] = useState<DecisionCardResult[]>([])
   const [decisionDayKey, setDecisionDayKey] = useState<string>('')
 
-  const decisionLastAccelRef = useRef<{ x: number; y: number; z: number } | null>(null)
-  const decisionShakeCooldownRef = useRef(0)
-  const decisionLastPulseRef = useRef(0)
+  const [decisionPlacedCards, setDecisionPlacedCards] = useState<Array<DecisionCardResult | null>>([null, null])
+  const [decisionRevealMap, setDecisionRevealMap] = useState<boolean[]>([false, false])
+  const [decisionPlacedCount, setDecisionPlacedCount] = useState(0)
 
-  const decisionLastSwapAtRef = useRef(0)
-  const decisionFinishingRef = useRef(false)
+  const decisionPlacedCountRef = useRef(0)
+  const decisionPlacedCardsRef = useRef<Array<DecisionCardResult | null>>([null, null])
+  const decisionFinishQueuedRef = useRef(false)
+  const decisionAutoDealTRef = useRef<number | null>(null)
+  const decisionRequestSeqRef = useRef(0)
 
-  const DECISION_SHAKE_THRESHOLD = 8.8
-  const DECISION_SHAKE_STEP_BASE = 0.11
+  const [decisionDragging, setDecisionDragging] = useState(false)
+  const [decisionDragOverSlot, setDecisionDragOverSlot] = useState<number | null>(null)
+  const [decisionActiveFanIndex, setDecisionActiveFanIndex] = useState(DECISION_TOP_INDEX)
+  const decisionSlotRefs = useRef<Array<HTMLButtonElement | null>>([])
+  const decisionDeckRef = useRef<HTMLDivElement | null>(null)
+  const decisionDragCardRef = useRef<HTMLDivElement | null>(null)
+  const decisionFanCardRefs = useRef<Array<HTMLSpanElement | null>>([])
+  const decisionDragPointerRef = useRef<number | null>(null)
+  const decisionDragTouchIdRef = useRef<number | null>(null)
+  const decisionGlobalDragCleanupRef = useRef<null | (() => void)>(null)
+  const decisionDragOriginRef = useRef(hiddenDragPoint())
+  const decisionDragStartDeltaRef = useRef({ x: 0, y: 0 })
+  const decisionDragReturnTRef = useRef<number | null>(null)
+  const decisionDragPosRef = useRef(hiddenDragPoint())
 
   // держим актуальный прогресс в refs, чтобы listeners не пересоздавались на каждый тик
   const shuffleProgressRef = useRef(0)
   const threeShuffleProgressRef = useRef(0)
   const ppfShuffleProgressRef = useRef(0)
-  const decisionShuffleProgressRef = useRef(0)
 
   useEffect(() => {
     shuffleProgressRef.current = shuffleProgress
@@ -3412,20 +4008,73 @@ useEffect(() => {
   }, [ppfShuffleProgress])
 
   useEffect(() => {
-    decisionShuffleProgressRef.current = decisionShuffleProgress
-  }, [decisionShuffleProgress])
+    decisionPlacedCountRef.current = decisionPlacedCount
+  }, [decisionPlacedCount])
 
-  const buildDecisionCardsMock = (): DecisionCardResult[] => {
-    const roles = ['Вариант A', 'Вариант B']
+  useEffect(() => {
+    decisionPlacedCardsRef.current = decisionPlacedCards
+  }, [decisionPlacedCards])
+
+  useEffect(() => {
+    return () => {
+      if (decisionAutoDealTRef.current) window.clearTimeout(decisionAutoDealTRef.current)
+      if (decisionDragReturnTRef.current) window.clearTimeout(decisionDragReturnTRef.current)
+      unbindGlobalDecisionDrag()
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!decisionDragging) return
+
+    const cancelDrag = () => {
+      decisionDragPointerRef.current = null
+      decisionDragTouchIdRef.current = null
+      unbindGlobalDecisionDrag()
+      if (decisionDragReturnTRef.current) {
+        window.clearTimeout(decisionDragReturnTRef.current)
+        decisionDragReturnTRef.current = null
+      }
+      setDecisionDragging(false)
+      setDecisionDragPoint(hiddenDragPoint())
+      setDecisionDragOverSlot(null)
+      setDecisionActiveFanIndex(DECISION_TOP_INDEX)
+    }
+
+    const onVisibility = () => {
+      if (document.visibilityState !== 'visible') cancelDrag()
+    }
+
+    window.addEventListener('blur', cancelDrag)
+    document.addEventListener('visibilitychange', onVisibility)
+    return () => {
+      window.removeEventListener('blur', cancelDrag)
+      document.removeEventListener('visibilitychange', onVisibility)
+    }
+  }, [decisionDragging])
+
+  const setDecisionDragPoint = (point: { x: number; y: number }) => {
+    decisionDragPosRef.current = point
+    const el = decisionDragCardRef.current
+    if (el) {
+      el.style.setProperty('--dx', `${point.x}px`)
+      el.style.setProperty('--dy', `${point.y}px`)
+    }
+  }
+
+  const buildDecisionCardsPreview = (): DecisionCardResult[] => {
     const idxs = pickUniqueIndexes(2, FRONT_CARD_URLS.length || 78)
-
     return idxs.map((idx, i) => {
       const url = FRONT_CARD_URLS[idx] || backCardImg
-      const name = cardNameFromUrl(url)
-      const text =
-        'Интерпретация будет подтянута с бэкенда. Сейчас это mock.\n\nПодумайте, как этот образ соотносится с вашим вариантом и какие чувства он вызывает.'
-
-      return { idx, url, name, role: roles[i], text, isReversed: false }
+      const isReversed = Math.random() < 0.5
+      const baseName = cardNameFromUrl(url)
+      return {
+        idx,
+        url,
+        name: isReversed ? `${baseName} (перевёрнутая)` : baseName,
+        role: DECISION_SLOT_LABELS[i] || '',
+        text: '',
+        isReversed,
+      }
     })
   }
 
@@ -3455,6 +4104,7 @@ useEffect(() => {
     void refreshBilling(token)
     // Save the description from the backend so we can display it in the UI
     setThreeDesc(String(reading?.description ?? ''))
+    setThreeMemoryHint(String(reading?.memory_hint ?? '').trim())
     const roles = ['Карта 1', 'Карта 2', 'Карта 3']
     const mapped = (reading.cards || []).slice(0, 3).map((c: any, i: number) => {
       const idx = Number(c.card_index ?? 0)
@@ -3477,14 +4127,18 @@ useEffect(() => {
   }
 
   // Build Past-Present-Future reading with real LLM meanings
-  const buildPpfCardsReal = async (previewCards?: PpfCardResult[]): Promise<PpfCardResult[]> => {
+  const buildPpfCardsReal = async (
+    previewCards?: PpfCardResult[],
+    questionText?: string
+  ): Promise<PpfCardResult[]> => {
     if (!token) {
       return (previewCards && previewCards.length ? previewCards : buildPpfCardsMock())
     }
+    const effectiveQuestion = String(questionText ?? ppfQuestion).trim()
     const params = {
       spread_type: 'ppf' as const,
       topic: topic,
-      question: ppfQuestion.trim(),
+      question: effectiveQuestion,
       consider_reversed: true,
       forced_cards: toForcedCards(previewCards),
     }
@@ -3492,6 +4146,7 @@ useEffect(() => {
     void refreshBilling(token)
     // Save description returned from the backend
     setPpfDesc(String(reading?.description ?? ''))
+    setPpfMemoryHint(String(reading?.memory_hint ?? '').trim())
     const roles = ['Прошлое', 'Настоящее', 'Будущее']
     const focusLine =
       ppfFocus === 'past'
@@ -3521,22 +4176,28 @@ useEffect(() => {
   }
 
   // Build Decision reading with real LLM meanings
-  const buildDecisionCardsReal = async (): Promise<DecisionCardResult[]> => {
-    if (!token) {
-      return buildDecisionCardsMock()
-    }
+  const buildDecisionCardsReal = async (
+    previewCards?: DecisionCardResult[],
+    questionText?: string
+  ): Promise<DecisionCardResult[]> => {
+    if (!token) return previewCards && previewCards.length ? previewCards : buildDecisionCardsPreview()
+
+    const effectiveQuestion =
+      String(questionText ?? decisionQuestion ?? question).trim() || 'Выбор между вариантом A и вариантом B'
+
     const params = {
       spread_type: 'decision' as const,
       topic: topic,
-      question: decisionQuestion.trim(),
+      question: effectiveQuestion,
       consider_reversed: true,
+      forced_cards: toForcedCards(previewCards),
     }
     const reading: any = await createReading(token, params)
     void refreshBilling(token)
     // Save description returned from the backend
     setDecisionDesc(String(reading?.description ?? ''))
-    const roles = ['Вариант A', 'Вариант B']
-    return (reading.cards || []).slice(0, 2).map((c: any, i: number) => {
+    setDecisionMemoryHint(String(reading?.memory_hint ?? '').trim())
+    const mapped = (reading.cards || []).slice(0, 2).map((c: any, i: number) => {
       const idx = Number(c.card_index ?? 0)
       const url = FRONT_CARD_URLS[idx] || backCardImg
       const isReversed = Boolean(c?.is_reversed)
@@ -3547,41 +4208,63 @@ useEffect(() => {
         idx,
         url,
         name,
-        role: roles[i] || '',
+        role: DECISION_SLOT_LABELS[i] || '',
         text,
         isReversed,
       }
     })
+    if (mapped.length) return mapped
+    return previewCards && previewCards.length ? previewCards : buildDecisionCardsPreview()
   }
 
   const resetDecisionState = () => {
-    setDecisionScreen('setup')
-    setDecisionShakeEnabled(false)
-    setDecisionShuffleProgress(0)
-    setDecisionReadyToOpen(false)
-
+    setDecisionScreen('shuffle')
     setDecisionCards([])
-    setDecisionOrder([0, 1])
+    setDecisionDeckCards([])
+    setDecisionPlacedCards([null, null])
+    setDecisionRevealMap([false, false])
+    setDecisionPlacedCount(0)
+    decisionPlacedCountRef.current = 0
+    decisionPlacedCardsRef.current = [null, null]
 
     // Reset description and loading state for decision reading
     setDecisionDesc('')
+    setDecisionMemoryHint('')
     setDecisionLoading(false)
 
     setDecisionDayKey('')
 
-    decisionFinishingRef.current = false
-    decisionLastSwapAtRef.current = 0
+    decisionFinishQueuedRef.current = false
+    decisionRequestSeqRef.current += 1
 
-    decisionLastAccelRef.current = null
-    decisionShakeCooldownRef.current = 0
-    decisionLastPulseRef.current = 0
+    if (decisionAutoDealTRef.current) {
+      window.clearTimeout(decisionAutoDealTRef.current)
+      decisionAutoDealTRef.current = null
+    }
+    if (decisionDragReturnTRef.current) {
+      window.clearTimeout(decisionDragReturnTRef.current)
+      decisionDragReturnTRef.current = null
+    }
+    unbindGlobalDecisionDrag()
+    decisionDragPointerRef.current = null
+    decisionDragTouchIdRef.current = null
+    decisionDragOriginRef.current = hiddenDragPoint()
+    decisionDragStartDeltaRef.current = { x: 0, y: 0 }
+    setDecisionDragging(false)
+    setDecisionDragPoint(hiddenDragPoint())
+    setDecisionDragOverSlot(null)
+    setDecisionActiveFanIndex(DECISION_TOP_INDEX)
   }
 
   const openDecision = () => {
     resetDecisionState()
-
-    // удобно: подхватим уже введённый вопрос с главной
-    setDecisionQuestion(question || '')
+    const q = String(question || '').trim()
+    const preview = buildDecisionCardsPreview()
+    setDecisionQuestion(q)
+    setDecisionDeckCards(preview)
+    setDecisionCards(preview)
+    warmupCardImages(preview)
+    setDecisionScreen('shuffle')
     setView('decision_prep')
 
     try {
@@ -3589,142 +4272,8 @@ useEffect(() => {
     } catch {}
   }
 
-  const beginDecisionShuffle = async () => {
-    if (!decisionQuestion.trim()) {
-      try {
-        hapticPulse(0.28)
-      } catch {}
-      return
-    }
-
-    if (needsMotionPermission) await requestMotion()
-
-    decisionLastAccelRef.current = null
-    decisionShakeCooldownRef.current = 0
-    decisionLastPulseRef.current = 0
-
-    // обнулим старые карты: настоящие значения будут получены с бэка
-    setDecisionCards([])
-    // Reset description and mark as loading while we fetch from the backend
-    setDecisionDesc('')
-    setDecisionLoading(true)
-    setDecisionDayKey(getVilniusDayKey())
-
-    setDecisionScreen('shuffle')
-    setDecisionShakeEnabled(true)
-    setDecisionReadyToOpen(false)
-    setDecisionShuffleProgress(0)
-
-    setDecisionOrder([0, 1])
-    decisionFinishingRef.current = false
-    decisionLastSwapAtRef.current = 0
-
-    try {
-      hapticPulse(0.35)
-    } catch {}
-
-    // подгружаем реальные карты: fallback на мок при ошибках
-    buildDecisionCardsReal().then((cards) => {
-      setDecisionCards(cards)
-      setDecisionLoading(false)
-    }).catch((err: any) => {
-      console.warn('[reading] decision failed:', err)
-      setDecisionCards([])
-      setDecisionDesc(mapReadingError(String(err?.message || err || '')))
-      setDecisionLoading(false)
-    })
-  }
-
-  const pickNextDecisionOrder = (cur: number[]) => {
-    const curKey = cur.join('')
-    for (let t = 0; t < 6; t++) {
-      const next = DECISION_PERMS[Math.floor(Math.random() * DECISION_PERMS.length)]
-      if (next.join('') !== curKey) return next
-    }
-    return [cur[1], cur[0]]
-  }
-
-  const swapDecisionVisual = () => {
-    setDecisionOrder((cur) => pickNextDecisionOrder(cur))
-  }
-
-  const finishDecisionShuffle = () => {
-    if (decisionFinishingRef.current) return
-    decisionFinishingRef.current = true
-
-    setDecisionShakeEnabled(false)
-    setDecisionOrder([0, 1])
-
-    window.setTimeout(() => {
-      setDecisionReadyToOpen(true)
-      setDecisionShuffleProgress(1)
-    }, 420)
-  }
-
-  const shuffleDecisionOnce = (power01: number) => {
-    const p = clamp(power01, 0, 1)
-    swapDecisionVisual()
-
-    setDecisionShuffleProgress((cur) => {
-      const step = DECISION_SHAKE_STEP_BASE + p * 0.16
-      const next = clamp(cur + step, 0, 1)
-
-      if (next >= 1) {
-        requestAnimationFrame(() => finishDecisionShuffle())
-      }
-
-      return next
-    })
-  }
-
-  const autoShuffleDecision = async () => {
-    if (needsMotionPermission) await requestMotion()
-
-    setDecisionShakeEnabled(true)
-    setDecisionReadyToOpen(false)
-    decisionFinishingRef.current = false
-
-    const from = decisionShuffleProgress
-    const start = performance.now()
-    const dur = 1050
-
-    let lastPulse = 0
-    decisionLastSwapAtRef.current = 0
-
-    const tick = (now: number) => {
-      const t = Math.min(1, (now - start) / dur)
-      const eased = 1 - Math.pow(1 - t, 3)
-      const next = clamp(from + (1 - from) * eased, 0, 1)
-
-      if (now - decisionLastSwapAtRef.current > 150 && next < 1) {
-        decisionLastSwapAtRef.current = now
-        swapDecisionVisual()
-      }
-
-      setDecisionShuffleProgress(next)
-
-      if (now - lastPulse > 90) {
-        lastPulse = now
-        try {
-          hapticPulse(clamp(next, 0.12, 1))
-        } catch {}
-      }
-
-      if (t < 1) {
-        requestAnimationFrame(tick)
-        return
-      }
-
-      finishDecisionShuffle()
-    }
-
-    requestAnimationFrame(tick)
-  }
-
   const openDecisionResult = () => {
-    if (!decisionReadyToOpen && decisionShuffleProgress < 1) return
     setDecisionScreen('result')
-    setDecisionShakeEnabled(false)
 
     try {
       hapticPulse(0.7)
@@ -3733,115 +4282,353 @@ useEffect(() => {
 
   const restartDecision = () => {
     resetDecisionState()
-    setDecisionScreen('setup')
+    const q = String(question || decisionQuestion || '').trim()
+    const preview = buildDecisionCardsPreview()
+    setDecisionQuestion(q)
+    setDecisionDeckCards(preview)
+    setDecisionCards(preview)
+    setDecisionScreen('shuffle')
   }
 
-  /* =============================================================================================
-    [21.2] SHAKE LISTENER — 2 КАРТЫ (отдельно от “карты дня” / “3 карты” / PPF)
-  ============================================================================================= */
+  const startDecisionReading = (previewCards: DecisionCardResult[]) => {
+    setDecisionLoading(true)
+    setDecisionDesc('')
+    setDecisionDayKey(getVilniusDayKey())
+    const req = decisionRequestSeqRef.current + 1
+    decisionRequestSeqRef.current = req
 
-  useEffect(() => {
-    if (view !== 'decision_prep') return
-    if (decisionScreen !== 'shuffle') return
-    if (!decisionShakeEnabled) return
-    if (decisionReadyToOpen) return
-
-    let mounted = true
-
-    const onMotion = (e: DeviceMotionEvent) => {
-      if (!mounted) return
-      if (view !== 'decision_prep') return
-      if (decisionScreen !== 'shuffle') return
-      if (!decisionShakeEnabled || decisionReadyToOpen) return
-
-      const a = e.accelerationIncludingGravity
-      if (!a) return
-
-      const x = a.x ?? 0
-      const y = a.y ?? 0
-      const z = a.z ?? 0
-
-      const prev = decisionLastAccelRef.current
-      decisionLastAccelRef.current = { x, y, z }
-      if (!prev) return
-
-      const dx = x - prev.x
-      const dy = y - prev.y
-      const dz = z - prev.z
-      const delta = Math.abs(dx) + Math.abs(dy) + Math.abs(dz)
-
-      const now = Date.now()
-      if (now < decisionShakeCooldownRef.current) return
-
-      if (delta > DECISION_SHAKE_THRESHOLD) {
-        decisionShakeCooldownRef.current = now + 70
-        const power = clamp((delta - DECISION_SHAKE_THRESHOLD) / 18, 0, 1)
-
-        shuffleDecisionOnce(power)
-
-        const currentProgress = decisionShuffleProgressRef.current
-        const interval = Math.round(120 - clamp(currentProgress, 0, 1) * 70)
-        if (now - decisionLastPulseRef.current > Math.max(HAPTIC_MIN_INTERVAL, interval)) {
-          decisionLastPulseRef.current = now
-          try {
-            hapticPulse(clamp(currentProgress * 0.85 + power * 0.45, 0.12, 1))
-          } catch {}
+    buildDecisionCardsReal(previewCards, decisionQuestion)
+      .then((cards) => {
+        if (decisionRequestSeqRef.current !== req) return
+        setDecisionCards(cards)
+        setDecisionLoading(false)
+      })
+      .catch((err: any) => {
+        if (decisionRequestSeqRef.current !== req) return
+        const raw = String(err?.message || err || '')
+        if (isReadingLimitExceeded(raw)) {
+          setDecisionCards(previewCards)
+          setDecisionDesc('')
+          setDecisionLoading(false)
+          setShowAccessPaywall(true)
+          return
         }
-      }
-    }
-
-    window.addEventListener('devicemotion', onMotion, { passive: true })
-    return () => {
-      mounted = false
-      window.removeEventListener('devicemotion', onMotion as any)
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [view, decisionScreen, decisionShakeEnabled, decisionReadyToOpen])
-
-
-  const enableShake = async () => {
-    lastAccelRef.current = null
-    lastPulseRef.current = 0
-    shakeCooldownRef.current = 0
-    setShuffleProgress(0)
-    setStopRequested(false)
-
-    // ✅ отправляем question + topic на бекенд, чтобы он выдал/вернул карту дня
-    if (token) {
-      setCardDayLoading(true)
-      try {
-        const dto = await createCardOfDay(token, {
-          question: question || '',
-          topic: topic,
-          deck_size: 78,
-          consider_reversed: true,
-        })
-
-        const idx = Math.max(0, Math.min(dto.card_index ?? 0, 77))
-        const url = FRONT_CARD_URLS[idx] || backCardImg
-
-        setDailyFrontUrl(url)
-
-        setDailyDesc(dto.description || '')
-        setDailyCardName(dto.card_name || '')
-        setDailyDayKey(dto.day_key || '')
-      } catch (e) {
-        // если бекенд не доступен — оставим текущий локальный daily, чтобы UX не умер
-        const fallback = pickDailyCardUrl()
-        setDailyFrontUrl(fallback)
-      } finally {
-        setCardDayLoading(false)
-      }
-    } else {
-      // без токена — fallback на локальный daily
-      const fallback = pickDailyCardUrl()
-      setDailyFrontUrl(fallback)
-    }
-
-    // ✅ дальше — текущая логика шейка (ввод скрываем, показываем shake-блок)
-    if (needsMotionPermission) await requestMotion()
-    setShakeEnabled(true)
+        console.warn('[reading] decision failed:', err)
+        setDecisionCards(previewCards)
+        setDecisionDesc(mapReadingError(raw))
+        setDecisionLoading(false)
+      })
   }
+
+  const queueDecisionFinishIfReady = (reveals?: boolean[]) => {
+    const revealed = reveals || decisionRevealMap
+    if (decisionPlacedCountRef.current < 2) return
+    if (!revealed[0] || !revealed[1]) return
+    if (decisionFinishQueuedRef.current) return
+
+    decisionFinishQueuedRef.current = true
+    window.setTimeout(() => {
+      openDecisionResult()
+      decisionFinishQueuedRef.current = false
+    }, 220)
+  }
+
+  const onDecisionSlotTap = (slotIdx: number) => {
+    const card = decisionPlacedCardsRef.current[slotIdx]
+    if (!card) return
+
+    setDecisionRevealMap((cur) => {
+      if (cur[slotIdx]) return cur
+      const next = [...cur]
+      next[slotIdx] = true
+      queueDecisionFinishIfReady(next)
+      return next
+    })
+
+    try {
+      hapticPulse(0.34)
+    } catch {}
+  }
+
+  const unbindGlobalDecisionDrag = () => {
+    if (!decisionGlobalDragCleanupRef.current) return
+    decisionGlobalDragCleanupRef.current()
+    decisionGlobalDragCleanupRef.current = null
+  }
+
+  const bindGlobalDecisionDrag = () => {
+    if (decisionGlobalDragCleanupRef.current) return
+
+    const onPointerMove = (e: PointerEvent) => onDecisionDeckPointerMove(e as any)
+    const onPointerUp = (e: PointerEvent) => onDecisionDeckPointerUp(e as any)
+    const onPointerCancel = (e: PointerEvent) => onDecisionDeckPointerCancel(e as any)
+
+    const onTouchMove = (e: TouchEvent) => onDecisionDeckTouchMove(e as any)
+    const onTouchEnd = (e: TouchEvent) => onDecisionDeckTouchEnd(e as any)
+    const onTouchCancel = () => onDecisionDeckTouchCancel()
+
+    window.addEventListener('pointermove', onPointerMove, { passive: false })
+    window.addEventListener('pointerup', onPointerUp, { passive: false })
+    window.addEventListener('pointercancel', onPointerCancel, { passive: false })
+
+    window.addEventListener('touchmove', onTouchMove, { passive: false })
+    window.addEventListener('touchend', onTouchEnd, { passive: false })
+    window.addEventListener('touchcancel', onTouchCancel, { passive: false })
+
+    decisionGlobalDragCleanupRef.current = () => {
+      window.removeEventListener('pointermove', onPointerMove)
+      window.removeEventListener('pointerup', onPointerUp)
+      window.removeEventListener('pointercancel', onPointerCancel)
+      window.removeEventListener('touchmove', onTouchMove)
+      window.removeEventListener('touchend', onTouchEnd)
+      window.removeEventListener('touchcancel', onTouchCancel)
+    }
+  }
+
+  const resolveDecisionFanIndex = (target: EventTarget | null) => {
+    const node = target instanceof HTMLElement
+      ? (target.closest('[data-decision-fan-index]') as HTMLElement | null)
+      : null
+
+    if (node) {
+      const parsed = Number(node.dataset.decisionFanIndex ?? '')
+      if (Number.isFinite(parsed)) return clamp(Math.round(parsed), 0, DECISION_FAN_CARDS - 1)
+    }
+
+    return DECISION_TOP_INDEX
+  }
+
+  const getDecisionFanRect = (fanIndex: number, fallbackX: number, fallbackY: number) => {
+    const safeIdx = clamp(fanIndex, 0, DECISION_FAN_CARDS - 1)
+    const fanEl = decisionFanCardRefs.current[safeIdx]
+    if (fanEl) return fanEl.getBoundingClientRect()
+
+    const deckRect = decisionDeckRef.current?.getBoundingClientRect()
+    if (deckRect) {
+      const anchorX = deckRect.left + deckRect.width * 0.5
+      const anchorY = deckRect.top + deckRect.height * 0.5
+      const w = 98
+      const h = 147
+      return new DOMRect(anchorX - w / 2, anchorY - h / 2, w, h)
+    }
+
+    return new DOMRect(fallbackX - 49, fallbackY - 74, 98, 147)
+  }
+
+  const placeDecisionCardToNextSlot = (slotIndexArg?: number) => {
+    const slotIndex = typeof slotIndexArg === 'number' ? slotIndexArg : decisionPlacedCountRef.current
+    if (slotIndex < 0 || slotIndex > 1) return
+    const card = decisionDeckCards[slotIndex]
+    if (!card) return
+    const current = decisionPlacedCardsRef.current
+    if (current[slotIndex]) return
+
+    const nextPlaced = [...current]
+    nextPlaced[slotIndex] = card
+    decisionPlacedCardsRef.current = nextPlaced
+    setDecisionPlacedCards(nextPlaced)
+
+    const nextCount = slotIndex + 1
+    decisionPlacedCountRef.current = nextCount
+    setDecisionPlacedCount(nextCount)
+
+    if (decisionDragReturnTRef.current) {
+      window.clearTimeout(decisionDragReturnTRef.current)
+      decisionDragReturnTRef.current = null
+    }
+    setDecisionDragging(false)
+    setDecisionDragOverSlot(null)
+    setDecisionActiveFanIndex(DECISION_TOP_INDEX)
+    setDecisionDragPoint(hiddenDragPoint())
+
+    try {
+      hapticPulse(0.34)
+    } catch {}
+
+    if (nextCount >= 2) {
+      startDecisionReading(nextPlaced.filter(Boolean) as DecisionCardResult[])
+    }
+  }
+
+  const updateDecisionDragAt = (clientX: number, clientY: number) => {
+    const x = clientX - decisionDragStartDeltaRef.current.x
+    const y = clientY - decisionDragStartDeltaRef.current.y
+    setDecisionDragPoint({ x, y })
+
+    const activeSlot = decisionPlacedCountRef.current
+    const slotEl = decisionSlotRefs.current[activeSlot]
+    if (!slotEl) {
+      setDecisionDragOverSlot(null)
+      return
+    }
+    const r = slotEl.getBoundingClientRect()
+    const inside = clientX >= r.left && clientX <= r.right && clientY >= r.top && clientY <= r.bottom
+    setDecisionDragOverSlot(inside ? activeSlot : null)
+  }
+
+  const finishDecisionDragAt = (clientX: number, clientY: number) => {
+    unbindGlobalDecisionDrag()
+    const activeSlot = decisionPlacedCountRef.current
+    const slotEl = decisionSlotRefs.current[activeSlot]
+    let inside = false
+    if (slotEl) {
+      const r = slotEl.getBoundingClientRect()
+      inside = clientX >= r.left && clientX <= r.right && clientY >= r.top && clientY <= r.bottom
+    }
+
+    if (inside) {
+      placeDecisionCardToNextSlot(activeSlot)
+      return
+    }
+
+    setDecisionDragOverSlot(null)
+    if (decisionDragReturnTRef.current) {
+      window.clearTimeout(decisionDragReturnTRef.current)
+      decisionDragReturnTRef.current = null
+    }
+    setDecisionDragPoint({ ...decisionDragOriginRef.current })
+    decisionDragReturnTRef.current = window.setTimeout(() => {
+      setDecisionDragging(false)
+      setDecisionDragPoint(hiddenDragPoint())
+      setDecisionActiveFanIndex(DECISION_TOP_INDEX)
+      decisionDragReturnTRef.current = null
+    }, 210)
+  }
+
+  const onDecisionDeckPointerDown = (e: any) => {
+    if (decisionPlacedCountRef.current >= 2) return
+    if (typeof e.button === 'number' && e.button !== 0) return
+    if (decisionDragTouchIdRef.current != null) return
+
+    const fanIndex = resolveDecisionFanIndex(e.target)
+    setDecisionActiveFanIndex(fanIndex)
+    decisionDragPointerRef.current = e.pointerId
+
+    const fanRect = getDecisionFanRect(fanIndex, e.clientX, e.clientY)
+    decisionDragOriginRef.current = { x: fanRect.left, y: fanRect.top }
+    const grabX = clamp(e.clientX - fanRect.left, 0, fanRect.width)
+    const grabY = clamp(e.clientY - fanRect.top, 0, fanRect.height)
+    decisionDragStartDeltaRef.current = { x: grabX, y: grabY }
+
+    setDecisionDragging(true)
+    setDecisionDragPoint({ x: fanRect.left, y: fanRect.top })
+    setDecisionDragOverSlot(null)
+    bindGlobalDecisionDrag()
+
+    try {
+      e.preventDefault()
+      e.stopPropagation()
+      ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
+    } catch {}
+  }
+
+  const onDecisionDeckPointerMove = (e: any) => {
+    if (decisionDragPointerRef.current !== e.pointerId) return
+    try {
+      e.preventDefault()
+    } catch {}
+    updateDecisionDragAt(e.clientX, e.clientY)
+  }
+
+  const onDecisionDeckPointerUp = (e: any) => {
+    if (decisionDragPointerRef.current !== e.pointerId) return
+    decisionDragPointerRef.current = null
+    try {
+      ;(decisionDeckRef.current as HTMLElement | null)?.releasePointerCapture(e.pointerId)
+    } catch {}
+    finishDecisionDragAt(e.clientX, e.clientY)
+  }
+
+  const onDecisionDeckPointerCancel = (e: any) => {
+    if (decisionDragPointerRef.current !== e.pointerId) return
+    decisionDragPointerRef.current = null
+    unbindGlobalDecisionDrag()
+    if (decisionDragReturnTRef.current) {
+      window.clearTimeout(decisionDragReturnTRef.current)
+      decisionDragReturnTRef.current = null
+    }
+    setDecisionDragging(false)
+    setDecisionDragPoint(hiddenDragPoint())
+    setDecisionDragOverSlot(null)
+    setDecisionActiveFanIndex(DECISION_TOP_INDEX)
+  }
+
+  const findDecisionTouchById = (touches: TouchList, id: number) => {
+    for (let i = 0; i < touches.length; i += 1) {
+      const t = touches.item(i)
+      if (t && t.identifier === id) return t
+    }
+    return null
+  }
+
+  const onDecisionDeckTouchStart = (e: any) => {
+    if (decisionPlacedCountRef.current >= 2) return
+    if (decisionDragPointerRef.current != null) return
+    const t = e.changedTouches.item(0)
+    if (!t) return
+
+    const fanIndex = resolveDecisionFanIndex(e.target)
+    setDecisionActiveFanIndex(fanIndex)
+    decisionDragTouchIdRef.current = t.identifier
+
+    const fanRect = getDecisionFanRect(fanIndex, t.clientX, t.clientY)
+    decisionDragOriginRef.current = { x: fanRect.left, y: fanRect.top }
+    const grabX = clamp(t.clientX - fanRect.left, 0, fanRect.width)
+    const grabY = clamp(t.clientY - fanRect.top, 0, fanRect.height)
+    decisionDragStartDeltaRef.current = { x: grabX, y: grabY }
+
+    setDecisionDragging(true)
+    setDecisionDragPoint({ x: fanRect.left, y: fanRect.top })
+    setDecisionDragOverSlot(null)
+    bindGlobalDecisionDrag()
+    e.preventDefault()
+    e.stopPropagation()
+  }
+
+  const onDecisionDeckTouchMove = (e: any) => {
+    const touchId = decisionDragTouchIdRef.current
+    if (touchId == null) return
+    const t = findDecisionTouchById(e.touches, touchId)
+    if (!t) return
+    updateDecisionDragAt(t.clientX, t.clientY)
+    e.preventDefault()
+  }
+
+  const onDecisionDeckTouchEnd = (e: any) => {
+    const touchId = decisionDragTouchIdRef.current
+    if (touchId == null) return
+    const t = findDecisionTouchById(e.changedTouches, touchId)
+    if (!t) return
+    decisionDragTouchIdRef.current = null
+    finishDecisionDragAt(t.clientX, t.clientY)
+    e.preventDefault()
+  }
+
+  const onDecisionDeckTouchCancel = () => {
+    unbindGlobalDecisionDrag()
+    decisionDragTouchIdRef.current = null
+    if (decisionDragReturnTRef.current) {
+      window.clearTimeout(decisionDragReturnTRef.current)
+      decisionDragReturnTRef.current = null
+    }
+    setDecisionDragging(false)
+    setDecisionDragPoint(hiddenDragPoint())
+    setDecisionDragOverSlot(null)
+    setDecisionActiveFanIndex(DECISION_TOP_INDEX)
+  }
+
+  const autoShuffleDecision = () => {
+    if (decisionAutoDealTRef.current) {
+      window.clearTimeout(decisionAutoDealTRef.current)
+      decisionAutoDealTRef.current = null
+    }
+
+    window.setTimeout(() => placeDecisionCardToNextSlot(0), 0)
+    window.setTimeout(() => placeDecisionCardToNextSlot(1), 240)
+    window.setTimeout(() => onDecisionSlotTap(0), 520)
+    decisionAutoDealTRef.current = window.setTimeout(() => onDecisionSlotTap(1), 760)
+  }
+
 
   // ✅ haptics: Telegram + fallback vibrate
   const hapticPulse = (strength01: number) => {
@@ -3865,27 +4652,7 @@ useEffect(() => {
     } catch {}
   }
 
-  // ✅ когда карта доехала до рубашки — фиксируем результат шейка
-  const onStoppedAtBack = () => {
-    setStopRequested(false)
-    setCardRevealed(false)
-    setShakenOnce(true)
-
-    // ✅ теперь фронт уже залочен в PremiumFlipCard на dailyFrontUrl,
-    // но дополнительно сохраним в selectedFrontUrl, чтобы result точно совпадал
-    setSelectedFrontUrl(dailyFrontUrl || backCardImg)
-
-    setTimeout(() => {
-      hapticPulse(1)
-      try {
-        navigator.vibrate?.([35, 18, 85])
-      } catch {}
-    }, 60)
-  }
-
-  const revealCard = async () => {
-    if (!shakenOnce) return
-
+  const revealCardAfterShake = async () => {
     if (!dailyFrontReady && dailyFrontUrl && dailyFrontUrl !== backCardImg) {
       const im = new Image()
       im.decoding = 'async'
@@ -3897,6 +4664,30 @@ useEffect(() => {
 
     setCardRevealed(true)
     hapticPulse(0.6)
+  }
+
+  // ✅ когда карта доехала до рубашки — фиксируем результат шейка
+  const onStoppedAtBack = () => {
+    setStopRequested(false)
+    setCardRevealed(false)
+    setShakenOnce(true)
+    markDailyOpened(dailyDayKey || getVilniusDayKey())
+
+    // ✅ теперь фронт уже залочен в PremiumFlipCard на dailyFrontUrl,
+    // но дополнительно сохраним в selectedFrontUrl, чтобы result точно совпадал
+    setSelectedFrontUrl(dailyFrontUrl || backCardImg)
+
+    setTimeout(() => {
+      hapticPulse(1)
+      try {
+        navigator.vibrate?.([35, 18, 85])
+      } catch {}
+    }, 60)
+
+    // После тряски карта открывается автоматически — без тапа по карте.
+    window.setTimeout(() => {
+      void revealCardAfterShake()
+    }, 120)
   }
 
   /* =============================================================================================
@@ -4116,6 +4907,8 @@ useEffect(() => {
     const BASE_W = 116 * 1.28
     const BASE_H = 280
     const MARGIN = 18
+    const PRE_REVEAL_GAP = 56
+    const PRE_REVEAL_SCALE_BOOST = 1.06
 
     const recalc = () => {
       const vw = window.innerWidth
@@ -4147,17 +4940,19 @@ useEffect(() => {
       const spreadRect = spreadActiveRef.current?.getBoundingClientRect()
       const spreadBottom = spreadRect ? spreadRect.bottom : 150
 
-      const desiredTop = spreadBottom + 14 + (BASE_H * s) / 2
+      // В режиме перемешивания делаем карту чуть крупнее и ниже.
+      s = Math.max(0.62, Math.min(1.08, s * PRE_REVEAL_SCALE_BOOST))
+      const desiredTop = spreadBottom + PRE_REVEAL_GAP + (BASE_H * s) / 2
 
       const bottomLimit = panelTop - MARGIN
       const desiredCardBottom = desiredTop + (BASE_H * s) / 2
 
       if (desiredCardBottom > bottomLimit) {
-        const availableH = Math.max(160, bottomLimit - (spreadBottom + 14))
+        const availableH = Math.max(160, bottomLimit - (spreadBottom + PRE_REVEAL_GAP))
         const sH = availableH / BASE_H
-        s = Math.max(0.58, Math.min(s, sH))
+        s = Math.max(0.62, Math.min(s, sH))
 
-        const topPx = spreadBottom + 14 + (BASE_H * s) / 2
+        const topPx = spreadBottom + PRE_REVEAL_GAP + (BASE_H * s) / 2
         setPflipScale(s)
         setPflipTop(`${topPx}px`)
         return
@@ -4304,6 +5099,7 @@ useEffect(() => {
   const subLabel = subActive
     ? `Активна до ${formatRuDate(billing?.subscription_until)}`
     : 'Не активна'
+  const currentLegalDoc = activeLegalDoc ? LEGAL_DOCS[activeLegalDoc] : null
 
   return (
     <div className="app" ref={appRef}>
@@ -4312,33 +5108,11 @@ useEffect(() => {
 
 {/* AUTH OVERLAY */}
 {authStatus === 'loading' && (
-  <div
-    style={{
-      position: 'fixed',
-      inset: 0,
-      display: 'grid',
-      placeItems: 'center',
-      zIndex: 9999,
-      background: 'rgba(6, 8, 18, 0.62)',
-      backdropFilter: 'blur(10px)',
-      WebkitBackdropFilter: 'blur(10px)',
-    }}
-  >
-    <div style={{ textAlign: 'center', padding: 18, maxWidth: 320 }}>
-      <div
-        style={{
-          width: 34,
-          height: 34,
-          borderRadius: '50%',
-          border: '3px solid rgba(255,255,255,0.25)',
-          borderTopColor: 'rgba(255,255,255,0.9)',
-          margin: '0 auto 12px',
-          animation: 'spin 900ms linear infinite',
-        }}
-        aria-hidden="true"
-      />
-      <div style={{ fontSize: 14, opacity: 0.9 }}>Авторизация…</div>
-      <div style={{ fontSize: 12, opacity: 0.7, marginTop: 6 }}>Проверяем Telegram и загружаем профиль</div>
+  <div className="auth-overlay" role="status" aria-live="polite">
+    <div className="auth-overlay__card">
+      <div className="auth-overlay__ring" aria-hidden="true" />
+      <div className="auth-overlay__title">Авторизация…</div>
+      <div className="auth-overlay__sub">Проверяем Telegram и загружаем профиль</div>
     </div>
   </div>
 )}
@@ -4398,6 +5172,48 @@ useEffect(() => {
           Закрыть
         </button>
       </div>
+    </div>
+  </div>
+)}
+
+{authStatus === 'ready' && showLegalConsent && (
+  <div className="auth-overlay legal-consent" role="dialog" aria-modal="true" aria-label="Согласие с документами">
+    <div className="auth-overlay__card legal-consent__card">
+      <div className="legal-consent__title">Перед началом использования</div>
+      <div className="legal-consent__text">
+        Подтвердите согласие с документами, чтобы продолжить работу в AI Taro.
+      </div>
+
+      <div className="legal-consent__links">
+        <button type="button" className="legal-consent__link" onClick={() => openLegalDoc('terms')}>
+          📄 Пользовательское соглашение
+        </button>
+        <button type="button" className="legal-consent__link" onClick={() => openLegalDoc('privacy')}>
+          🔐 Политика конфиденциальности
+        </button>
+      </div>
+
+      <label className="legal-consent__check">
+        <input
+          type="checkbox"
+          checked={legalConsentChecked}
+          onChange={(e) => setLegalConsentChecked(e.target.checked)}
+        />
+        <span>Соглашаюсь с Пользовательским соглашением и Политикой конфиденциальности</span>
+      </label>
+
+      <button
+        type="button"
+        className="glass-cta legal-consent__accept"
+        disabled={!legalConsentChecked}
+        onClick={acceptLegalConsent}
+      >
+        <span className="glass-cta__inner">
+          <span className="glass-cta__rim" aria-hidden="true" />
+          <span className="glass-cta__text">Согласиться и продолжить</span>
+          <span className="glass-cta__spark" aria-hidden="true" />
+        </span>
+      </button>
     </div>
   </div>
 )}
@@ -4525,6 +5341,8 @@ useEffect(() => {
 
                     <div className={`ask-hint ${isRecording ? 'is-visible' : ''}`}>Идёт запись… нажмите ещё раз, чтобы остановить</div>
                   </div>
+
+                  <ContextHint text={contextHint} />
 
                   <h2 className="home-section-title">Выберите категорию вопроса</h2>
 
@@ -4827,50 +5645,11 @@ useEffect(() => {
                       <div className="profile-hero__username">{profileUsername}</div>
                     </div>
 
-                    {subActive && (
-                      <section className="profile-panel profile-panel--premium" aria-label="Подписка">
-                        <div className="profile-panel__title">
-                          <span className="profile-icon profile-icon--premium" aria-hidden="true">
-                            <svg viewBox="0 0 24 24">
-                              <path d="M4 9.5 7.4 5h9.2L20 9.5l-8 9-8-9Z" fill="none" stroke="currentColor" strokeWidth="1.8" />
-                              <path d="M7.4 5 12 18.5 16.6 5" fill="none" stroke="currentColor" strokeWidth="1.4" />
-                            </svg>
-                          </span>
-                          <span>Premium / Подписка AI Tarot</span>
-                        </div>
-                        <div className="profile-panel__status">
-                          Статус: <span className={`profile-status ${subActive ? 'is-active' : 'is-inactive'}`}>{subLabel}</span>
-                        </div>
-
-                        <a
-                          href={BOT_PAYMENT_URL}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="profile-link-row"
-                          onClick={(e) => {
-                            e.preventDefault()
-                            openTelegramUrl(BOT_PAYMENT_URL)
-                          }}
-                        >
-                          <span className="profile-link-row__left">Управление подпиской</span>
-                          <span className="profile-link-row__chevron" aria-hidden="true">›</span>
-                        </a>
-
-                        <a
-                          href={BOT_PAYMENT_URL}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="profile-link-row"
-                          onClick={(e) => {
-                            e.preventDefault()
-                            openTelegramUrl(BOT_PAYMENT_URL)
-                          }}
-                        >
-                          <span className="profile-link-row__left">Как отменить подписку?</span>
-                          <span className="profile-link-row__chevron" aria-hidden="true">›</span>
-                        </a>
-                      </section>
-                    )}
+                    <SubscriptionManageCard
+                      active={subActive}
+                      statusLabel={subLabel}
+                      onOpenManage={() => openTelegramAndCloseMiniApp(BOT_SUB_MANAGE_URL)}
+                    />
 
                     {!subActive && (
                       <section className="profile-piece profile-piece--stack" aria-label="Подключить безлимит">
@@ -4955,6 +5734,30 @@ useEffect(() => {
                       </section>
                     )}
 
+                    <MemorySettingsCard
+                      memoryOptIn={memoryOptIn}
+                      nudgesOptIn={nudgesOptIn}
+                      nudgeHour={nudgeHour}
+                      nudgeTz={nudgeTz}
+                      saveBusy={memorySaveBusy}
+                      saveError={memorySaveError}
+                      summaryLoading={memorySummaryLoading}
+                      summary={memorySummary}
+                      onToggleMemory={(next) => {
+                        setMemoryOptIn(next)
+                        if (!next) {
+                          setNudgesOptIn(false)
+                        }
+                      }}
+                      onToggleNudges={(next) => setNudgesOptIn(next)}
+                      onChangeHour={(next) => setNudgeHour(next)}
+                      onSave={saveMemoryPreferences}
+                      onRefreshSummary={() => {
+                        if (!token) return
+                        void loadMemorySummaryData(token, false)
+                      }}
+                    />
+
                     <section className="profile-panel" aria-label="Настройки">
                       <div className="profile-group-title">Настройки</div>
 
@@ -4969,7 +5772,6 @@ useEffect(() => {
                           <span>Язык приложения (Draft)</span>
                         </span>
                         <span className="profile-link-row__right">Русский</span>
-                        <span className="profile-link-row__chevron" aria-hidden="true">›</span>
                       </div>
 
                       <div className="profile-link-row profile-link-row--static">
@@ -4985,14 +5787,22 @@ useEffect(() => {
                         <span className={`profile-link-row__right ${token ? 'is-ok' : 'is-muted'}`}>
                           {token ? 'Подключен' : 'Не подключен'}
                         </span>
-                        <span className="profile-link-row__chevron" aria-hidden="true">›</span>
                       </div>
                     </section>
 
                     <section className="profile-panel" aria-label="Информация и поддержка">
                       <div className="profile-group-title">Информация и поддержка</div>
 
-                      <a href={SUPPORT_URL} target="_blank" rel="noreferrer" className="profile-link-row">
+                      <a
+                        href={SUPPORT_URL}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="profile-link-row"
+                        onClick={(e) => {
+                          e.preventDefault()
+                          openTelegramAndCloseMiniApp(SUPPORT_URL)
+                        }}
+                      >
                         <span className="profile-link-row__left">
                           <span className="profile-icon profile-icon--row" aria-hidden="true">
                             <svg viewBox="0 0 24 24">
@@ -5004,7 +5814,16 @@ useEffect(() => {
                         <span className="profile-link-row__chevron" aria-hidden="true">›</span>
                       </a>
 
-                      <a href={TERMS_URL} target="_blank" rel="noreferrer" className="profile-link-row">
+                      <a
+                        href={TERMS_URL}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="profile-link-row"
+                        onClick={(e) => {
+                          e.preventDefault()
+                          openLegalDoc('terms')
+                        }}
+                      >
                         <span className="profile-link-row__left">
                           <span className="profile-icon profile-icon--row" aria-hidden="true">
                             <svg viewBox="0 0 24 24">
@@ -5017,7 +5836,16 @@ useEffect(() => {
                         <span className="profile-link-row__chevron" aria-hidden="true">›</span>
                       </a>
 
-                      <a href={PRIVACY_URL} target="_blank" rel="noreferrer" className="profile-link-row">
+                      <a
+                        href={PRIVACY_URL}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="profile-link-row"
+                        onClick={(e) => {
+                          e.preventDefault()
+                          openLegalDoc('privacy')
+                        }}
+                      >
                         <span className="profile-link-row__left">
                           <span className="profile-icon profile-icon--row" aria-hidden="true">
                             <svg viewBox="0 0 24 24">
@@ -5030,6 +5858,17 @@ useEffect(() => {
                         <span className="profile-link-row__chevron" aria-hidden="true">›</span>
                       </a>
                     </section>
+
+                    <SupportEntry
+                      tickets={supportTickets}
+                      loading={supportTicketsLoading}
+                      error={supportTicketsError}
+                      onRefresh={() => {
+                        if (!token) return
+                        void loadSupportTicketsData(token, false)
+                      }}
+                      onOpenSupport={() => openTelegramAndCloseMiniApp(SUPPORT_URL)}
+                    />
 
                     <button type="button" className="profile-logout-btn" onClick={handleProfileLogout}>
                       Выйти из аккаунта
@@ -5078,45 +5917,61 @@ useEffect(() => {
                 </div>
               ) : null}
 
-              {photoPreviewUrl ? (
-                <div className="photo-preview" aria-label="Предпросмотр фото">
-                  <img src={photoPreviewUrl} alt="Фото расклада" />
-                </div>
-              ) : (
-                <div className="photo-placeholder" aria-label="Фото не выбрано">
-                  <div className="photo-placeholder__icon" aria-hidden="true">
-                    <img src={cameraIcon} alt="" />
-                  </div>
-                  <div className="photo-placeholder__text">Выберите или сделайте фото расклада</div>
-                  <div className="photo-placeholder__sub">После выбора фото этот экран останется в привычном вам виде.</div>
-                </div>
-              )}
+              <div
+                className={`photo-placeholder photo-placeholder--picker ${photoPreviewUrl ? 'has-preview' : ''}`}
+                aria-label={photoPreviewUrl ? 'Предпросмотр фото' : 'Выберите или сделайте фото расклада'}
+              >
+                {photoPreviewUrl ? (
+                  <img className="photo-placeholder__preview" src={photoPreviewUrl} alt="Фото расклада" />
+                ) : (
+                  <>
+                    <span className="photo-placeholder__icon" aria-hidden="true">
+                      <img src={cameraIcon} alt="" />
+                    </span>
+                    <div className="photo-placeholder__text">Выберите или сделайте фото расклада</div>
+                    <div className="photo-placeholder__sub">
+                      После выбора фото этот экран останется в привычном вам виде.
+                    </div>
+                  </>
+                )}
+              </div>
 
-              <div className={`photo-actions ${photoPreviewUrl ? 'is-compact' : ''}`}>
+              <div className="photo-actions photo-actions--tiles">
                 <button
                   type="button"
-                  className="glass-cta mini-cta"
+                  className="photo-upload-tile photo-upload-tile--gallery"
                   onClick={() => galleryInputRef.current?.click()}
                   disabled={photoStatus === 'uploading'}
                 >
-                  <span className="glass-cta__inner">
-                    <span className="glass-cta__rim" aria-hidden="true" />
-                    <span className="glass-cta__text">Выбрать из галереи</span>
-                    <span className="glass-cta__spark" aria-hidden="true" />
+                  <span className="photo-upload-tile__icon" aria-hidden="true">
+                    <svg viewBox="0 0 24 24">
+                      <rect x="3.5" y="5.5" width="17" height="13" rx="2.2" fill="none" stroke="currentColor" strokeWidth="1.8" />
+                      <circle cx="9" cy="10" r="1.3" fill="currentColor" />
+                      <path d="M6.6 16.5l4.4-4 2.4 2 3-2.8 1.7 1.7" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+                    </svg>
                   </span>
+                  <span className="photo-upload-tile__text">Выбрать из галереи</span>
                 </button>
 
                 <button
                   type="button"
-                  className="glass-cta mini-cta"
+                  className="photo-upload-tile photo-upload-tile--camera"
                   onClick={() => cameraInputRef.current?.click()}
                   disabled={photoStatus === 'uploading'}
                 >
-                  <span className="glass-cta__inner">
-                    <span className="glass-cta__rim" aria-hidden="true" />
-                    <span className="glass-cta__text">Сделать фото</span>
-                    <span className="glass-cta__spark" aria-hidden="true" />
+                  <span className="photo-upload-tile__icon" aria-hidden="true">
+                    <svg viewBox="0 0 24 24">
+                      <path
+                        d="M4.6 8.5h2.2l1.2-2h8l1.2 2h2.2a1.8 1.8 0 0 1 1.8 1.8v7.4a1.8 1.8 0 0 1-1.8 1.8H4.6a1.8 1.8 0 0 1-1.8-1.8v-7.4a1.8 1.8 0 0 1 1.8-1.8Z"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="1.8"
+                        strokeLinejoin="round"
+                      />
+                      <circle cx="12" cy="13.1" r="3.2" fill="none" stroke="currentColor" strokeWidth="1.8" />
+                    </svg>
                   </span>
+                  <span className="photo-upload-tile__text">Сделать фото</span>
                 </button>
               </div>
 
@@ -5305,13 +6160,10 @@ useEffect(() => {
               key={pflipMountKey}
               frontUrls={SHUFFLE_FRONT_URLS}
               backUrl={backCardImg}
-              active={!shakenOnce && !stopRequested && !cardDayLoading && dailyFrontReady}
+              active={!shakenOnce && !cardDayLoading}
               durationMs={2600}
-              randomizeEveryMs={720}
               intensity={cardDayLoading ? 0 : shakeEnabled ? shuffleProgress : 0}
-              clickable={shakenOnce}
-              onClick={revealCard}
-              ariaLabel="Перевернуть карту"
+              clickable={false}
               stopAtBack={stopRequested}
               onStoppedAtBack={onStoppedAtBack}
               className={`${shakenOnce ? 'is-done' : ''} ${cardRevealed ? 'is-revealed' : ''} ${isResult ? 'is-top' : ''}`.trim()}
@@ -5321,112 +6173,55 @@ useEffect(() => {
               // До остановки: рандомные карты в перемешивании. После остановки: фикс выпавшей карты.
               lockFront={shakenOnce}
               lockedFrontUrl={dailyFrontUrl || backCardImg}
+              lockedFrontReversed={dailyIsReversed}
               previewExcludeUrl={dailyFrontUrl || ''}
             />
 
             {!isResult && !cardDayLoading && (
               <>
-                {!shakeEnabled ? (
-                  <div className="bottom-panel bottom-panel--input" ref={bottomPanelRef}>
-                    <div className={`ask-wrap ${isRecording ? 'is-attn' : ''}`} ref={askWrapRef}>
-                      <div className="ask-glass">
-                        <textarea
-                          className="ask-input"
-                          value={question}
-                          onChange={(e) => setQuestion(e.target.value)}
-                          placeholder="Что вас беспокоит? О чем хотели бы узнать?"
-                          enterKeyHint="search"
-                          rows={2}
-                        />
-                        <div className={`ask-mic ${isRecording ? 'recording' : ''}`} onClick={toggleRecording} role="button" tabIndex={0}>
-                          <img className="ask-mic__icon" src={micIcon} alt="" aria-hidden="true" />
-                        </div>
+                <div
+                  className={`cardday-shake-hint ${cardDayShuffleStarted ? 'is-hidden' : 'is-visible'}`}
+                  aria-hidden={cardDayShuffleStarted ? 'true' : 'false'}
+                >
+                  <div className="cardday-shake-overlay__phone" />
+                  <div className="cardday-shake-overlay__title">Встряхните телефон</div>
+                  <div className="cardday-shake-overlay__sub">Или нажмите кнопку ниже для авто‑перемешивания</div>
+                </div>
+
+                <div className="bottom-panel bottom-panel--shake cardday-shake-panel" ref={bottomPanelRef}>
+                  {shuffleProgress < 1 ? (
+                    <>
+                      {needsMotionPermission && (
+                        <button type="button" className="glassbtn" onClick={requestMotion}>
+                          Разрешить датчики
+                        </button>
+                      )}
+
+                      <button type="button" className="glass-cta mini-cta" onClick={autoShuffle}>
+                        <span className="glass-cta__inner">
+                          <span className="glass-cta__rim" aria-hidden="true" />
+                          <span className="glass-cta__text">Перемешать автоматически</span>
+                          <span className="glass-cta__spark" aria-hidden="true" />
+                        </span>
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      <div className="shake__badge is-done">
+                        <div className="shake__title">Открываем карту…</div>
+                        <div className="shake__sub">Сейчас покажем значение карты дня.</div>
                       </div>
-                    </div>
-                    {/* [CARD DAY] SWITCHER ТЕМЫ: Отношения / Карьера / Финансы */}
-                    <div
-                      className={`seg seg--topics ${isBumping ? 'is-bump' : ''}`}
-                      data-bump={bump}
-                      style={{
-                        ['--seg-cols' as any]: TOPICS.length,
-                        ['--i' as any]: activeIndex,
-                        ['--from' as any]: prevIndex,
-                      }}
-                      role="tablist"
-                      aria-label="Выбор темы"
-                    >
-                      <svg className="seg__svg" aria-hidden="true">
-                        <filter id="seg-goo">
-                          <feGaussianBlur in="SourceGraphic" stdDeviation="8" result="blur" />
-                          <feColorMatrix
-                            in="blur"
-                            mode="matrix"
-                            values="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 18 -7"
-                            result="goo"
-                          />
-                          <feComposite in="SourceGraphic" in2="goo" operator="atop" />
-                        </filter>
-                      </svg>
 
-                      <div className="seg__pill" aria-hidden="true" />
-
-                      {TOPICS.map((t) => (
-                        <button
-                          key={t.id}
-                          type="button"
-                          className={`seg__btn ${topic === t.id ? 'is-active' : ''}`}
-                          onClick={() => onPickTopic(t.id)}
-                          role="tab"
-                          aria-selected={topic === t.id}
-                        >
-                          {t.label}
-                        </button>
-                      ))}
-                    </div>
-
-                    <button type="button" className="glass-cta" onClick={enableShake}>
-                      <span className="glass-cta__inner">
-                        <span className="glass-cta__rim" aria-hidden="true" />
-                        <span className="glass-cta__text">Продолжить</span>
-                        <span className="glass-cta__spark" aria-hidden="true" />
-                      </span>
-                    </button>
-                  </div>
-                ) : (
-                  <div className="bottom-panel bottom-panel--shake" ref={bottomPanelRef}>
-                    {shuffleProgress < 1 ? (
-                      <>
-                        <div className="shake__badge">
-                          <div className="shake__title">Потрясите телефон</div>
-                          <div className="shake__sub">Потрясите устройство, чтобы перемешать карты, или нажмите кнопку ниже.</div>
-                        </div>
-
-                        <button type="button" className="glass-cta mini-cta" onClick={autoShuffle}>
-                          <span className="glass-cta__inner">
-                            <span className="glass-cta__rim" aria-hidden="true" />
-                            <span className="glass-cta__text">Перемешать автоматически</span>
-                            <span className="glass-cta__spark" aria-hidden="true" />
-                          </span>
-                        </button>
-                      </>
-                    ) : (
-                      <>
-                        <div className="shake__badge is-done">
-                          <div className="shake__title">Переверните карту</div>
-                          <div className="shake__sub">Нажмите на карту — и мы расскажем о её значении.</div>
-                        </div>
-
-                        <button type="button" className="glass-cta mini-cta" disabled>
-                          <span className="glass-cta__inner">
-                            <span className="glass-cta__rim" aria-hidden="true" />
-                            <span className="glass-cta__text">Нажмите на карту</span>
-                            <span className="glass-cta__spark" aria-hidden="true" />
-                          </span>
-                        </button>
-                      </>
-                    )}
-                  </div>
-                )}
+                      <button type="button" className="glass-cta mini-cta" disabled>
+                        <span className="glass-cta__inner">
+                          <span className="glass-cta__rim" aria-hidden="true" />
+                          <span className="glass-cta__text">Идёт раскрытие</span>
+                          <span className="glass-cta__spark" aria-hidden="true" />
+                        </span>
+                      </button>
+                    </>
+                  )}
+                </div>
               </>
             )}
 
@@ -5568,17 +6363,20 @@ useEffect(() => {
                     })}
                   </div>
 
+                  {threeShuffleProgress < 1 && (
+                    <div
+                      className={`cardday-shake-overlay ${threeShuffleStarted ? 'is-hidden' : 'is-visible'}`}
+                      aria-hidden={threeShuffleStarted ? 'true' : 'false'}
+                    >
+                      <div className="cardday-shake-overlay__phone" />
+                      <div className="cardday-shake-overlay__title">Встряхните телефон</div>
+                      <div className="cardday-shake-overlay__sub">Или нажмите кнопку ниже для авто‑перемешивания</div>
+                    </div>
+                  )}
 
                   <div className="bottom-panel bottom-panel--shake">
                     {threeShuffleProgress < 1 ? (
                       <>
-                        <div className="shake__badge">
-                          <div className="shake__title">Потрясите телефон</div>
-                          <div className="shake__sub">
-                            Карты будут перемешиваться при тряске. Можно и автоматически — кнопкой ниже.
-                          </div>
-                        </div>
-
                         {needsMotionPermission && (
                           <button type="button" className="glassbtn" onClick={requestMotion}>
                             Разрешить датчики
@@ -5596,12 +6394,7 @@ useEffect(() => {
                         </button>
                       </>
                     ) : (
-                      <>
-                        <div className="shake__badge is-done">
-                          <div className="shake__title">Открываем карты…</div>
-                          <div className="shake__sub">Сейчас покажем 3 карты и интерпретацию.</div>
-                        </div>
-                      </>
+                      <div className="threehint">Открываем карты…</div>
                     )}
                   </div>
                 </>
@@ -5619,7 +6412,7 @@ useEffect(() => {
                   </div>
 
                   {/* ✅ один большой блок результата со скроллом, как на "Карта дня" */}
-                  <div className="three-result">
+                  <div className={`three-result ${decisionLoading ? 'is-loading' : ''}`.trim()}>
                     {threeLoading ? (
                       <div className="result-loading-standalone">
                         <InterpretationLoader text="Получаем интерпретацию" />
@@ -5757,7 +6550,7 @@ useEffect(() => {
                       ))}
                     </div>
 
-                    <button type="button" className="glass-cta" onClick={beginPpfShuffle}>
+                    <button type="button" className="glass-cta" onClick={() => void beginPpfShuffle()}>
                       <span className="glass-cta__inner">
                         <span className="glass-cta__rim" aria-hidden="true" />
                         <span className="glass-cta__text">Продолжить</span>
@@ -5779,7 +6572,6 @@ useEffect(() => {
                         const placed = ppfPlacedCards[slotIdx]
                         const isTarget = slotIdx === ppfPlacedCount
                         const isOver = ppfDragOverSlot === slotIdx
-                        const cleanName = (placed?.name || '').replace(/\s*\(перевёрнутая\)\s*$/i, '')
                         return (
                           <div
                             key={`${label}-${slotIdx}`}
@@ -5805,7 +6597,6 @@ useEffect(() => {
                               </div>
                             ) : null}
 
-                            {cleanName ? <div className="ppf-drop-slot__name">{cleanName}</div> : null}
                             <div className="ppf-drop-slot__label">{label}</div>
                           </div>
                         )
@@ -5813,23 +6604,41 @@ useEffect(() => {
                     </div>
 
                     {ppfPlacedCount < 3 && (
-                      <div className="ppf-drag-deck" aria-hidden="true">
+                      <div
+                        className={`ppf-drag-deck ${ppfDragging ? 'is-dragging' : ''}`}
+                        aria-hidden="true"
+                        ref={ppfDeckRef}
+                        onPointerDown={onPpfDeckPointerDown}
+                        onPointerMove={onPpfDeckPointerMove}
+                        onPointerUp={onPpfDeckPointerUp}
+                        onPointerCancel={onPpfDeckPointerCancel}
+                        onTouchStart={onPpfDeckTouchStart}
+                        onTouchMove={onPpfDeckTouchMove}
+                        onTouchEnd={onPpfDeckTouchEnd}
+                        onTouchCancel={onPpfDeckTouchCancel}
+                      >
                         <div className="ppf-drag-deck__fan">
                           {Array.from({ length: 7 }).map((_, i) => (
-                            <span key={i} />
+                            <span
+                              key={i}
+                              data-ppf-fan-index={i}
+                              ref={(el) => {
+                                ppfFanCardRefs.current[i] = el
+                              }}
+                              className={ppfDragging && ppfActiveFanIndex === i ? 'is-picked' : ''}
+                            >
+                              <img src={backCardImg} alt="" />
+                            </span>
                           ))}
                         </div>
 
                         <div
+                          ref={ppfDragCardRef}
                           className={`ppf-drag-card-live ${ppfDragging ? 'is-dragging' : ''}`}
                           style={{
                             ['--dx' as any]: `${ppfDragDelta.x}px`,
                             ['--dy' as any]: `${ppfDragDelta.y}px`,
                           }}
-                          onPointerDown={onPpfDeckPointerDown}
-                          onPointerMove={onPpfDeckPointerMove}
-                          onPointerUp={onPpfDeckPointerUp}
-                          onPointerCancel={onPpfDeckPointerCancel}
                         >
                           <img src={backCardImg} alt="" />
                         </div>
@@ -5954,144 +6763,118 @@ useEffect(() => {
             <p>Принятие решения</p>
 
             <div className="threepage">
-              {/* 1) SETUP */}
-              {decisionScreen === 'setup' && (
-                <>
-                  <div className="threecards-row" aria-label="Две карты (рубашка)">
-                    {[0, 1].map((i) => (
-                      <div key={i} className="threecard">
-                        <img src={backCardImg} alt="" />
-                      </div>
-                    ))}
-                  </div>
-
-                  <div className="threeform">
-                    <div className="ask-wrap">
-                      <div className="ask-glass">
-                        <textarea
-                          className="ask-input"
-                          value={decisionQuestion}
-                          onChange={(e) => setDecisionQuestion(e.target.value)}
-                          placeholder="Сформулируйте вопрос и мысленно обозначьте Вариант A и Вариант B…"
-                          enterKeyHint="search"
-                          rows={2}
-                        />
-                      </div>
-                    </div>
-
-                    <div
-                      className={`seg seg--ppf ${decisionFocusIsBumping ? 'is-bump' : ''}`}
-                      data-bump={decisionFocusBump}
-                      style={{
-                        ['--i' as any]: decisionFocusActiveIndex,
-                        ['--from' as any]: decisionFocusPrevIndex,
-                      }}
-                      role="tablist"
-                      aria-label="Фокус"
-                    >
-                      <div className="seg__pill" aria-hidden="true" />
-                      {DECISION_FOCUS.map((k) => (
-                        <button
-                          key={k.id}
-                          type="button"
-                          className={`seg__btn ${decisionFocus === k.id ? 'is-active' : ''}`}
-                          onClick={() => onPickDecisionFocus(k.id)}
-                          role="tab"
-                          aria-selected={decisionFocus === k.id}
-                        >
-                          {k.label}
-                        </button>
-                      ))}
-                    </div>
-
-                    <button type="button" className="glass-cta" onClick={beginDecisionShuffle}>
-                      <span className="glass-cta__inner">
-                        <span className="glass-cta__rim" aria-hidden="true" />
-                        <span className="glass-cta__text">Продолжить</span>
-                        <span className="glass-cta__spark" aria-hidden="true" />
-                      </span>
-                    </button>
-                  </div>
-                </>
-              )}
-
-              {/* 2) SHUFFLE */}
               {decisionScreen === 'shuffle' && (
                 <>
-                  <div
-                    className={`three-mix-area ${decisionShuffleProgress < 1 ? 'is-shuffling' : 'is-done'}`}
-                    aria-label="Перемешивание"
-                  >
-                    {[0, 1].map((cardIdx) => {
-                      const slot = Math.max(0, decisionOrder.indexOf(cardIdx)) // 0..1
-                      const p = DECISION_SLOTS[slot] || DECISION_SLOTS[0]
+                  <div className="decision-drag-board" aria-label="Расклад по вариантам A и B">
+                    <div className="decision-drag-board__slots">
+                      {DECISION_SLOT_LABELS.map((label, slotIdx) => {
+                        const placed = decisionPlacedCards[slotIdx]
+                        const isOver = decisionDragOverSlot === slotIdx
+                        const canDrop = slotIdx === decisionPlacedCount
+                        const isRevealed = Boolean(decisionRevealMap[slotIdx])
+                        const waitingFlip = decisionPlacedCount >= 2 && !!placed && !isRevealed
 
-                      return (
-                        <div
-                          key={cardIdx}
-                          className="three-mix-card"
-                          style={{
-                            ['--x' as any]: `${p.x}px`,
-                            ['--y' as any]: `${p.y}px`,
-                            ['--r' as any]: `${p.r}deg`,
-                            ['--s' as any]: `${p.s}`,
-                            zIndex: p.z,
-                          }}
-                        >
+                        return (
+                          <button
+                            key={`${label}-${slotIdx}`}
+                            ref={(el) => {
+                              decisionSlotRefs.current[slotIdx] = el
+                            }}
+                            type="button"
+                            className={`decision-drop-slot ${canDrop ? 'is-target' : ''} ${isOver ? 'is-over' : ''} ${
+                              placed ? 'is-filled' : ''
+                            } ${waitingFlip ? 'is-awaiting-flip' : ''}`}
+                            onClick={() => onDecisionSlotTap(slotIdx)}
+                            disabled={!placed || isRevealed}
+                          >
+                            {placed ? (
+                              <div className={`decision-drop-card ${isRevealed ? 'is-revealed' : ''} ${waitingFlip ? 'is-waiting-flip' : ''}`}>
+                                <div className="decision-drop-card__face decision-drop-card__face--back">
+                                  <img src={backCardImg} alt="" />
+                                </div>
+                                <div className="decision-drop-card__face decision-drop-card__face--front">
+                                  <img
+                                    className={placed.isReversed ? 'is-reversed' : ''}
+                                    src={placed.url || backCardImg}
+                                    alt={placed.name}
+                                  />
+                                </div>
+                              </div>
+                            ) : null}
+
+                            {waitingFlip ? <div className="decision-finger-hint" aria-hidden="true" /> : null}
+                            <div className="decision-drop-slot__label">{label}</div>
+                          </button>
+                        )
+                      })}
+                    </div>
+
+                    {decisionPlacedCount < 2 && (
+                      <div
+                        className={`decision-drag-deck ${decisionDragging ? 'is-dragging' : ''}`}
+                        ref={decisionDeckRef}
+                        onPointerDown={onDecisionDeckPointerDown}
+                        onPointerMove={onDecisionDeckPointerMove}
+                        onPointerUp={onDecisionDeckPointerUp}
+                        onPointerCancel={onDecisionDeckPointerCancel}
+                        onTouchStart={onDecisionDeckTouchStart}
+                        onTouchMove={onDecisionDeckTouchMove}
+                        onTouchEnd={onDecisionDeckTouchEnd}
+                        onTouchCancel={onDecisionDeckTouchCancel}
+                      >
+                        <div className="decision-drag-deck__fan">
+                          {Array.from({ length: DECISION_FAN_CARDS }).map((_, i) => (
+                            <span
+                              key={i}
+                              data-decision-fan-index={i}
+                              ref={(el) => {
+                                decisionFanCardRefs.current[i] = el
+                              }}
+                              className={`${i === DECISION_TOP_INDEX ? 'is-top' : ''} ${
+                                decisionDragging && decisionActiveFanIndex === i ? 'is-picked' : ''
+                              }`}
+                            >
+                              <img src={backCardImg} alt="" />
+                            </span>
+                          ))}
+                        </div>
+
+                        <div ref={decisionDragCardRef} className={`decision-drag-card-live ${decisionDragging ? 'is-dragging' : ''}`}>
                           <img src={backCardImg} alt="" />
                         </div>
-                      )
-                    })}
+                      </div>
+                    )}
                   </div>
 
                   <div className="bottom-panel bottom-panel--shake">
-                    {decisionShuffleProgress < 1 ? (
+                    {decisionPlacedCount < 2 || !decisionRevealMap.every(Boolean) ? (
                       <>
-                        <div className="shake__badge">
-                          <div className="shake__title">Потрясите телефон</div>
-                          <div className="shake__sub">Карты будут меняться местами при тряске. Можно и автоматически — кнопкой ниже.</div>
-                        </div>
-
-                        {needsMotionPermission && (
-                          <button type="button" className="glassbtn" onClick={requestMotion}>
-                            Разрешить датчики
-                          </button>
+                        {decisionPlacedCount < 2 ? (
+                          <div className="threehint">Выложено: {decisionPlacedCount} из 2</div>
+                        ) : (
+                          <div className="decision-flip-caption">Нажмите на карту, чтобы её перевернуть</div>
                         )}
 
-                        <div className="threehint">Прогресс: {Math.round(decisionShuffleProgress * 100)}%</div>
-
-                        <button type="button" className="glass-cta mini-cta" onClick={autoShuffleDecision}>
-                          <span className="glass-cta__inner">
-                            <span className="glass-cta__rim" aria-hidden="true" />
-                            <span className="glass-cta__text">Перемешать автоматически</span>
-                            <span className="glass-cta__spark" aria-hidden="true" />
-                          </span>
-                        </button>
+                        {decisionPlacedCount < 2 ? (
+                          <button type="button" className="glass-cta mini-cta" onClick={autoShuffleDecision}>
+                            <span className="glass-cta__inner">
+                              <span className="glass-cta__rim" aria-hidden="true" />
+                              <span className="glass-cta__text">Разложить автоматически</span>
+                              <span className="glass-cta__spark" aria-hidden="true" />
+                            </span>
+                          </button>
+                        ) : null}
                       </>
                     ) : (
-                      <>
-                        <div className="shake__badge is-done">
-                          <div className="shake__title">Откройте карты</div>
-                          <div className="shake__sub">Нажмите кнопку ниже — покажем 2 карты и их значения.</div>
-                        </div>
-
-                        <button type="button" className="glass-cta mini-cta" onClick={openDecisionResult}>
-                          <span className="glass-cta__inner">
-                            <span className="glass-cta__rim" aria-hidden="true" />
-                            <span className="glass-cta__text">Открыть карты</span>
-                            <span className="glass-cta__spark" aria-hidden="true" />
-                          </span>
-                        </button>
-                      </>
+                      <div className="threehint">Открываем интерпретацию…</div>
                     )}
                   </div>
                 </>
               )}
 
-              {/* 3) RESULT */}
               {decisionScreen === 'result' && (
                 <>
-                  <div className="threecards-row" aria-label="Две карты (результат)">
+                  <div className="decision-result-row" aria-label="Две карты (результат)">
                     {(decisionCards.length ? decisionCards : []).map((c, i) => (
                       <div key={`${c.idx}-${i}`} className="threecard">
                         <img className={c.isReversed ? 'is-reversed' : ''} src={c.url || backCardImg} alt={c.name} />
@@ -6117,10 +6900,6 @@ useEffect(() => {
                                 <b>Вопрос:</b> {decisionQuestion}
                               </p>
                             ) : null}
-
-                            <p style={{ marginTop: 10, opacity: 0.86 }}>
-                              <b>Фокус:</b> {DECISION_FOCUS.find((x) => x.id === decisionFocus)?.label || '—'}
-                            </p>
 
                             {renderSafetyNotice(decisionQuestion)}
 
@@ -6167,6 +6946,111 @@ useEffect(() => {
           </>
         )}
       </div>
+
+      {currentLegalDoc && (
+        <div
+          className="legal-doc-overlay"
+          role="dialog"
+          aria-modal="true"
+          aria-label={currentLegalDoc.title}
+          onClick={closeLegalDoc}
+        >
+          <div className="legal-doc-card" onClick={(e) => e.stopPropagation()}>
+            <div className="legal-doc-card__head">
+              <div className="legal-doc-card__title">{currentLegalDoc.title}</div>
+              <button
+                type="button"
+                className="legal-doc-card__close"
+                onClick={closeLegalDoc}
+                aria-label="Закрыть документ"
+              >
+                ×
+              </button>
+            </div>
+
+            <div className="legal-doc-card__embed">
+              <iframe
+                src={`${currentLegalDoc.pdf}#toolbar=0&navpanes=0&view=FitH`}
+                title={currentLegalDoc.title}
+                loading="lazy"
+              />
+            </div>
+
+            <div className="legal-doc-card__fallback">
+              <p>{currentLegalDoc.intro}</p>
+              {currentLegalDoc.body.map((line, idx) => (
+                <p key={`${activeLegalDoc}:line:${idx}`}>{line}</p>
+              ))}
+            </div>
+
+            <div className="legal-doc-card__actions">
+              <a
+                href={currentLegalDoc.pdf}
+                target="_blank"
+                rel="noreferrer"
+                className="legal-doc-card__action"
+              >
+                Открыть PDF
+              </a>
+              <button
+                type="button"
+                className="legal-doc-card__action legal-doc-card__action--ghost"
+                onClick={() => openTelegramAndCloseMiniApp(LEGAL_DOC_BOT_DEEPLINK[activeLegalDoc || 'terms'])}
+              >
+                Открыть в боте
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showAccessPaywall && (
+        <div className="paywall-overlay" role="dialog" aria-modal="true" aria-label="Доступ к раскладам">
+          <div className="paywall-card">
+            <div className="paywall-card__title">Бесплатные расклады закончились</div>
+            <div className="paywall-card__text">
+              Подключите подписку, чтобы продолжить пользоваться приложением без ограничений.
+            </div>
+            <div className="paywall-card__meta">
+              В этом месяце: {Math.max(0, Number(billing?.free_left ?? 0))} бесплатных из {Math.max(1, Number(billing?.free_limit ?? 5))}
+            </div>
+
+            <button
+              type="button"
+              className="glass-cta paywall-card__cta"
+              onClick={() => {
+                openTelegramUrl(BOT_PAYMENT_URL)
+              }}
+            >
+              <span className="glass-cta__inner">
+                <span className="glass-cta__rim" aria-hidden="true" />
+                <span className="glass-cta__text">Купить подписку</span>
+                <span className="glass-cta__spark" aria-hidden="true" />
+              </span>
+            </button>
+
+            <button
+              type="button"
+              className="glass-cta paywall-card__cta paywall-card__cta--ghost"
+              onClick={() => {
+                setShowAccessPaywall(false)
+                setView('home')
+                setNavTab('profile')
+              }}
+            >
+              <span className="glass-cta__inner">
+                <span className="glass-cta__rim" aria-hidden="true" />
+                <span className="glass-cta__text">Открыть профиль</span>
+                <span className="glass-cta__spark" aria-hidden="true" />
+              </span>
+            </button>
+
+            <button type="button" className="paywall-card__close" onClick={() => setShowAccessPaywall(false)}>
+              Позже
+            </button>
+          </div>
+        </div>
+      )}
 
       {showKeyboardToolbar && (
         <div

@@ -31,39 +31,41 @@ if ($openai_key === '') {
     json_out(500, ['ok' => false, 'error' => 'missing_openai_key']);
 }
 
-if ($relay_token !== '') {
-    $xrelay = (string)($_SERVER['HTTP_X_RELAY_TOKEN'] ?? '');
-    if ($xrelay !== '' && hash_equals($relay_token, trim($xrelay))) {
-        $auth = 'ok';
-    } else {
-        $auth = '';
-    }
-    if ($auth === '') {
-        $auth = (string)($_SERVER['HTTP_AUTHORIZATION'] ?? ($_SERVER['REDIRECT_HTTP_AUTHORIZATION'] ?? ''));
-    }
-    if ($auth === '' && function_exists('getallheaders')) {
-        $headers = getallheaders();
-        if (is_array($headers)) {
-            foreach ($headers as $k => $v) {
-                if (strtolower((string)$k) === 'authorization') {
-                    $auth = (string)$v;
-                    break;
-                }
-                if (strtolower((string)$k) === 'x-relay-token' && hash_equals($relay_token, trim((string)$v))) {
-                    $auth = 'ok';
-                    break;
-                }
+if ($relay_token === '') {
+    json_out(500, ['ok' => false, 'error' => 'missing_relay_token']);
+}
+
+$xrelay = (string)($_SERVER['HTTP_X_RELAY_TOKEN'] ?? '');
+if ($xrelay !== '' && hash_equals($relay_token, trim($xrelay))) {
+    $auth = 'ok';
+} else {
+    $auth = '';
+}
+if ($auth === '') {
+    $auth = (string)($_SERVER['HTTP_AUTHORIZATION'] ?? ($_SERVER['REDIRECT_HTTP_AUTHORIZATION'] ?? ''));
+}
+if ($auth === '' && function_exists('getallheaders')) {
+    $headers = getallheaders();
+    if (is_array($headers)) {
+        foreach ($headers as $k => $v) {
+            if (strtolower((string)$k) === 'authorization') {
+                $auth = (string)$v;
+                break;
+            }
+            if (strtolower((string)$k) === 'x-relay-token' && hash_equals($relay_token, trim((string)$v))) {
+                $auth = 'ok';
+                break;
             }
         }
     }
-    if ($auth !== 'ok') {
-        if (!preg_match('/^Bearer\\s+(.+)$/i', $auth, $m)) {
-            json_out(401, ['ok' => false, 'error' => 'unauthorized']);
-        }
-        $provided = trim((string)$m[1]);
-        if ($provided === '' || !hash_equals($relay_token, $provided)) {
-            json_out(401, ['ok' => false, 'error' => 'unauthorized']);
-        }
+}
+if ($auth !== 'ok') {
+    if (!preg_match('/^Bearer\\s+(.+)$/i', $auth, $m)) {
+        json_out(401, ['ok' => false, 'error' => 'unauthorized']);
+    }
+    $provided = trim((string)$m[1]);
+    if ($provided === '' || !hash_equals($relay_token, $provided)) {
+        json_out(401, ['ok' => false, 'error' => 'unauthorized']);
     }
 }
 

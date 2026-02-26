@@ -10,11 +10,27 @@ import os
 import secrets
 import time
 from datetime import datetime, timedelta, timezone
-from typing import Dict, Any, List, Optional
+from html import escape
+from io import BytesIO
+from types import SimpleNamespace
+from typing import Dict, Any, List, Optional, Set
 from urllib.parse import urlencode
 
 import asyncpg
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, LabeledPrice, Update, WebAppInfo
+from sqlalchemy import select
+from telegram import (
+    Bot,
+    BotCommand,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    InputFile,
+    KeyboardButton,
+    LabeledPrice,
+    MenuButtonWebApp,
+    ReplyKeyboardMarkup,
+    Update,
+    WebAppInfo,
+)
 from telegram.constants import ParseMode
 from telegram.error import BadRequest
 from telegram.ext import (
@@ -27,6 +43,11 @@ from telegram.ext import (
     filters,
 )
 from dotenv import load_dotenv
+from db import SessionLocal
+from features.common.flags import FEATURE_FLAGS
+from features.support_tickets import repository as support_ticket_repository
+from features.support_tickets import service as support_ticket_service
+from models import SupportTicket, User
 
 load_dotenv()
 
@@ -54,6 +75,8 @@ SBP_BOT_LINK_SECRET = (
     or os.environ.get("YOOKASSA_WEBHOOK_TOKEN")
     or ""
 ).strip()
+SBP_AUTOPAY_ENABLED = str(os.environ.get("SBP_AUTOPAY_ENABLED", "1")).strip().lower() not in {"0", "false", "no"}
+SBP_AUTOPAY_PLAN_KEY = (os.environ.get("SBP_AUTOPAY_PLAN_CODE") or "sub_month").strip().lower()
 
 APP_URL_RAW = (os.environ.get("TELEGRAM_APP_URL") or "").strip()  # например https://tarrotai.ru
 APP_BUTTON_TEXT = os.environ.get("TELEGRAM_APP_BUTTON_TEXT") or "Открыть приложение"
@@ -71,6 +94,37 @@ CLICK_SUB_2WEEKS_AMOUNT = max(0, int(os.environ.get("CLICK_SUB_2WEEKS_AMOUNT", "
 CLICK_SUB_MONTH_AMOUNT = max(0, int(os.environ.get("CLICK_SUB_MONTH_AMOUNT", "0")))
 CLICK_SUB_2WEEKS_LABEL = (os.environ.get("CLICK_SUB_2WEEKS_LABEL") or "🇺🇿 CLICK — 2 недели").strip()
 CLICK_SUB_MONTH_LABEL = (os.environ.get("CLICK_SUB_MONTH_LABEL") or "🇺🇿 CLICK — месяц").strip()
+BOT_PUBLIC_USERNAME = (os.environ.get("TELEGRAM_BOT_USERNAME") or "Ttaarrroobot").strip().lstrip("@")
+_SUPPORT_CHAT_RAW = (os.environ.get("SUPPORT_INBOX_CHAT_ID") or "").strip()
+SUPPORT_INBOX_CHAT_ID = int(_SUPPORT_CHAT_RAW) if _SUPPORT_CHAT_RAW.lstrip("-").isdigit() else None
+SUPPORT_INBOX_BOT_TOKEN = (os.environ.get("SUPPORT_INBOX_BOT_TOKEN") or "").strip()
+SUPPORT_ADMIN_IDS: Set[int] = {
+    int(x.strip())
+    for x in str(os.environ.get("SUPPORT_ADMIN_IDS") or "").split(",")
+    if x.strip().lstrip("-").isdigit()
+}
+if SUPPORT_INBOX_CHAT_ID is None and SUPPORT_ADMIN_IDS:
+    SUPPORT_INBOX_CHAT_ID = sorted(SUPPORT_ADMIN_IDS)[0]
+START_ONBOARDING_TEXT = (
+    os.environ.get("TELEGRAM_START_ONBOARDING_TEXT")
+    or (
+        "👋 <b>Добро пожаловать в AI Taro</b>\n\n"
+        "Нажмите <b>«🚀 Открыть AI Taro»</b> ниже.\n\n"
+        "Мини‑приложение откроется сразу, без дополнительных команд.\n\n"
+        "Открывая приложение, вы принимаете Пользовательское соглашение и Политику конфиденциальности."
+    )
+).strip()
+BOT_SHORT_DESCRIPTION = (
+    os.environ.get("TELEGRAM_BOT_SHORT_DESCRIPTION")
+    or "Нажмите Start, затем «Открыть AI Taro»."
+).strip()
+BOT_DESCRIPTION = (
+    os.environ.get("TELEGRAM_BOT_DESCRIPTION")
+    or (
+        "AI Taro — мини‑приложение с раскладами и AI‑интерпретацией.\n"
+        "Чтобы начать, нажмите Start, затем кнопку «Открыть AI Taro»."
+    )
+).strip()
 
 # ----- Тарифы -----
 # amount — в копейках (RUB * 100)
@@ -160,10 +214,25 @@ PLAN_TITLES = {
     "sub_2weeks": "2 недели",
     "sub_month": "Месяц",
 }
+TERMS_PLACEHOLDER_TEXT = (
+    "Пользовательское соглашение AI Taro (черновик)\n\n"
+    "Этот документ временный и будет заменен на финальную юридическую версию.\n"
+    "Используя сервис, пользователь соглашается с правилами использования."
+)
+PRIVACY_PLACEHOLDER_TEXT = (
+    "Политика конфиденциальности AI Taro (черновик)\n\n"
+    "Этот документ временный и будет заменен на финальную юридическую версию.\n"
+    "Сервис обрабатывает данные Telegram-профиля и пользовательские запросы для работы приложения."
+)
 
 # Простое хранилище заказов в памяти (для валидации precheckout и подтверждения оплаты)
 # В проде лучше хранить в БД, но ты просил “без server.py”.
 ORDERS: Dict[str, Dict[str, Any]] = {}
+_BOT_UI_CONFIGURED = False
+SUPPORT_PENDING_USERS: Set[int] = set()
+SUPPORT_PENDING_TICKET_BY_USER: Dict[int, str] = {}
+SUPPORT_ACTIVE_TICKET_BY_USER: Dict[int, str] = {}
+SUPPORT_TICKETS: Dict[str, Dict[str, Any]] = {}
 
 
 def _get_product(code: str) -> Optional[Dict[str, Any]]:
@@ -219,6 +288,29 @@ def _build_sbp_payment_link(*, tg_user_id: int, plan_key: str) -> Optional[str]:
         }
     )
     return f"{API_PUBLIC_BASE}/billing/sbp/bot-link?{query}"
+
+
+def _build_sbp_autopay_link(*, tg_user_id: int, plan_key: str) -> Optional[str]:
+    if not API_PUBLIC_BASE or not SBP_BOT_LINK_SECRET:
+        return None
+    if not SBP_AUTOPAY_ENABLED:
+        return None
+    exp = int(time.time()) + (15 * 60)
+    payload = f"{int(tg_user_id)}:{str(plan_key).strip().lower()}:autopay:{exp}"
+    sig = hmac.new(
+        SBP_BOT_LINK_SECRET.encode("utf-8"),
+        payload.encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
+    query = urlencode(
+        {
+            "tg_user_id": int(tg_user_id),
+            "plan_code": str(plan_key).strip().lower(),
+            "exp": exp,
+            "sig": sig,
+        }
+    )
+    return f"{API_PUBLIC_BASE}/billing/sbp/autopay/bot-link?{query}"
 
 
 def _products_for_mode(mode: str = "menu") -> List[Dict[str, Any]]:
@@ -306,7 +398,7 @@ def _format_plan_list() -> str:
     parts: List[str] = [
         "<b>Тарифы AI Tarot</b>",
         "Шаг 1 из 2: выберите план в рублях/сумах.",
-        "После выбора плана покажу способы оплаты: СБП, CLICK, по карте.",
+        "После выбора плана покажу способы оплаты: СБП, СБП автоплатёж, CLICK, по карте.",
         "",
     ]
     for plan_key in _available_plan_keys():
@@ -324,6 +416,15 @@ def _method_keyboard(plan_key: str) -> InlineKeyboardMarkup:
 
     if card_product:
         rows.append([InlineKeyboardButton(f"🟢 СБП — {_format_amount_label(card_product)}", callback_data=f"sbp:{plan_key}")])
+    if card_product and SBP_AUTOPAY_ENABLED and str(plan_key) == SBP_AUTOPAY_PLAN_KEY:
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    f"🔁 СБП автоплатёж — {_format_amount_label(card_product)}",
+                    callback_data=f"sbp_auto:{plan_key}",
+                )
+            ]
+        )
     if click_product:
         rows.append(
             [
@@ -349,12 +450,19 @@ def _method_keyboard(plan_key: str) -> InlineKeyboardMarkup:
 
 def _format_methods_text(plan_key: str) -> str:
     title = PLAN_TITLES.get(plan_key, plan_key)
+    methods: List[str] = ["• СБП"]
+    if SBP_AUTOPAY_ENABLED and str(plan_key) == SBP_AUTOPAY_PLAN_KEY:
+        methods.append("• СБП автоплатёж (ежемесячно)")
+    methods.extend(
+        [
+            "• CLICK",
+            "• По карте / SberPay",
+        ]
+    )
     return (
         f"<b>{title}</b>\n"
         f"Шаг 2 из 2: выберите способ оплаты.\n\n"
-        f"• СБП\n"
-        f"• CLICK\n"
-        f"• По карте / SberPay"
+        + "\n".join(methods)
     )
 
 
@@ -403,7 +511,24 @@ def _price_keyboard(mode: str = "menu") -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(rows)
 
 
-def _build_app_button() -> Optional[InlineKeyboardButton]:
+def _app_webapp_url() -> Optional[str]:
+    raw = str(APP_URL_RAW or "").strip()
+    if raw.startswith("https://") and not raw.startswith("https://t.me/"):
+        return raw
+    return None
+
+
+def _bot_deeplink(mode: str) -> Optional[str]:
+    username = str(BOT_PUBLIC_USERNAME or "").strip().lstrip("@")
+    payload = str(mode or "").strip()
+    if not username:
+        return None
+    if payload:
+        return f"https://t.me/{username}?start={payload}"
+    return f"https://t.me/{username}"
+
+
+def _build_app_button(custom_text: Optional[str] = None) -> Optional[InlineKeyboardButton]:
     """
     Кнопка открытия Mini App.
     Если https-домен (добавлен в BotFather Web App) → web_app кнопка.
@@ -414,14 +539,536 @@ def _build_app_button() -> Optional[InlineKeyboardButton]:
 
     url = APP_URL_RAW
 
+    text = str(custom_text or APP_BUTTON_TEXT).strip() or APP_BUTTON_TEXT
     if url.startswith("https://t.me/"):
-        return InlineKeyboardButton(APP_BUTTON_TEXT, url=url)
+        return InlineKeyboardButton(text, url=url)
 
     if url.startswith("https://"):
-        return InlineKeyboardButton(APP_BUTTON_TEXT, web_app=WebAppInfo(url=url))
+        return InlineKeyboardButton(text, web_app=WebAppInfo(url=url))
 
     logger.warning("TELEGRAM_APP_URL is invalid (%s), skipping WebApp button", url)
     return None
+
+
+def _welcome_keyboard() -> InlineKeyboardMarkup:
+    rows: List[List[InlineKeyboardButton]] = []
+    app_btn = _build_app_button("🚀 Открыть AI Taro")
+    if app_btn:
+        rows.append([app_btn])
+    rows.append(
+        [
+            InlineKeyboardButton("💳 Тарифы и оплата", callback_data="menu"),
+            InlineKeyboardButton("💬 Поддержка", callback_data="support"),
+        ]
+    )
+    rows.append(
+        [
+            InlineKeyboardButton("📄 Соглашение", callback_data="doc:terms"),
+            InlineKeyboardButton("🔐 Политика", callback_data="doc:privacy"),
+        ]
+    )
+    rows.append([InlineKeyboardButton("ℹ️ Как начать", callback_data="howto")])
+    return InlineKeyboardMarkup(rows)
+
+
+def _quick_reply_keyboard() -> Optional[ReplyKeyboardMarkup]:
+    rows: List[List[KeyboardButton]] = []
+    webapp_url = _app_webapp_url()
+
+    if webapp_url:
+        rows.append([KeyboardButton("🚀 Открыть AI Taro", web_app=WebAppInfo(url=webapp_url))])
+    elif APP_URL_RAW:
+        rows.append([KeyboardButton("🚀 Открыть AI Taro")])
+
+    rows.append([KeyboardButton("💳 Тарифы и оплата"), KeyboardButton("💬 Поддержка")])
+    rows.append([KeyboardButton("📄 Соглашение"), KeyboardButton("🔐 Политика")])
+    rows.append([KeyboardButton("ℹ️ Как начать")])
+    return ReplyKeyboardMarkup(
+        rows,
+        resize_keyboard=True,
+        one_time_keyboard=False,
+        is_persistent=True,
+        input_field_placeholder="Выберите действие",
+    )
+
+
+def _howto_text() -> str:
+    return (
+        "<b>Как быстро начать</b>\n\n"
+        "1) Нажмите <b>🚀 Открыть AI Taro</b>\n"
+        "2) Разрешите открытие мини‑приложения в Telegram\n"
+        "3) Задайте вопрос и выберите расклад\n\n"
+        "💡 Оплату можно открыть кнопкой <b>«Тарифы и оплата»</b>.\n"
+        "💬 Поддержка: <b>/support</b>\n"
+        "📄 Соглашение: <b>/terms</b>\n"
+        "🔐 Политика: <b>/privacy</b>"
+    )
+
+
+def _subscription_manage_text() -> str:
+    return (
+        "<b>Управление подпиской</b>\n\n"
+        "Выберите действие:\n"
+        "• подключить/настроить СБП автоплатёж;\n"
+        "• запросить отмену подписки через поддержку;\n"
+        "• перейти к тарифам и оплате."
+    )
+
+
+def _subscription_manage_keyboard() -> InlineKeyboardMarkup:
+    rows: List[List[InlineKeyboardButton]] = []
+    if SBP_AUTOPAY_ENABLED:
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    "🔁 СБП автоплатёж",
+                    callback_data=f"sbp_auto:{SBP_AUTOPAY_PLAN_KEY}",
+                )
+            ]
+        )
+    rows.append([InlineKeyboardButton("🛑 Как отменить подписку", callback_data="sub_cancel")])
+    rows.append([InlineKeyboardButton("💳 Тарифы и оплата", callback_data="menu")])
+    return InlineKeyboardMarkup(rows)
+
+
+def _subscription_cancel_text() -> str:
+    return (
+        "🛑 <b>Отмена подписки</b>\n\n"
+        "Чтобы отменить подписку, напишите в поддержку одним сообщением:\n"
+        "например, «Прошу отменить подписку».\n\n"
+        "Ответ придёт сюда же, в этот чат."
+    )
+
+
+def _subscription_cancel_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [
+            [InlineKeyboardButton("💬 Написать в поддержку", callback_data="support")],
+            [InlineKeyboardButton("⬅️ Назад к управлению подпиской", callback_data="sub_manage")],
+        ]
+    )
+
+
+async def _send_legal_document(
+    *,
+    chat_id: int,
+    context: ContextTypes.DEFAULT_TYPE,
+    kind: str,
+) -> None:
+    kind_l = str(kind or "").strip().lower()
+    if kind_l == "privacy":
+        filename = "ai_taro_privacy_policy_draft.txt"
+        caption = "🔐 Политика конфиденциальности (черновик)"
+        text = PRIVACY_PLACEHOLDER_TEXT
+    else:
+        filename = "ai_taro_user_agreement_draft.txt"
+        caption = "📄 Пользовательское соглашение (черновик)"
+        text = TERMS_PLACEHOLDER_TEXT
+
+    content = BytesIO(text.encode("utf-8"))
+    content.name = filename
+    await context.bot.send_document(
+        chat_id=chat_id,
+        document=InputFile(content, filename=filename),
+        caption=f"{caption}\nФинальную версию заменим позже без изменения кнопок.",
+    )
+
+
+def _support_target_enabled() -> bool:
+    return bool(SUPPORT_INBOX_CHAT_ID)
+
+
+def _is_support_operator(update: Update) -> bool:
+    user_id = int(getattr(update.effective_user, "id", 0) or 0)
+    if user_id <= 0:
+        return False
+    if SUPPORT_ADMIN_IDS and user_id in SUPPORT_ADMIN_IDS:
+        return True
+    return False
+
+
+def _build_support_ticket_id(user_id: int) -> str:
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+    rnd = secrets.token_hex(2).upper()
+    return f"SUP-{stamp}-{int(user_id)}-{rnd}"
+
+
+def _support_user_reply_markup(ticket_id: Optional[str] = None) -> InlineKeyboardMarkup:
+    safe_ticket = str(ticket_id or "").strip()
+    support_cb = f"support:{safe_ticket}" if safe_ticket else "support"
+    close_cb = f"support_close:{safe_ticket}" if safe_ticket else "support_close"
+    return InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton("💬 Ответить", callback_data=support_cb),
+                InlineKeyboardButton("✅ Закрыть диалог", callback_data=close_cb),
+            ]
+        ]
+    )
+
+
+def _support_inbox_reply_markup(*, ticket_id: str, user_id: int) -> InlineKeyboardMarkup:
+    safe_ticket = str(ticket_id or "").strip()
+    return InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton(
+                    "💬 Ответить пользователю",
+                    callback_data=f"support_reply:{safe_ticket}:{int(user_id)}",
+                ),
+                InlineKeyboardButton(
+                    "✅ Закрыть тикет",
+                    callback_data=f"support_close:{safe_ticket}:{int(user_id)}",
+                ),
+            ]
+        ]
+    )
+
+
+def _sync_ticket_runtime_state(
+    *,
+    ticket_id: str,
+    user_id: int,
+    source_chat_id: int,
+    status: str,
+    messages_count: int,
+    inbox_message_id: Optional[int],
+) -> Dict[str, Any]:
+    now_ts = int(time.time())
+    state = SUPPORT_TICKETS.get(ticket_id) or {
+        "ticket_id": ticket_id,
+        "user_id": int(user_id),
+        "source_chat_id": int(source_chat_id),
+        "status": str(status or "open"),
+        "created_at": now_ts,
+        "last_message_at": now_ts,
+        "messages": int(messages_count),
+        "inbox_message_id": inbox_message_id,
+    }
+    state["status"] = str(status or state.get("status") or "open")
+    state["last_message_at"] = now_ts
+    state["messages"] = int(max(0, int(messages_count)))
+    if inbox_message_id and not state.get("inbox_message_id"):
+        state["inbox_message_id"] = int(inbox_message_id)
+    SUPPORT_TICKETS[ticket_id] = state
+    if user_id > 0:
+        SUPPORT_ACTIVE_TICKET_BY_USER[int(user_id)] = ticket_id
+    return state
+
+
+async def _ensure_support_user(db, from_user) -> User:
+    tg_user_id = int(getattr(from_user, "id", 0) or 0)
+    q = await db.execute(select(User).where(User.telegram_id == tg_user_id))
+    row = q.scalar_one_or_none()
+    if row:
+        return row
+    row = User(
+        telegram_id=tg_user_id,
+        username=(str(getattr(from_user, "username", "") or "").strip() or None),
+        first_name=(str(getattr(from_user, "first_name", "") or "").strip() or None),
+        last_name=(str(getattr(from_user, "last_name", "") or "").strip() or None),
+    )
+    db.add(row)
+    await db.flush()
+    return row
+
+
+async def _persist_support_user_message(
+    *,
+    from_user,
+    source_chat_id: int,
+    message_text: str,
+    ticket_id: Optional[str],
+    telegram_message_id: Optional[int],
+) -> Optional[Dict[str, Any]]:
+    if not FEATURE_FLAGS.tickets_v2:
+        return None
+
+    tg_user_id = int(getattr(from_user, "id", 0) or 0)
+    if tg_user_id <= 0:
+        return None
+
+    preferred_ticket = str(ticket_id or "").strip().upper() or None
+
+    async with SessionLocal() as db:
+        try:
+            user_row = await _ensure_support_user(db, from_user)
+            ticket_row, _ = await support_ticket_service.get_or_create_open_ticket(
+                db,
+                user_id=int(user_row.id),
+                telegram_user_id=tg_user_id,
+                source_chat_id=int(source_chat_id),
+                preferred_ticket_id=preferred_ticket,
+                support_chat_id=SUPPORT_INBOX_CHAT_ID,
+            )
+
+            await support_ticket_service.register_user_message(
+                db,
+                ticket=ticket_row,
+                text=str(message_text or ""),
+                sender_telegram_id=tg_user_id,
+                telegram_chat_id=int(source_chat_id),
+                telegram_message_id=(int(telegram_message_id) if telegram_message_id else None),
+            )
+            if SUPPORT_INBOX_CHAT_ID and not ticket_row.support_chat_id:
+                ticket_row.support_chat_id = int(SUPPORT_INBOX_CHAT_ID)
+
+            msg_count = await support_ticket_repository.count_messages(db, ticket_pk=int(ticket_row.id))
+            await db.commit()
+
+            return {
+                "ticket_id": str(ticket_row.ticket_id or "").strip().upper(),
+                "status": str(ticket_row.status or "open"),
+                "messages_count": int(msg_count),
+                "inbox_message_id": int(getattr(ticket_row, "support_inbox_message_id", 0) or 0) or None,
+            }
+        except Exception as exc:
+            await db.rollback()
+            logger.warning("Support message DB persistence failed for user %s: %s", tg_user_id, exc)
+            return None
+
+
+async def _store_support_inbox_anchor(ticket_id: str, inbox_message_id: int) -> None:
+    if not FEATURE_FLAGS.tickets_v2:
+        return
+    safe_ticket = str(ticket_id or "").strip().upper()
+    if not safe_ticket or int(inbox_message_id or 0) <= 0:
+        return
+    async with SessionLocal() as db:
+        try:
+            row = await support_ticket_repository.get_ticket_by_public_id(db, safe_ticket)
+            if not row:
+                return
+            if hasattr(row, "support_inbox_message_id") and not int(getattr(row, "support_inbox_message_id", 0) or 0):
+                setattr(row, "support_inbox_message_id", int(inbox_message_id))
+            if SUPPORT_INBOX_CHAT_ID and not row.support_chat_id:
+                row.support_chat_id = int(SUPPORT_INBOX_CHAT_ID)
+            await db.commit()
+        except Exception as exc:
+            await db.rollback()
+            logger.warning("Failed to store support inbox anchor ticket=%s: %s", safe_ticket, exc)
+
+
+async def _mark_support_ticket_closed(
+    *,
+    ticket_id: str,
+    actor_telegram_id: int,
+    actor_chat_id: int,
+) -> bool:
+    if not FEATURE_FLAGS.tickets_v2:
+        return False
+    safe_ticket = str(ticket_id or "").strip().upper()
+    if not safe_ticket:
+        return False
+    async with SessionLocal() as db:
+        try:
+            row = await support_ticket_repository.get_ticket_by_public_id(db, safe_ticket)
+            if not row:
+                return False
+            row.status = "closed"
+            row.closed_at = datetime.now(timezone.utc)
+            row.updated_at = datetime.now(timezone.utc)
+            await support_ticket_repository.add_message(
+                db,
+                ticket=row,
+                direction="system",
+                text="Тикет закрыт пользователем.",
+                sender_telegram_id=int(actor_telegram_id) if actor_telegram_id else None,
+                telegram_chat_id=int(actor_chat_id) if actor_chat_id else None,
+            )
+            await db.commit()
+            return True
+        except Exception as exc:
+            await db.rollback()
+            logger.warning("Failed to close support ticket ticket=%s: %s", safe_ticket, exc)
+            return False
+
+
+async def _forward_support_to_inbox(
+    *,
+    context: ContextTypes.DEFAULT_TYPE,
+    from_user,
+    source_chat_id: int,
+    message_text: str,
+    ticket_id: Optional[str] = None,
+    source_message_id: Optional[int] = None,
+) -> Dict[str, Any]:
+    target_chat_id = SUPPORT_INBOX_CHAT_ID
+    if not target_chat_id:
+        return {"ok": False, "ticket_id": "", "is_new": False}
+
+    user_id = int(getattr(from_user, "id", 0) or 0)
+    username = str(getattr(from_user, "username", "") or "").strip()
+    first_name = str(getattr(from_user, "first_name", "") or "").strip()
+    last_name = str(getattr(from_user, "last_name", "") or "").strip()
+    user_name_line = f"{first_name} {last_name}".strip() or "без имени"
+    profile_link = f'<a href="tg://user?id={user_id}">профиль</a>' if user_id > 0 else "профиль недоступен"
+    safe_text = escape(str(message_text or "").strip())
+    safe_username = escape(f"@{username}" if username else "—")
+    safe_name = escape(user_name_line)
+
+    preferred_ticket = str(ticket_id or SUPPORT_ACTIVE_TICKET_BY_USER.get(user_id) or "").strip().upper()
+    ticket_state = SUPPORT_TICKETS.get(preferred_ticket) if preferred_ticket else None
+
+    persisted = await _persist_support_user_message(
+        from_user=from_user,
+        source_chat_id=int(source_chat_id),
+        message_text=message_text,
+        ticket_id=preferred_ticket or None,
+        telegram_message_id=source_message_id,
+    )
+    used_persisted = persisted is not None
+    if persisted:
+        ticket_id = str(persisted.get("ticket_id") or "").strip().upper()
+        ticket_state = _sync_ticket_runtime_state(
+            ticket_id=ticket_id,
+            user_id=user_id,
+            source_chat_id=int(source_chat_id),
+            status=str(persisted.get("status") or "open"),
+            messages_count=int(persisted.get("messages_count") or 0),
+            inbox_message_id=(int(persisted.get("inbox_message_id") or 0) or None),
+        )
+    else:
+        ticket_id = preferred_ticket
+        if not ticket_state:
+            ticket_id = _build_support_ticket_id(user_id)
+            ticket_state = _sync_ticket_runtime_state(
+                ticket_id=ticket_id,
+                user_id=user_id,
+                source_chat_id=int(source_chat_id),
+                status="open",
+                messages_count=0,
+                inbox_message_id=None,
+            )
+        else:
+            ticket_state = _sync_ticket_runtime_state(
+                ticket_id=ticket_id,
+                user_id=user_id,
+                source_chat_id=int(source_chat_id),
+                status="open",
+                messages_count=int(ticket_state.get("messages") or 0),
+                inbox_message_id=(int(ticket_state.get("inbox_message_id") or 0) or None),
+            )
+
+    safe_ticket = escape(str(ticket_id or ""))
+    is_new_ticket = int(ticket_state.get("messages") or 0) <= 1
+    if is_new_ticket:
+        support_payload = (
+            "📩 <b>Новый запрос в поддержку</b>\n"
+            f"Тикет: <code>{safe_ticket}</code>\n"
+            f"ID: <code>{user_id}</code>\n"
+            f"Пользователь: {safe_name}\n"
+            f"Username: {safe_username}\n"
+            f"Чат: <code>{source_chat_id}</code>\n"
+            f"Ссылка: {profile_link}\n\n"
+            f"<b>Сообщение:</b>\n{safe_text}\n\n"
+            "Нажмите кнопку ниже, чтобы ответить в один шаг.\n"
+            f"Резерв: <code>/reply {user_id} ваш_текст</code>"
+        )
+    else:
+        support_payload = (
+            "📨 <b>Новое сообщение в тикете</b>\n"
+            f"Тикет: <code>{safe_ticket}</code>\n"
+            f"ID: <code>{user_id}</code>\n"
+            f"Пользователь: {safe_name}\n\n"
+            f"<b>Сообщение:</b>\n{safe_text}"
+        )
+
+    reply_markup = _support_inbox_reply_markup(ticket_id=ticket_id, user_id=user_id)
+    reply_to_message_id = int(ticket_state.get("inbox_message_id") or 0) or None
+    sent_message = None
+
+    if SUPPORT_INBOX_BOT_TOKEN:
+        try:
+            inbox_bot = Bot(token=SUPPORT_INBOX_BOT_TOKEN)
+            sent_message = await inbox_bot.send_message(
+                chat_id=target_chat_id,
+                text=support_payload,
+                parse_mode=ParseMode.HTML,
+                disable_web_page_preview=True,
+                reply_markup=reply_markup,
+                reply_to_message_id=reply_to_message_id,
+                allow_sending_without_reply=True,
+            )
+        except Exception as exc:
+            logger.warning("Support forward via SUPPORT_INBOX_BOT_TOKEN failed, fallback to main bot: %s", exc)
+
+    if not sent_message:
+        try:
+            sent_message = await context.bot.send_message(
+                chat_id=target_chat_id,
+                text=support_payload,
+                parse_mode=ParseMode.HTML,
+                disable_web_page_preview=True,
+                reply_markup=reply_markup,
+                reply_to_message_id=reply_to_message_id,
+                allow_sending_without_reply=True,
+            )
+        except Exception as exc:
+            logger.warning("Support forward failed: %s", exc)
+            return {"ok": False, "ticket_id": ticket_id, "is_new": is_new_ticket}
+
+    just_set_anchor = False
+    if not ticket_state.get("inbox_message_id"):
+        ticket_state["inbox_message_id"] = int(getattr(sent_message, "message_id", 0) or 0) or None
+        just_set_anchor = bool(ticket_state.get("inbox_message_id"))
+    if not used_persisted:
+        ticket_state["messages"] = int(ticket_state.get("messages") or 0) + 1
+    SUPPORT_TICKETS[ticket_id] = ticket_state
+    if user_id > 0:
+        SUPPORT_ACTIVE_TICKET_BY_USER[user_id] = ticket_id
+    if just_set_anchor:
+        await _store_support_inbox_anchor(ticket_id, int(ticket_state.get("inbox_message_id") or 0))
+    return {"ok": True, "ticket_id": ticket_id, "is_new": is_new_ticket}
+
+
+async def _ensure_bot_ui(context: ContextTypes.DEFAULT_TYPE) -> None:
+    global _BOT_UI_CONFIGURED
+    if _BOT_UI_CONFIGURED:
+        return
+    try:
+        await context.bot.set_my_commands(
+            [
+                BotCommand("start", "Запустить AI Taro"),
+                BotCommand("menu", "Тарифы и оплата"),
+                BotCommand("help", "Как начать"),
+                BotCommand("support", "Написать в поддержку"),
+                BotCommand("terms", "Пользовательское соглашение"),
+                BotCommand("privacy", "Политика конфиденциальности"),
+            ]
+        )
+        await context.bot.set_my_short_description(BOT_SHORT_DESCRIPTION)
+        await context.bot.set_my_description(BOT_DESCRIPTION)
+        webapp_url = _app_webapp_url()
+        if webapp_url:
+            await context.bot.set_chat_menu_button(
+                menu_button=MenuButtonWebApp(text="Открыть AI Taro", web_app=WebAppInfo(url=webapp_url))
+            )
+        _BOT_UI_CONFIGURED = True
+    except Exception as exc:
+        logger.warning("Failed to configure bot commands/menu button: %s", exc)
+
+
+async def configure_bot_ui_at_startup(application: Application) -> None:
+    # Configure menu/commands once at process boot so first-time users see hints immediately.
+    await _ensure_bot_ui(SimpleNamespace(bot=application.bot))
+
+
+async def _send_start_panel(chat_id: int, context: ContextTypes.DEFAULT_TYPE) -> None:
+    await context.bot.send_message(
+        chat_id=chat_id,
+        text=START_ONBOARDING_TEXT,
+        parse_mode=ParseMode.HTML,
+        reply_markup=_welcome_keyboard(),
+    )
+    quick_kb = _quick_reply_keyboard()
+    if quick_kb:
+        await context.bot.send_message(
+            chat_id=chat_id,
+            text="👇 Нажмите синюю кнопку <b>«Открыть AI Taro»</b> внизу, чтобы сразу перейти в приложение.",
+            parse_mode=ParseMode.HTML,
+            reply_markup=quick_kb,
+        )
 
 
 def _to_utc(dt: Optional[datetime]) -> Optional[datetime]:
@@ -627,8 +1274,145 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
 
     logger.info("start: tg_user=%s bot_version=%s", getattr(update.effective_user, "id", None), BOT_VERSION)
-    mode = str((context.args or ["menu"])[0] or "menu").strip().lower()
-    await _send_menu(update.effective_chat.id, context, include_app_link=True, mode=mode)
+    mode = str((context.args or [""])[0] or "").strip().lower()
+    await _ensure_bot_ui(context)
+
+    if mode in {"menu", "buy", "buy_credits", "credits"}:
+        await _send_menu(update.effective_chat.id, context, include_app_link=False, mode="menu")
+        return
+    if mode in {"card", "cards", "sberpay", "card_sberpay", "click", "uz", "uzbekistan"}:
+        await _send_menu(update.effective_chat.id, context, include_app_link=False, mode=mode)
+        return
+    if mode in {"support", "help_support"}:
+        support_uid = int(getattr(update.effective_user, "id", 0) or 0)
+        SUPPORT_PENDING_USERS.add(support_uid)
+        SUPPORT_PENDING_TICKET_BY_USER.pop(support_uid, None)
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text=(
+                "💬 Поддержка AI Taro\n\n"
+                "Напишите одним сообщением, с чем нужна помощь. "
+                "Мы отправим это в поддержку.\n\n"
+                "Для отмены напишите: отмена"
+            ),
+        )
+        return
+    if mode in {"sub_manage", "manage_sub", "subscription_manage"}:
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text=_subscription_manage_text(),
+            parse_mode=ParseMode.HTML,
+            reply_markup=_subscription_manage_keyboard(),
+        )
+        return
+    if mode in {"sub_cancel", "cancel_sub", "unsubscribe"}:
+        support_uid = int(getattr(update.effective_user, "id", 0) or 0)
+        SUPPORT_PENDING_USERS.add(support_uid)
+        SUPPORT_PENDING_TICKET_BY_USER.pop(support_uid, None)
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text=_subscription_cancel_text(),
+            parse_mode=ParseMode.HTML,
+            reply_markup=_subscription_cancel_keyboard(),
+        )
+        return
+    if mode in {"terms", "agreement", "user_agreement"}:
+        await _send_legal_document(chat_id=update.effective_chat.id, context=context, kind="terms")
+        return
+    if mode in {"privacy", "policy"}:
+        await _send_legal_document(chat_id=update.effective_chat.id, context=context, kind="privacy")
+        return
+
+    await _send_start_panel(update.effective_chat.id, context)
+
+
+async def menu_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not update.effective_chat:
+        return
+    await _ensure_bot_ui(context)
+    await _send_menu(update.effective_chat.id, context, include_app_link=False, mode="menu")
+
+
+async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not update.effective_chat:
+        return
+    await _ensure_bot_ui(context)
+    await context.bot.send_message(
+        chat_id=update.effective_chat.id,
+        text=_howto_text(),
+        parse_mode=ParseMode.HTML,
+        reply_markup=_welcome_keyboard(),
+    )
+
+
+async def support_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not update.effective_chat:
+        return
+    await _ensure_bot_ui(context)
+    user_id = int(getattr(update.effective_user, "id", 0) or 0)
+    if user_id > 0:
+        SUPPORT_PENDING_USERS.add(user_id)
+        SUPPORT_PENDING_TICKET_BY_USER.pop(user_id, None)
+    await context.bot.send_message(
+        chat_id=update.effective_chat.id,
+        text=(
+            "💬 Поддержка AI Taro\n\n"
+            "Напишите одним сообщением, с чем нужна помощь.\n"
+            "Мы передадим запрос в поддержку.\n\n"
+            "Для отмены напишите: отмена"
+        ),
+    )
+
+
+async def terms_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not update.effective_chat:
+        return
+    await _ensure_bot_ui(context)
+    await _send_legal_document(chat_id=update.effective_chat.id, context=context, kind="terms")
+
+
+async def privacy_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not update.effective_chat:
+        return
+    await _ensure_bot_ui(context)
+    await _send_legal_document(chat_id=update.effective_chat.id, context=context, kind="privacy")
+
+
+async def reply_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not update.effective_chat:
+        return
+    if not _is_support_operator(update):
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text="Нет доступа к /reply. Добавьте ваш telegram_id в SUPPORT_ADMIN_IDS на сервере.",
+        )
+        return
+
+    args = list(context.args or [])
+    if len(args) < 2 or not str(args[0]).lstrip("-").isdigit():
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text="Формат: /reply <telegram_id> <сообщение>",
+        )
+        return
+
+    target_tg_id = int(args[0])
+    text = " ".join(args[1:]).strip()
+    if not text:
+        await context.bot.send_message(chat_id=update.effective_chat.id, text="Введите текст ответа после telegram_id.")
+        return
+    try:
+        await context.bot.send_message(
+            chat_id=target_tg_id,
+            text=f"💬 Ответ поддержки AI Taro:\n\n{text}",
+            reply_markup=_support_user_reply_markup(),
+        )
+        await context.bot.send_message(chat_id=update.effective_chat.id, text="Ответ отправлен пользователю.")
+    except Exception as exc:
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text=f"Не удалось отправить ответ: {exc}",
+        )
 
 
 async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -638,6 +1422,239 @@ async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     await _safe_answer_query(query)
     if query.message:
         await _send_menu(query.message.chat.id, context, message=query.message, include_app_link=False, mode="menu")
+
+
+async def howto_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    if not query:
+        return
+    await _safe_answer_query(query)
+    if query.message:
+        await query.message.reply_text(
+            _howto_text(),
+            parse_mode=ParseMode.HTML,
+            reply_markup=_welcome_keyboard(),
+        )
+
+
+async def support_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    if not query:
+        return
+    await _safe_answer_query(query)
+    user_id = int(getattr(query.from_user, "id", 0) or 0)
+    data = str(query.data or "").strip()
+    ticket_id = ""
+    if data.startswith("support:"):
+        ticket_id = str(data.split(":", 1)[1] or "").strip().upper()
+    if user_id > 0:
+        SUPPORT_PENDING_USERS.add(user_id)
+        SUPPORT_PENDING_TICKET_BY_USER.pop(user_id, None)
+        if ticket_id:
+            SUPPORT_PENDING_TICKET_BY_USER[user_id] = ticket_id
+    if query.message:
+        if ticket_id:
+            await query.message.reply_text(
+                f"💬 Продолжим диалог по тикету {ticket_id}.\nНапишите ответ одним сообщением.\nДля отмены напишите: отмена"
+            )
+        else:
+            await query.message.reply_text(
+                "💬 Напишите одним сообщением, с чем нужна помощь.\nДля отмены напишите: отмена"
+            )
+
+
+async def sub_manage_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    if not query:
+        return
+    await _safe_answer_query(query)
+    if query.message:
+        await query.message.reply_text(
+            _subscription_manage_text(),
+            parse_mode=ParseMode.HTML,
+            reply_markup=_subscription_manage_keyboard(),
+        )
+
+
+async def sub_cancel_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    if not query:
+        return
+    await _safe_answer_query(query)
+    user_id = int(getattr(query.from_user, "id", 0) or 0)
+    if user_id > 0:
+        SUPPORT_PENDING_USERS.add(user_id)
+        SUPPORT_PENDING_TICKET_BY_USER.pop(user_id, None)
+    if query.message:
+        await query.message.reply_text(
+            _subscription_cancel_text(),
+            parse_mode=ParseMode.HTML,
+            reply_markup=_subscription_cancel_keyboard(),
+        )
+
+
+async def support_close_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    if not query:
+        return
+    await _safe_answer_query(query)
+    user_id = int(getattr(query.from_user, "id", 0) or 0)
+    data = str(query.data or "").strip()
+    ticket_id = ""
+    if data.startswith("support_close:"):
+        ticket_id = str(data.split(":", 1)[1] or "").strip().upper()
+    if user_id > 0:
+        SUPPORT_PENDING_USERS.discard(user_id)
+        SUPPORT_PENDING_TICKET_BY_USER.pop(user_id, None)
+        if ticket_id and SUPPORT_ACTIVE_TICKET_BY_USER.get(user_id) == ticket_id:
+            SUPPORT_ACTIVE_TICKET_BY_USER.pop(user_id, None)
+            ticket_state = SUPPORT_TICKETS.get(ticket_id)
+            if ticket_state:
+                ticket_state["status"] = "closed"
+                ticket_state["last_message_at"] = int(time.time())
+                SUPPORT_TICKETS[ticket_id] = ticket_state
+        if ticket_id:
+            await _mark_support_ticket_closed(
+                ticket_id=ticket_id,
+                actor_telegram_id=user_id,
+                actor_chat_id=int(getattr(query.message.chat, "id", 0) or 0) if query.message else 0,
+            )
+    if query.message:
+        try:
+            await query.message.edit_reply_markup(reply_markup=None)
+        except Exception:
+            pass
+        if ticket_id:
+            await query.message.reply_text(
+                f"Диалог по тикету {ticket_id} закрыт.\nЕсли понадобится, нажмите «💬 Поддержка» или введите /support."
+            )
+        else:
+            await query.message.reply_text(
+                "Диалог с поддержкой закрыт.\nЕсли понадобится, нажмите «💬 Поддержка» или введите /support."
+            )
+
+
+async def doc_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    if not query or not query.data:
+        return
+    await _safe_answer_query(query)
+    kind = "privacy" if str(query.data).endswith("privacy") else "terms"
+    if query.message:
+        await _send_legal_document(chat_id=query.message.chat.id, context=context, kind=kind)
+
+
+async def text_fallback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    message = update.message
+    if not message or not message.text:
+        return
+
+    text = str(message.text or "").strip().lower()
+    if not text:
+        return
+
+    await _ensure_bot_ui(context)
+
+    user_id = int(getattr(message.from_user, "id", 0) or 0)
+    if user_id > 0 and user_id in SUPPORT_PENDING_USERS:
+        if text in {"отмена", "cancel", "/cancel"}:
+            SUPPORT_PENDING_USERS.discard(user_id)
+            SUPPORT_PENDING_TICKET_BY_USER.pop(user_id, None)
+            await context.bot.send_message(chat_id=message.chat.id, text="Запрос в поддержку отменён.")
+            return
+
+        if text in {"💳 тарифы и оплата", "🚀 открыть ai taro", "ℹ️ как начать", "📄 соглашение", "🔐 политика"}:
+            SUPPORT_PENDING_USERS.discard(user_id)
+            SUPPORT_PENDING_TICKET_BY_USER.pop(user_id, None)
+        else:
+            preferred_ticket_id = str(
+                SUPPORT_PENDING_TICKET_BY_USER.get(user_id)
+                or SUPPORT_ACTIVE_TICKET_BY_USER.get(user_id)
+                or ""
+            ).strip()
+            if preferred_ticket_id:
+                ticket_state = SUPPORT_TICKETS.get(preferred_ticket_id)
+                if ticket_state and str(ticket_state.get("status") or "").lower() == "closed":
+                    preferred_ticket_id = ""
+
+            if preferred_ticket_id:
+                SUPPORT_ACTIVE_TICKET_BY_USER[user_id] = preferred_ticket_id
+            result = await _forward_support_to_inbox(
+                context=context,
+                from_user=message.from_user,
+                source_chat_id=int(message.chat.id),
+                message_text=message.text,
+                ticket_id=preferred_ticket_id or None,
+                source_message_id=int(getattr(message, "message_id", 0) or 0) or None,
+            )
+            SUPPORT_PENDING_USERS.discard(user_id)
+            SUPPORT_PENDING_TICKET_BY_USER.pop(user_id, None)
+            if bool(result.get("ok")):
+                ticket_id = str(result.get("ticket_id") or "").strip()
+                is_new_ticket = bool(result.get("is_new"))
+                await context.bot.send_message(
+                    chat_id=message.chat.id,
+                    text=(
+                        f"✅ Запрос отправлен в поддержку.\n"
+                        f"Тикет: <code>{escape(ticket_id)}</code>\n"
+                        + ("Ответ придёт сюда же в этот чат." if is_new_ticket else "Сообщение добавлено в существующий диалог.")
+                    ),
+                    parse_mode=ParseMode.HTML,
+                )
+            else:
+                await context.bot.send_message(
+                    chat_id=message.chat.id,
+                    text=(
+                        "Не удалось отправить запрос в поддержку.\n"
+                        "Попробуйте ещё раз позже или напишите /support."
+                    ),
+                )
+            return
+
+    if "тариф" in text or "оплат" in text or "price" in text:
+        await _send_menu(message.chat.id, context, include_app_link=False, mode="menu")
+        return
+
+    if "поддерж" in text or text in {"support", "/support", "💬 поддержка"}:
+        SUPPORT_PENDING_USERS.add(user_id)
+        SUPPORT_PENDING_TICKET_BY_USER.pop(user_id, None)
+        await context.bot.send_message(
+            chat_id=message.chat.id,
+            text="💬 Напишите одним сообщением, с чем нужна помощь.\nДля отмены напишите: отмена",
+        )
+        return
+
+    if "соглаш" in text or text in {"📄 соглашение", "/terms", "terms"}:
+        await _send_legal_document(chat_id=message.chat.id, context=context, kind="terms")
+        return
+
+    if "политик" in text or text in {"🔐 политика", "/privacy", "privacy"}:
+        await _send_legal_document(chat_id=message.chat.id, context=context, kind="privacy")
+        return
+
+    if "как начать" in text or "помощ" in text or text in {"help", "start", "старт", "ℹ️ как начать"}:
+        await context.bot.send_message(
+            chat_id=message.chat.id,
+            text=_howto_text(),
+            parse_mode=ParseMode.HTML,
+            reply_markup=_welcome_keyboard(),
+        )
+        return
+
+    if "открыть" in text or "прилож" in text or text == "🚀 открыть ai taro":
+        await context.bot.send_message(
+            chat_id=message.chat.id,
+            text=START_ONBOARDING_TEXT,
+            parse_mode=ParseMode.HTML,
+            reply_markup=_welcome_keyboard(),
+        )
+        return
+
+    await context.bot.send_message(
+        chat_id=message.chat.id,
+        text="Нажмите «🚀 Открыть AI Taro», чтобы сразу перейти в мини‑приложение.",
+        reply_markup=_welcome_keyboard(),
+    )
 
 
 async def plan_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -695,6 +1712,56 @@ async def sbp_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         f"<b>СБП — {PLAN_TITLES.get(plan_key, plan_key)}</b>\n"
         f"Сумма: {_format_amount_label(card_product)}\n\n"
         "Нажмите кнопку ниже — откроется ссылка на оплату через СБП."
+    )
+
+    if query.message:
+        await query.message.reply_text(
+            text,
+            reply_markup=InlineKeyboardMarkup(rows),
+            parse_mode=ParseMode.HTML,
+            disable_web_page_preview=True,
+        )
+
+
+async def sbp_auto_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    if not query or not query.data:
+        return
+    await _safe_answer_query(query)
+
+    _, plan_key = (query.data.split(":", 1) + [""])[:2]
+    plan_key = str(plan_key or "").strip().lower()
+    card_product = _product_for_plan_and_provider(plan_key, "yookassa")
+    if not card_product:
+        if query.message:
+            await query.message.reply_text("СБП автоплатёж для этого плана временно недоступен.")
+        return
+    if not SBP_AUTOPAY_ENABLED or plan_key != SBP_AUTOPAY_PLAN_KEY:
+        if query.message:
+            await query.message.reply_text("СБП автоплатёж сейчас доступен только для ежемесячного плана.")
+        return
+
+    tg_user_id = int(getattr(query.from_user, "id", 0) or 0)
+    if tg_user_id <= 0:
+        if query.message:
+            await query.message.reply_text("Не удалось определить профиль Telegram. Попробуйте ещё раз.")
+        return
+
+    payment_link = _build_sbp_autopay_link(tg_user_id=tg_user_id, plan_key=plan_key)
+    if not payment_link:
+        if query.message:
+            await query.message.reply_text("СБП автоплатёж временно недоступен. Попробуйте позже.")
+        return
+
+    rows: List[List[InlineKeyboardButton]] = [
+        [InlineKeyboardButton("🔁 Подключить СБП автоплатёж", url=payment_link)],
+        [InlineKeyboardButton("⬅️ Назад к способам оплаты", callback_data=f"plan:{plan_key}")],
+    ]
+    text = (
+        f"<b>СБП автоплатёж — {PLAN_TITLES.get(plan_key, plan_key)}</b>\n"
+        f"Сумма: {_format_amount_label(card_product)} / месяц\n\n"
+        "Первый платёж пройдёт сейчас. После подтверждения ЮKassa сохранит метод оплаты, "
+        "и продление будет списываться автоматически раз в 30 дней."
     )
 
     if query.message:
@@ -978,13 +2045,26 @@ def create_application() -> Application:
     application = Application.builder().token(BOT_TOKEN).build()
 
     application.add_handler(CommandHandler("start", start))
-    application.add_handler(CommandHandler("menu", start))
+    application.add_handler(CommandHandler("menu", menu_command))
+    application.add_handler(CommandHandler("help", help_command))
+    application.add_handler(CommandHandler("support", support_command))
+    application.add_handler(CommandHandler("terms", terms_command))
+    application.add_handler(CommandHandler("privacy", privacy_command))
+    application.add_handler(CommandHandler("reply", reply_command))
     application.add_handler(CallbackQueryHandler(buy_handler, pattern=r"^buy:"))
     application.add_handler(CallbackQueryHandler(plan_callback, pattern=r"^plan:"))
+    application.add_handler(CallbackQueryHandler(sbp_auto_callback, pattern=r"^sbp_auto:"))
     application.add_handler(CallbackQueryHandler(sbp_callback, pattern=r"^sbp:"))
+    application.add_handler(CallbackQueryHandler(sub_manage_callback, pattern=r"^sub_manage$"))
+    application.add_handler(CallbackQueryHandler(sub_cancel_callback, pattern=r"^sub_cancel$"))
+    application.add_handler(CallbackQueryHandler(support_callback, pattern=r"^support(?::.+)?$"))
+    application.add_handler(CallbackQueryHandler(support_close_callback, pattern=r"^support_close(?::.+)?$"))
+    application.add_handler(CallbackQueryHandler(doc_callback, pattern=r"^doc:(terms|privacy)$"))
+    application.add_handler(CallbackQueryHandler(howto_callback, pattern=r"^howto$"))
     application.add_handler(CallbackQueryHandler(menu_callback, pattern=r"^menu"))
     application.add_handler(PreCheckoutQueryHandler(precheckout_handler))
     application.add_handler(MessageHandler(filters.SUCCESSFUL_PAYMENT, successful_payment_handler))
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_fallback_handler))
 
     return application
 

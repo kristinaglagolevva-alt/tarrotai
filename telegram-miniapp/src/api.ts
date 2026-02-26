@@ -28,8 +28,89 @@ async function apiJson<T>(url: string, init?: RequestInit): Promise<T> {
 
 type AuthOut = { access_token: string; token_type?: string }
 
-export async function getMe(token: string): Promise<any> {
+export type MeDto = {
+  id: number
+  telegram_id: number
+  username?: string | null
+  first_name?: string | null
+  last_name?: string | null
+  photo_url?: string | null
+  paid_readings_balance?: number
+  subscription_until?: string | null
+  has_active_subscription?: boolean
+  memory_opt_in?: boolean
+  retention_nudges_opt_in?: boolean
+  retention_nudge_hour_local?: number | null
+  retention_nudge_tz?: string | null
+}
+
+export type MePreferencesInDto = {
+  memory_opt_in: boolean
+  retention_nudges_opt_in: boolean
+  retention_nudge_hour_local?: number | null
+  retention_nudge_tz?: string | null
+}
+
+export type MePreferencesOutDto = {
+  memory_opt_in: boolean
+  retention_nudges_opt_in: boolean
+  retention_nudge_hour_local?: number | null
+  retention_nudge_tz?: string | null
+}
+
+export type MemorySummaryDto = {
+  recurring_topics: Array<{ topic?: string; count?: number; last_seen?: string | null }>
+  repeated_cards: Array<{ card?: string; count?: number; last_seen?: string | null }>
+  cycle_hints: string[]
+  last_changes: Record<string, any>
+}
+
+export type SupportTicketDto = {
+  ticket_id: string
+  status: 'open' | 'pending_support' | 'pending_user' | 'closed' | string
+  created_at: string
+  updated_at: string
+  last_user_message_at?: string | null
+  last_support_reply_at?: string | null
+  closed_at?: string | null
+  messages_count: number
+}
+
+export type SupportTicketListDto = {
+  items: SupportTicketDto[]
+}
+
+export async function getMe(token: string): Promise<MeDto> {
   return apiJson(`${API_BASE}/me`, {
+    method: 'GET',
+    headers: { Authorization: `Bearer ${token}` },
+  })
+}
+
+export async function updateMePreferences(
+  token: string,
+  payload: MePreferencesInDto
+): Promise<MePreferencesOutDto> {
+  return apiJson(`${API_BASE}/me/preferences`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify(payload),
+  })
+}
+
+export async function getMemorySummary(token: string): Promise<MemorySummaryDto> {
+  return apiJson(`${API_BASE}/memory/summary`, {
+    method: 'GET',
+    headers: { Authorization: `Bearer ${token}` },
+  })
+}
+
+export async function getSupportTicketsMe(token: string, limit = 20): Promise<SupportTicketListDto> {
+  const q = new URLSearchParams({ limit: String(limit) }).toString()
+  return apiJson(`${API_BASE}/support/tickets/me?${q}`, {
     method: 'GET',
     headers: { Authorization: `Bearer ${token}` },
   })
@@ -131,6 +212,7 @@ export type CardOfDayDto = {
   question: string
   card_index: number
   card_name: string
+  is_reversed?: boolean
   description: string
 }
 
@@ -193,6 +275,7 @@ export type ReadingOutDto = {
   cards: ReadingCardDto[]
   description: string
   created_at: string
+  memory_hint?: string | null
 }
 
 export type ReadingCreateParams = {
@@ -276,6 +359,7 @@ export type PhotoAnalysisOutDto = {
   topic?: string
   question?: string
   spread_type?: string
+  memory_hint?: string | null
 }
 
 export type PhotoAnalysisParams = {

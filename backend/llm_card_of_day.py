@@ -548,14 +548,56 @@ def _sanitize_memory_meta_phrases(text: str) -> str:
         r"(?im)^\s*.*повторяющ[а-я]*\s+паттерн.*\n?",
         r"(?im)^\s*.*эта\s+тема\s+возвращается.*(?:другое|open).*\n?",
         r"(?im)^\s*.*(?:trigger|триггер).*\n?",
+        r"(?im)^\s*факт\s+из\s+истории\s*:.*\n?",
+        r"(?im)^\s*сравнение\s+карт\s*:.*\n?",
+        r"(?im)^\s*контекст\s+из\s+истории.*\n?",
+        r"(?im)^\s*карточная\s+динамика\s+по\s+вашей\s+истории\s*:.*\n?",
     ]
     cleaned = src
     for pat in patterns:
         cleaned = re.sub(pat, "", cleaned)
 
-    cleaned = cleaned.replace("open question", "").replace("другое", "")
+    cleaned = re.sub(
+        r"(?im)\bобязательно\b[^.\n!?]*(?:[.\n!?]|$)",
+        "",
+        cleaned,
+    )
+    cleaned = cleaned.replace("open question", "")
     cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
     return cleaned.strip()
+
+
+def _normalize_history_hint(hint: str) -> str:
+    raw = str(hint or "").strip()
+    if not raw:
+        return ""
+    clean = re.sub(r"^сравнение\s+карт:\s*", "", raw, flags=re.IGNORECASE)
+    clean = re.sub(r"^факт\s+из\s+истории:\s*", "", clean, flags=re.IGNORECASE)
+    clean = re.sub(r"(?i)\bобязательно\b[^.\n!?]*(?:[.\n!?]|$)", "", clean)
+    clean = re.sub(r"\s+", " ", clean).strip(" .")
+    if not clean:
+        return ""
+
+    low = clean.lower()
+    if "ориентация изменилась" in low:
+        return "По сравнению с прошлым раскладом у повторяющейся карты заметно изменился вектор."
+    if "снова выходит та же карта" in low or "снова вышла та же карта" in low:
+        cards_match = re.search(r"\((.*?)\)", clean)
+        cards = cards_match.group(1).strip() if cards_match else ""
+        if cards:
+            return f"В раскладе снова проявились знакомые карты ({cards}), поэтому тема развивается по той же линии."
+        return "В раскладе снова проявилась знакомая карта, поэтому тема развивается по той же линии."
+    if "повторяется акцент на масти" in low:
+        suit_match = re.search(r"масти\s+«([^»]+)»", clean)
+        suit = suit_match.group(1).strip() if suit_match else ""
+        if suit:
+            return f"Как и раньше, сохраняется акцент масти «{suit}», но детали ситуации уже сдвигаются."
+    if "повторяется смысловая линия" in low:
+        motif_match = re.search(r"линия\s+«([^»]+)»", clean)
+        motif = motif_match.group(1).strip() if motif_match else ""
+        if motif:
+            return f"Снова возвращается линия «{motif}», но текущие карты показывают её в новом ракурсе."
+    return clean
 
 
 def _extract_then_vs_now_lines_from_context(extra_context: str) -> List[str]:
@@ -590,7 +632,7 @@ def _extract_history_hint_from_context(extra_context: str) -> str:
     for raw in src_lines:
         line = str(raw or "").strip()
         if line.lower().startswith("сравнение карт:"):
-            return re.sub(r"^сравнение карт:\s*", "", line, flags=re.IGNORECASE).strip(" .")
+            return _normalize_history_hint(line)
     for raw in src_lines:
         line = str(raw or "").strip()
         if line.lower().startswith("прошлый похожий вопрос:"):
@@ -625,7 +667,7 @@ def _ensure_then_vs_now_block(text: str, *, context_lines: List[str]) -> str:
 
 
 def _ensure_history_in_general_vector(text: str, *, history_hint: str) -> str:
-    hint = str(history_hint or "").strip()
+    hint = _normalize_history_hint(history_hint)
     if not hint:
         return text
     pattern = re.compile(

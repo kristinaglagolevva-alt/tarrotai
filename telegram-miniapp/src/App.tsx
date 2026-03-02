@@ -8,8 +8,6 @@ import {
   telegramAuth,
   getMe,
   updateMePreferences,
-  getMemorySummary,
-  getSupportTicketsMe,
   getBillingStatus,
   createSbpPayment,
   getSbpPaymentStatus,
@@ -21,15 +19,8 @@ import {
 } from './api'
 import type {
   MeDto,
-  MePreferencesInDto,
-  MemorySummaryDto,
-  SupportTicketDto,
 } from './api'
-import MemorySettingsCard from './features/profile/MemorySettingsCard'
 import SubscriptionManageCard from './features/profile/SubscriptionManageCard'
-import InsightBanner from './features/readings/InsightBanner'
-import ContextHint from './features/readings/ContextHint'
-import SupportEntry from './features/support/SupportEntry'
 
 
 
@@ -49,13 +40,13 @@ import backCardImg from './assets/cards/back/back.png'
    FIX: гарантируем стабильный порядок (index -> одна и та же карта всегда)
 ================================================================================================= */
 
-// ✅ Подхватываем все изображения из assets/cards/** кроме back
-const frontCardModules = import.meta.glob('./assets/cards/**/*.{jpg,jpeg,png,webp}', { eager: true }) as Record<
+// ✅ Подхватываем только лицевые карты из папок мастей/старших арканов
+const frontCardModules = import.meta.glob('./assets/cards/{major,wands,cups,swords,pentacles}/*.{jpg,jpeg,png,webp}', { eager: true }) as Record<
   string,
   { default: string }
 >
 
-const FRONT_CARD_ENTRIES = Object.entries(frontCardModules).filter(([path]) => !/\/back\//.test(path))
+const FRONT_CARD_ENTRIES = Object.entries(frontCardModules)
 
 // --- helpers ---
 const norm = (s: string) =>
@@ -272,8 +263,19 @@ function renderMdInline(text: string, keyPrefix: string) {
   return nodes.length ? nodes : [text]
 }
 
+function normalizeInterpretationText(text: string) {
+  let out = String(text || '')
+  if (!out) return out
+  // Guardrail for stale backend responses with a repetitive, non-actionable practical line.
+  out = out.replace(
+    /Практический вывод:\s*сравните текущее решение с прошлым\s*[—-]\s*именно в этом точка развилки\.?/gi,
+    'Практический вывод: выберите один конкретный шаг на сегодня и проверьте результат по факту.',
+  )
+  return out
+}
+
 function MarkdownText({ text, className = '' }: { text?: string; className?: string }) {
-  const source = String(text || '').replace(/\r\n?/g, '\n').trim()
+  const source = normalizeInterpretationText(String(text || '')).replace(/\r\n?/g, '\n').trim()
   if (!source) return null
 
   const lines = source.split('\n')
@@ -361,6 +363,22 @@ function InterpretationLoader({ text = 'Получаем интерпретац�
       </div>
     </div>
   )
+}
+
+function stripDailyQuestionContextSection(text: string, question: string) {
+  if (String(question || '').trim()) return String(text || '')
+  let out = String(text || '')
+  if (!out) return out
+  out = out.replace(
+    /(^|\n)\s*##\s*Что это значит в контексте вопроса\s*\n[\s\S]*?(?=(\n\s*##\s)|\n\s*\*\*Итог|\Z)/gi,
+    '\n',
+  )
+  out = out.replace(
+    /(^|\n)\s*Что это значит в контексте вопроса\s*\n[\s\S]*?(?=(\n\s*##\s)|\n\s*\*\*Итог|\Z)/gi,
+    '\n',
+  )
+  out = out.replace(/\n{3,}/g, '\n\n').trim()
+  return out
 }
 
 /* =================================================================================================
@@ -796,8 +814,10 @@ const LEGAL_DOCS: Record<LegalDocKind, { title: string; intro: string; body: str
     body: [
       '1. AI Taro предоставляет информационные интерпретации раскладов и не является медицинской, юридической или финансовой консультацией.',
       '2. Пользователь самостоятельно принимает решения на основе полученной информации.',
-      '3. Доступ к функциям приложения предоставляется по правилам тарифов и подписки.',
-      '4. Для вопросов поддержки используйте кнопку «Написать в поддержку» в профиле или команду /support в боте.',
+      '3. При первом входе пользователь подтверждает согласие с документами и отдельное согласие на персональную память раскладов (хранение до 90 дней).',
+      '4. Память используется только для персонализации интерпретаций. Для удаления персональных данных используйте /forgetme.',
+      '5. Пользователь может запросить полное удаление персональных данных командой /forgetme в боте @Ttaarrroobot.',
+      '6. Для вопросов поддержки используйте кнопку «Написать в поддержку» в профиле или команду /support в боте.',
     ],
     pdf: TERMS_PDF_URL,
   },
@@ -807,8 +827,10 @@ const LEGAL_DOCS: Record<LegalDocKind, { title: string; intro: string; body: str
     body: [
       '1. Для работы сервиса обрабатываются данные Telegram-профиля (id, username, имя) и введённые пользователем запросы.',
       '2. Данные используются только для авторизации, расчёта лимитов, оплаты и генерации ответов.',
-      '3. Сервис не продаёт персональные данные третьим лицам.',
-      '4. По вопросам удаления данных и приватности обращайтесь в поддержку через /support.',
+      '3. При включённой персональной памяти сохраняются структурированные данные раскладов (тема, тип, карты, выводы) со сроком хранения до 90 дней.',
+      '4. Сервис не продаёт персональные данные третьим лицам и использует их только для работы AI Taro.',
+      '5. Для удаления персональных данных используйте команду /forgetme в боте @Ttaarrroobot.',
+      '6. Для медико-кризисных вопросов сервис показывает мягкое предупреждение и контакты экстренной помощи по региону, без постановки диагнозов.',
     ],
     pdf: PRIVACY_PDF_URL,
   },
@@ -842,6 +864,12 @@ const openTelegramAndCloseMiniApp = (url: string) => {
       ;(window as any)?.Telegram?.WebApp?.close?.()
     }, 120)
   } catch {}
+}
+
+const isGenericThemeCapsule = (value: string) => {
+  const t = String(value || '').trim().toLowerCase()
+  if (!t) return true
+  return ['other', 'другое', 'open', 'open question', 'открытый вопрос', 'эта тема'].includes(t)
 }
 
 const LEGAL_DOC_BOT_DEEPLINK: Record<LegalDocKind, string> = {
@@ -887,28 +915,12 @@ const [showAccessPaywall, setShowAccessPaywall] = useState(false)
 const [showLegalConsent, setShowLegalConsent] = useState(false)
 const [legalConsentChecked, setLegalConsentChecked] = useState(false)
 const [activeLegalDoc, setActiveLegalDoc] = useState<LegalDocKind | null>(null)
+const [showPersonalizationModal, setShowPersonalizationModal] = useState(false)
+const [memoryOptIn, setMemoryOptIn] = useState<boolean>(true)
+const [prefsSaving, setPrefsSaving] = useState(false)
+const [prefsError, setPrefsError] = useState('')
 
-// vNext: AI memory/preferences (opt-in)
-const [memoryOptIn, setMemoryOptIn] = useState(false)
-const [nudgesOptIn, setNudgesOptIn] = useState(false)
-const [nudgeHour, setNudgeHour] = useState<number | null>(null)
-const [nudgeTz, setNudgeTz] = useState<string | null>(null)
-const [memorySummary, setMemorySummary] = useState<MemorySummaryDto | null>(null)
-const [memorySummaryLoading, setMemorySummaryLoading] = useState(false)
-const [memorySaveBusy, setMemorySaveBusy] = useState(false)
-const [memorySaveError, setMemorySaveError] = useState('')
-
-// vNext: support tickets list in profile (read-only from miniapp)
-const [supportTickets, setSupportTickets] = useState<SupportTicketDto[]>([])
-const [supportTicketsLoading, setSupportTicketsLoading] = useState(false)
-const [supportTicketsError, setSupportTicketsError] = useState('')
-
-// vNext: contextual hints in readings
-const [contextHint, setContextHint] = useState('')
-const [threeMemoryHint, setThreeMemoryHint] = useState('')
-const [ppfMemoryHint, setPpfMemoryHint] = useState('')
-const [decisionMemoryHint, setDecisionMemoryHint] = useState('')
-const [photoMemoryHint, setPhotoMemoryHint] = useState('')
+const [question, setQuestion] = useState('')
 
 useEffect(() => {
   let mounted = true
@@ -1009,6 +1021,10 @@ useEffect(() => {
   ============================================================================================= */
 
   useEffect(() => {
+    setMemoryOptIn(Boolean(user?.memory_opt_in ?? true))
+  }, [user?.memory_opt_in])
+
+  useEffect(() => {
     if (authStatus !== 'ready') {
       setShowLegalConsent(false)
       return
@@ -1046,6 +1062,27 @@ useEffect(() => {
     setActiveLegalDoc(null)
   }
 
+  const savePersonalization = async () => {
+    if (!token) return
+    setPrefsSaving(true)
+    setPrefsError('')
+    try {
+      const out = await updateMePreferences(token, {
+        memory_opt_in: memoryOptIn,
+        retention_nudges_opt_in: false,
+        retention_nudge_hour_local: null,
+        retention_nudge_tz: null,
+      })
+      setMemoryOptIn(Boolean(out.memory_opt_in ?? true))
+      setUser((prev) => (prev ? { ...prev, memory_opt_in: Boolean(out.memory_opt_in ?? true) } : prev))
+      setShowPersonalizationModal(false)
+    } catch {
+      setPrefsError('Не удалось сохранить. Попробуйте ещё раз.')
+    } finally {
+      setPrefsSaving(false)
+    }
+  }
+
   useEffect(() => {
     if (!activeLegalDoc) return
     const onEsc = (e: KeyboardEvent) => {
@@ -1054,144 +1091,6 @@ useEffect(() => {
     window.addEventListener('keydown', onEsc)
     return () => window.removeEventListener('keydown', onEsc)
   }, [activeLegalDoc])
-
-  const detectClientTimezone = () => {
-    try {
-      const tz = Intl.DateTimeFormat().resolvedOptions().timeZone
-      return String(tz || '').trim() || 'UTC'
-    } catch {
-      return 'UTC'
-    }
-  }
-
-  const hydrateMemoryPrefsFromUser = (me: MeDto | null) => {
-    const hasMemory = Boolean(me?.memory_opt_in)
-    const hasNudges = hasMemory && Boolean(me?.retention_nudges_opt_in)
-    const rawHour = me?.retention_nudge_hour_local
-    const nextHour =
-      typeof rawHour === 'number' && Number.isFinite(rawHour) && rawHour >= 0 && rawHour <= 23
-        ? rawHour
-        : null
-    const nextTz = String(me?.retention_nudge_tz || '').trim() || detectClientTimezone()
-
-    setMemoryOptIn(hasMemory)
-    setNudgesOptIn(hasNudges)
-    setNudgeHour(nextHour)
-    setNudgeTz(nextTz)
-  }
-
-  const loadMemorySummaryData = async (jwt: string, silent = false) => {
-    if (!jwt || !memoryOptIn) {
-      setMemorySummary(null)
-      setContextHint('')
-      return
-    }
-    if (!silent) setMemorySummaryLoading(true)
-    try {
-      const out = await getMemorySummary(jwt)
-      setMemorySummary(out)
-      const hint = String(out?.cycle_hints?.[0] || '').trim()
-      if (hint) {
-        setContextHint(hint)
-      } else {
-        const topTopic = out?.recurring_topics?.[0]
-        const topicLabel = String(topTopic?.topic || '').trim()
-        const count = Number(topTopic?.count || 0)
-        setContextHint(topicLabel && count > 1 ? `Вы уже возвращались к теме «${topicLabel}» ${count} раз.` : '')
-      }
-    } catch (err: any) {
-      if (!silent) {
-        setMemorySaveError(String(err?.message || 'Не удалось обновить память.'))
-      }
-      setMemorySummary(null)
-      setContextHint('')
-    } finally {
-      if (!silent) setMemorySummaryLoading(false)
-    }
-  }
-
-  const loadSupportTicketsData = async (jwt: string, silent = false) => {
-    if (!jwt) return
-    if (!silent) {
-      setSupportTicketsLoading(true)
-      setSupportTicketsError('')
-    }
-    try {
-      const out = await getSupportTicketsMe(jwt, 20)
-      setSupportTickets(Array.isArray(out?.items) ? out.items : [])
-    } catch (err: any) {
-      if (!silent) {
-        setSupportTicketsError(String(err?.message || 'Не удалось загрузить обращения.'))
-      }
-      setSupportTickets([])
-    } finally {
-      if (!silent) setSupportTicketsLoading(false)
-    }
-  }
-
-  const saveMemoryPreferences = async () => {
-    if (!token) return
-    setMemorySaveBusy(true)
-    setMemorySaveError('')
-
-    const payload: MePreferencesInDto = {
-      memory_opt_in: Boolean(memoryOptIn),
-      retention_nudges_opt_in: Boolean(memoryOptIn && nudgesOptIn),
-      retention_nudge_hour_local: memoryOptIn && nudgesOptIn ? nudgeHour : null,
-      retention_nudge_tz: memoryOptIn && nudgesOptIn ? (nudgeTz || detectClientTimezone()) : null,
-    }
-
-    try {
-      const out = await updateMePreferences(token, payload)
-      setMemoryOptIn(Boolean(out.memory_opt_in))
-      setNudgesOptIn(Boolean(out.memory_opt_in && out.retention_nudges_opt_in))
-      setNudgeHour(
-        typeof out.retention_nudge_hour_local === 'number' &&
-          out.retention_nudge_hour_local >= 0 &&
-          out.retention_nudge_hour_local <= 23
-          ? out.retention_nudge_hour_local
-          : null
-      )
-      setNudgeTz(String(out.retention_nudge_tz || '').trim() || detectClientTimezone())
-      setUser((prev) =>
-        prev
-          ? {
-              ...prev,
-              memory_opt_in: Boolean(out.memory_opt_in),
-              retention_nudges_opt_in: Boolean(out.retention_nudges_opt_in),
-              retention_nudge_hour_local: out.retention_nudge_hour_local ?? null,
-              retention_nudge_tz: out.retention_nudge_tz ?? null,
-            }
-          : prev
-      )
-      if (out.memory_opt_in) {
-        await loadMemorySummaryData(token, false)
-      } else {
-        setMemorySummary(null)
-        setContextHint('')
-      }
-    } catch (err: any) {
-      setMemorySaveError(String(err?.message || 'Не удалось сохранить настройки памяти.'))
-    } finally {
-      setMemorySaveBusy(false)
-    }
-  }
-
-  useEffect(() => {
-    hydrateMemoryPrefsFromUser(user)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user?.id, user?.memory_opt_in, user?.retention_nudges_opt_in, user?.retention_nudge_hour_local, user?.retention_nudge_tz])
-
-  useEffect(() => {
-    if (authStatus !== 'ready' || !token) return
-    if (memoryOptIn) {
-      void loadMemorySummaryData(token, true)
-    } else {
-      setMemorySummary(null)
-      setContextHint('')
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [authStatus, token, memoryOptIn])
 
   const refreshBilling = async (jwt: string | null | undefined = token) => {
     if (!jwt) {
@@ -1383,7 +1282,6 @@ useEffect(() => {
   const [needsMotionPermission, setNeedsMotionPermission] = useState(false)
   const [pressed, setPressed] = useState(false)
 
-  const [question, setQuestion] = useState('')
   const [askInputFocused, setAskInputFocused] = useState(false)
   const [keyboardInset, setKeyboardInset] = useState(0)
   const focusSyncTRef = useRef<number | null>(null)
@@ -2156,12 +2054,6 @@ useEffect(() => {
   }
 
   useEffect(() => {
-    if (authStatus !== 'ready' || !token || navTab !== 'profile') return
-    void loadSupportTicketsData(token, false)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [authStatus, token, navTab])
-
-  useEffect(() => {
     let mounted = true
 
     const load = async () => {
@@ -2192,6 +2084,7 @@ useEffect(() => {
                 card_index: Number(p.card_index ?? 0),
                 card_name: String(p.card_name || ''),
                 is_reversed: Boolean(p.is_reversed),
+                theme_capsule: String(p.theme_capsule || '').trim() || undefined,
                 description: String(p.description || ''),
                 created_at: String(item?.created_at || ''),
               }
@@ -2218,6 +2111,7 @@ useEffect(() => {
                 question: String(p.question || ''),
                 spread_type: String(p.spread_type || 'reading'),
                 description: String(p.description || ''),
+                theme_capsule: String(p.theme_capsule || '').trim() || undefined,
                 cards_count: cards.length || 0,
                 card_index: Number(first.card_index ?? 0),
                 card_name: String(first.card_name || fallbackLabel),
@@ -2498,6 +2392,7 @@ useEffect(() => {
     card_index: number
     card_name: string
     is_reversed?: boolean
+    theme_capsule?: string
     description: string
     created_at: string
   }
@@ -2519,6 +2414,7 @@ useEffect(() => {
     question: string
     spread_type: string
     description: string
+    theme_capsule?: string
     cards_count: number
     card_index: number
     card_name: string
@@ -2556,6 +2452,7 @@ useEffect(() => {
   const [dailyCardName, setDailyCardName] = useState<string>('')
   const [dailyDayKey, setDailyDayKey] = useState<string>('')
   const [dailyIsReversed, setDailyIsReversed] = useState(false)
+  const [dailyQuestion, setDailyQuestion] = useState<string>('')
 
   // Подогреваем конкретную карту дня заранее, чтобы reveal открывался без подгрузочного “фриза”.
   useEffect(() => {
@@ -2727,6 +2624,8 @@ useEffect(() => {
 
     // сбрасываем UI
     setSelectedFrontUrl('')
+    setDailyFrontUrl('')
+    setDailyFrontReady(false)
     setShakenOnce(false)
     setShakeEnabled(false)
     setShuffleProgress(0)
@@ -2737,6 +2636,7 @@ useEffect(() => {
     setDailyCardName('')
     setDailyDayKey('')
     setDailyIsReversed(false)
+    setDailyQuestion('')
 
     // сразу открываем шейк-сценарий без экрана вопроса/категории
     setCardDayLoading(true)
@@ -2759,6 +2659,7 @@ useEffect(() => {
       setDailyCardName(cardName)
       setDailyDayKey(dayKey)
       setDailyIsReversed(isReversed)
+      setDailyQuestion(String(dto?.question || ''))
     }
 
     const applyLocalFallback = () => {
@@ -2771,6 +2672,7 @@ useEffect(() => {
       setDailyCardName(cardNameFromUrl(dailyLocal))
       setDailyDayKey(day)
       setDailyIsReversed(false)
+      setDailyQuestion('')
       shouldOpenReadyResult = wasDailyOpened(day)
     }
 
@@ -2841,6 +2743,7 @@ useEffect(() => {
     setDailyCardName(it.card_name || '')
     setDailyIsReversed(Boolean(it.is_reversed) || /\(перев[её]рнут/i.test(String(it.card_name || '')))
     setDailyDayKey(it.day_key || '')
+    setDailyQuestion(String(it.question || ''))
 
     // (опционально) восстановим вопрос/тему в state — удобно, если где-то показываешь/используешь
     if (typeof it.question === 'string') setQuestion(it.question)
@@ -2905,7 +2808,6 @@ useEffect(() => {
   const openPhotoAnalysis = () => {
     setPhotoFile(null)
     setPhotoResult(null)
-    setPhotoMemoryHint('')
     setPhotoStatus('idle')
     setPhotoError('')
     setView('photo_analysis')
@@ -2920,7 +2822,6 @@ useEffect(() => {
     setPhotoError('')
     setPhotoStatus('idle')
     setPhotoResult(null)
-    setPhotoMemoryHint('')
     setPhotoFile(file)
   }
 
@@ -3057,7 +2958,6 @@ useEffect(() => {
         description: (out as any)?.description || '',
         cards: (out as any)?.cards || [],
       })
-      setPhotoMemoryHint(String((out as any)?.memory_hint || '').trim())
       setPhotoStatus('done')
       void refreshBilling(token)
     } catch (err: any) {
@@ -3065,14 +2965,12 @@ useEffect(() => {
       if (isReadingLimitExceeded(raw)) {
         setPhotoStatus('idle')
         setPhotoError('')
-        setPhotoMemoryHint('')
         setShowAccessPaywall(true)
         void refreshBilling(token)
         return
       }
       setPhotoStatus('error')
       setPhotoError(mapPhotoError(raw))
-      setPhotoMemoryHint('')
       void refreshBilling(token)
     }
   }
@@ -3173,7 +3071,6 @@ useEffect(() => {
 
     // Reset description and loading state for three card reading
     setThreeDesc('')
-    setThreeMemoryHint('')
     setThreeLoading(false)
 
     threeFinishingRef.current = false
@@ -3224,7 +3121,6 @@ useEffect(() => {
     warmupCardImages(previewCards)
     // Reset description and mark as loading while we fetch from the backend
     setThreeDesc('')
-    setThreeMemoryHint('')
     setThreeLoading(true)
     setThreeShowMeaning(false)
     // дата расклада (Europe/Vilnius) — используем уже существующий helper
@@ -3257,7 +3153,6 @@ useEffect(() => {
       if (isReadingLimitExceeded(raw)) {
         setThreeCards(previewCards)
         setThreeDesc('')
-        setThreeMemoryHint('')
         setThreeLoading(false)
         setShowAccessPaywall(true)
         return
@@ -3265,7 +3160,6 @@ useEffect(() => {
       console.warn('[reading] three_cards failed:', err)
       setThreeCards(previewCards)
       setThreeDesc(mapReadingError(raw))
-      setThreeMemoryHint('')
       setThreeLoading(false)
     })
   }
@@ -3463,7 +3357,6 @@ useEffect(() => {
 
     // Reset description and loading state for PPF reading
     setPpfDesc('')
-    setPpfMemoryHint('')
     setPpfLoading(false)
 
     ppfFinishingRef.current = false
@@ -3515,7 +3408,6 @@ useEffect(() => {
     warmupCardImages(previewCards)
     // Reset description and mark as loading while we fetch from the backend
     setPpfDesc('')
-    setPpfMemoryHint('')
     setPpfLoading(true)
     setPpfDayKey(getVilniusDayKey())
 
@@ -3552,7 +3444,6 @@ useEffect(() => {
       if (isReadingLimitExceeded(raw)) {
         setPpfCards(previewCards)
         setPpfDesc('')
-        setPpfMemoryHint('')
         setPpfLoading(false)
         setShowAccessPaywall(true)
         return
@@ -3560,7 +3451,6 @@ useEffect(() => {
       console.warn('[reading] ppf failed:', err)
       setPpfCards(previewCards)
       setPpfDesc(mapReadingError(raw))
-      setPpfMemoryHint('')
       setPpfLoading(false)
     })
   }
@@ -4104,7 +3994,6 @@ useEffect(() => {
     void refreshBilling(token)
     // Save the description from the backend so we can display it in the UI
     setThreeDesc(String(reading?.description ?? ''))
-    setThreeMemoryHint(String(reading?.memory_hint ?? '').trim())
     const roles = ['Карта 1', 'Карта 2', 'Карта 3']
     const mapped = (reading.cards || []).slice(0, 3).map((c: any, i: number) => {
       const idx = Number(c.card_index ?? 0)
@@ -4146,7 +4035,6 @@ useEffect(() => {
     void refreshBilling(token)
     // Save description returned from the backend
     setPpfDesc(String(reading?.description ?? ''))
-    setPpfMemoryHint(String(reading?.memory_hint ?? '').trim())
     const roles = ['Прошлое', 'Настоящее', 'Будущее']
     const focusLine =
       ppfFocus === 'past'
@@ -4196,7 +4084,6 @@ useEffect(() => {
     void refreshBilling(token)
     // Save description returned from the backend
     setDecisionDesc(String(reading?.description ?? ''))
-    setDecisionMemoryHint(String(reading?.memory_hint ?? '').trim())
     const mapped = (reading.cards || []).slice(0, 2).map((c: any, i: number) => {
       const idx = Number(c.card_index ?? 0)
       const url = FRONT_CARD_URLS[idx] || backCardImg
@@ -4229,7 +4116,6 @@ useEffect(() => {
 
     // Reset description and loading state for decision reading
     setDecisionDesc('')
-    setDecisionMemoryHint('')
     setDecisionLoading(false)
 
     setDecisionDayKey('')
@@ -5342,8 +5228,6 @@ useEffect(() => {
                     <div className={`ask-hint ${isRecording ? 'is-visible' : ''}`}>Идёт запись… нажмите ещё раз, чтобы остановить</div>
                   </div>
 
-                  <ContextHint text={contextHint} />
-
                   <h2 className="home-section-title">Выберите категорию вопроса</h2>
 
                   <div
@@ -5491,7 +5375,11 @@ useEffect(() => {
                           const title = isCardDay
                             ? (it.card_name || 'Карта дня')
                             : (SPREAD_HISTORY_LABELS[it.spread_type] || 'Расклад')
-                          const subtitle = `${topicLabel}${it.question ? ` • ${it.question}` : ''}`
+                          const rawThemeCapsule = String(it.theme_capsule || '').trim()
+                          const themeCapsule = isGenericThemeCapsule(rawThemeCapsule) ? '' : rawThemeCapsule
+                          const subtitle = themeCapsule
+                            ? `Тема: ${themeCapsule}`
+                            : `${topicLabel}${it.question ? ` • ${it.question}` : ''}`
                           const when = (() => {
                             const d = new Date(it.created_at)
                             if (!isFinite(d.getTime())) return isCardDay ? it.day_key : ''
@@ -5560,11 +5448,12 @@ useEffect(() => {
                                 <div className="history-reading-detail">
                                   <div className="history-reading-detail__head">
                                     <div className="history-reading-detail__title">{title}</div>
-                                    <div className="history-reading-detail__meta">
-                                      {topicLabel}
-                                      {it.question ? ` • ${it.question}` : ''}
-                                      {when ? ` • ${when}` : ''}
-                                    </div>
+                                  <div className="history-reading-detail__meta">
+                                    {themeCapsule ? `Тема: ${themeCapsule} • ` : ''}
+                                    {topicLabel}
+                                    {it.question ? ` • ${it.question}` : ''}
+                                    {when ? ` • ${when}` : ''}
+                                  </div>
                                   </div>
 
                                   <div className="history-reading-cards">
@@ -5734,32 +5623,34 @@ useEffect(() => {
                       </section>
                     )}
 
-                    <MemorySettingsCard
-                      memoryOptIn={memoryOptIn}
-                      nudgesOptIn={nudgesOptIn}
-                      nudgeHour={nudgeHour}
-                      nudgeTz={nudgeTz}
-                      saveBusy={memorySaveBusy}
-                      saveError={memorySaveError}
-                      summaryLoading={memorySummaryLoading}
-                      summary={memorySummary}
-                      onToggleMemory={(next) => {
-                        setMemoryOptIn(next)
-                        if (!next) {
-                          setNudgesOptIn(false)
-                        }
-                      }}
-                      onToggleNudges={(next) => setNudgesOptIn(next)}
-                      onChangeHour={(next) => setNudgeHour(next)}
-                      onSave={saveMemoryPreferences}
-                      onRefreshSummary={() => {
-                        if (!token) return
-                        void loadMemorySummaryData(token, false)
-                      }}
-                    />
-
                     <section className="profile-panel" aria-label="Настройки">
                       <div className="profile-group-title">Настройки</div>
+
+                      <button
+                        type="button"
+                        className="profile-link-row"
+                        onClick={() => {
+                          setPrefsError('')
+                          setShowPersonalizationModal(true)
+                        }}
+                      >
+                        <span className="profile-link-row__left">
+                          <span className="profile-icon profile-icon--row" aria-hidden="true">
+                            <svg viewBox="0 0 24 24">
+                              <path
+                                d="M12 4.2a3 3 0 1 0 0 6 3 3 0 0 0 0-6Zm0 9.6a5.2 5.2 0 1 0 0 10.4 5.2 5.2 0 0 0 0-10.4Zm-8.4-1.6a2.2 2.2 0 1 0 0 4.4 2.2 2.2 0 0 0 0-4.4Zm16.8 0a2.2 2.2 0 1 0 0 4.4 2.2 2.2 0 0 0 0-4.4Z"
+                                fill="none"
+                                stroke="currentColor"
+                                strokeWidth="1.6"
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                              />
+                            </svg>
+                          </span>
+                          <span>Персонализация AI</span>
+                        </span>
+                        <span className="profile-link-row__chevron" aria-hidden="true">›</span>
+                      </button>
 
                       <div className="profile-link-row profile-link-row--static">
                         <span className="profile-link-row__left">
@@ -5858,17 +5749,6 @@ useEffect(() => {
                         <span className="profile-link-row__chevron" aria-hidden="true">›</span>
                       </a>
                     </section>
-
-                    <SupportEntry
-                      tickets={supportTickets}
-                      loading={supportTicketsLoading}
-                      error={supportTicketsError}
-                      onRefresh={() => {
-                        if (!token) return
-                        void loadSupportTicketsData(token, false)
-                      }}
-                      onOpenSupport={() => openTelegramAndCloseMiniApp(SUPPORT_URL)}
-                    />
 
                     <button type="button" className="profile-logout-btn" onClick={handleProfileLogout}>
                       Выйти из аккаунта
@@ -6113,30 +5993,11 @@ useEffect(() => {
             <h1>AI Taro</h1>
             <p ref={subtitleRef}>Мудрость карт и искусственного интеллекта</p>
             {cardDayLoading && (
-              <div
-                style={{
-                  marginTop: 14,
-                  borderRadius: 16,
-                  padding: 14,
-                  background: 'rgba(255,255,255,0.06)',
-                  border: '1px solid rgba(255,255,255,0.12)',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 10,
-                }}
-              >
-                <div
-                  style={{
-                    width: 16,
-                    height: 16,
-                    borderRadius: '50%',
-                    border: '2px solid rgba(255,255,255,0.25)',
-                    borderTopColor: 'rgba(255,255,255,0.9)',
-                    animation: 'spin 900ms linear infinite',
-                    flex: '0 0 auto',
-                  }}
-                  aria-hidden="true"
-                />
+              <div className="cardday-loader-stage" aria-live="polite">
+                <div className="cardday-loader-orb" aria-hidden="true">
+                  <div className="cardday-loader-spin cardday-loader-spin--lg" />
+                </div>
+                <div className="cardday-loader-caption">Подготавливаем расклад…</div>
               </div>
             )}
             {/* активный spread-card */}
@@ -6156,26 +6017,28 @@ useEffect(() => {
               </div>
             )}
 
-            <PremiumFlipCard
-              key={pflipMountKey}
-              frontUrls={SHUFFLE_FRONT_URLS}
-              backUrl={backCardImg}
-              active={!shakenOnce && !cardDayLoading}
-              durationMs={2600}
-              intensity={cardDayLoading ? 0 : shakeEnabled ? shuffleProgress : 0}
-              clickable={false}
-              stopAtBack={stopRequested}
-              onStoppedAtBack={onStoppedAtBack}
-              className={`${shakenOnce ? 'is-done' : ''} ${cardRevealed ? 'is-revealed' : ''} ${isResult ? 'is-top' : ''}`.trim()}
-              scale={pflipScale}
-              top={pflipTop}
-              onFrontChange={setSelectedFrontUrl}
-              // До остановки: рандомные карты в перемешивании. После остановки: фикс выпавшей карты.
-              lockFront={shakenOnce}
-              lockedFrontUrl={dailyFrontUrl || backCardImg}
-              lockedFrontReversed={dailyIsReversed}
-              previewExcludeUrl={dailyFrontUrl || ''}
-            />
+            {!cardDayLoading && (
+              <PremiumFlipCard
+                key={pflipMountKey}
+                frontUrls={SHUFFLE_FRONT_URLS}
+                backUrl={backCardImg}
+                active={!shakenOnce}
+                durationMs={2600}
+                intensity={shakeEnabled ? shuffleProgress : 0}
+                clickable={false}
+                stopAtBack={stopRequested}
+                onStoppedAtBack={onStoppedAtBack}
+                className={`${shakenOnce ? 'is-done' : ''} ${cardRevealed ? 'is-revealed' : ''} ${isResult ? 'is-top' : ''}`.trim()}
+                scale={pflipScale}
+                top={pflipTop}
+                onFrontChange={setSelectedFrontUrl}
+                // До остановки: рандомные карты в перемешивании. После остановки: фикс выпавшей карты.
+                lockFront={shakenOnce}
+                lockedFrontUrl={dailyFrontUrl || backCardImg}
+                lockedFrontReversed={dailyIsReversed}
+                previewExcludeUrl={dailyFrontUrl || ''}
+              />
+            )}
 
             {!isResult && !cardDayLoading && (
               <>
@@ -6188,12 +6051,21 @@ useEffect(() => {
                   <div className="cardday-shake-overlay__sub">Или нажмите кнопку ниже для авто‑перемешивания</div>
                 </div>
 
-                <div className="bottom-panel bottom-panel--shake cardday-shake-panel" ref={bottomPanelRef}>
+                {needsMotionPermission && !cardDayShuffleStarted && shuffleProgress < 1 && (
+                  <div className="motion-permission-focus" aria-hidden="true" />
+                )}
+
+                <div
+                  className={`bottom-panel bottom-panel--shake cardday-shake-panel ${
+                    needsMotionPermission && !cardDayShuffleStarted && shuffleProgress < 1 ? 'is-permission-focus' : ''
+                  }`.trim()}
+                  ref={bottomPanelRef}
+                >
                   {shuffleProgress < 1 ? (
                     <>
                       {needsMotionPermission && (
-                        <button type="button" className="glassbtn" onClick={requestMotion}>
-                          Разрешить датчики
+                        <button type="button" className="motion-permission-cta motion-permission-cta--tech" onClick={requestMotion}>
+                          Разрешить встряхивание
                         </button>
                       )}
 
@@ -6241,10 +6113,10 @@ useEffect(() => {
                         <p style={{ opacity: 0.72, marginTop: 0 }}>Карта дня: {dailyDayKey}</p>
                       ) : null}
 
-                      {renderSafetyNotice(question)}
+                      {renderSafetyNotice(dailyQuestion)}
 
                       {dailyDesc ? (
-                        <MarkdownText text={dailyDesc} />
+                        <MarkdownText text={stripDailyQuestionContextSection(dailyDesc, dailyQuestion)} />
                       ) : (
                         <p>Описание пока недоступно.</p>
                       )}
@@ -6374,12 +6246,20 @@ useEffect(() => {
                     </div>
                   )}
 
-                  <div className="bottom-panel bottom-panel--shake">
+                  {needsMotionPermission && !threeShuffleStarted && threeShuffleProgress < 1 && (
+                    <div className="motion-permission-focus" aria-hidden="true" />
+                  )}
+
+                  <div
+                    className={`bottom-panel bottom-panel--shake ${
+                      needsMotionPermission && !threeShuffleStarted && threeShuffleProgress < 1 ? 'is-permission-focus' : ''
+                    }`.trim()}
+                  >
                     {threeShuffleProgress < 1 ? (
                       <>
                         {needsMotionPermission && (
-                          <button type="button" className="glassbtn" onClick={requestMotion}>
-                            Разрешить датчики
+                          <button type="button" className="motion-permission-cta motion-permission-cta--tech" onClick={requestMotion}>
+                            Разрешить встряхивание
                           </button>
                         )}
 
@@ -7000,6 +6880,73 @@ useEffect(() => {
                 Открыть в боте
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {showPersonalizationModal && (
+        <div
+          className="prefs-modal-overlay"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Персонализация AI"
+          onClick={() => {
+            if (!prefsSaving) setShowPersonalizationModal(false)
+          }}
+        >
+          <div className="prefs-modal-card" onClick={(e) => e.stopPropagation()}>
+            <div className="prefs-modal-card__head">
+              <div className="prefs-modal-card__title">Персонализация AI</div>
+              <button
+                type="button"
+                className="prefs-modal-card__close"
+                onClick={() => setShowPersonalizationModal(false)}
+                aria-label="Закрыть"
+              >
+                ×
+              </button>
+            </div>
+
+            <p className="prefs-modal-card__text">
+              Используем вашу историю раскладов для более точной интерпретации. Отдельную «вторую историю» не создаём.
+            </p>
+
+            <div className="prefs-modal-card__row">
+              <div className="prefs-modal-card__row-text">
+                <div className="prefs-modal-card__row-title">Память раскладов (90 дней)</div>
+                <div className="prefs-modal-card__row-sub">Учитываем повторяющиеся темы и динамику по похожим вопросам.</div>
+              </div>
+              <label className="prefs-switch" aria-label="Память раскладов">
+                <input
+                  type="checkbox"
+                  checked={memoryOptIn}
+                  onChange={(e) => setMemoryOptIn(e.target.checked)}
+                  disabled={prefsSaving}
+                />
+                <span />
+              </label>
+            </div>
+
+            <p className="prefs-modal-card__hint">
+              Для полного удаления персональных данных используйте команду <b>/forgetme</b> в боте.
+            </p>
+
+            {prefsError ? <div className="prefs-modal-card__error">{prefsError}</div> : null}
+
+            <button
+              type="button"
+              className="glass-cta prefs-modal-card__save"
+              disabled={prefsSaving}
+              onClick={() => {
+                void savePersonalization()
+              }}
+            >
+              <span className="glass-cta__inner">
+                <span className="glass-cta__rim" aria-hidden="true" />
+                <span className="glass-cta__text">{prefsSaving ? 'Сохраняем…' : 'Сохранить'}</span>
+                <span className="glass-cta__spark" aria-hidden="true" />
+              </span>
+            </button>
           </div>
         </div>
       )}

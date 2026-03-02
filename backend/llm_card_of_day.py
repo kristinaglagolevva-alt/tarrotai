@@ -109,6 +109,32 @@ def fallback_spread_text(topic: str, question: str, spread_type: str, cards: Lis
     return "\n\n".join(lines).strip()
 
 
+def _has_meaningful_question(question: str) -> bool:
+    return bool(str(question or "").strip())
+
+
+def _strip_question_context_section(text: str) -> str:
+    src = str(text or "")
+    if not src:
+        return ""
+
+    out = src
+    out = re.sub(
+        r"(^|\n)\s*##\s*Что это значит в контексте вопроса\s*\n[\s\S]*?(?=(\n\s*##\s)|\Z)",
+        "\n",
+        out,
+        flags=re.IGNORECASE,
+    )
+    out = re.sub(
+        r"(^|\n)\s*Что это значит в контексте вопроса\s*\n[\s\S]*?(?=(\n\s*##\s)|(\n\s*\*\*Итог)|\Z)",
+        "\n",
+        out,
+        flags=re.IGNORECASE,
+    )
+    out = re.sub(r"\n{3,}", "\n\n", out).strip()
+    return out
+
+
 async def _call_openai(system_prompt: str, user_prompt: str, *, model: str, temperature: float, max_tokens: int) -> str:
     relay_url = _env("OPENAI_RELAY_URL")
     relay_token = _env("OPENAI_RELAY_TOKEN")
@@ -299,29 +325,50 @@ async def generate_card_text_llm(
 
     orient = "перевёрнутая" if is_reversed else "прямая"
     meaning = card["reversed_meaning"] if is_reversed else card["upright_meaning"]
+    has_question = _has_meaningful_question(question)
 
-    system_prompt = (
-        "Ты — человечный таролог-психолог. Пиши на русском, живо и понятно.\n"
-        "Не делай точных предсказаний и не выдумывай факты о людях.\n"
-        "Опирайся на вопрос пользователя и смысл карты.\n\n"
-        "Формат строго в markdown:\n"
-        "## Суть\n"
-        "2–3 предложения, коротко и по вопросу.\n"
-        "## Что это значит в контексте вопроса\n"
-        "2–4 предложения.\n"
-        "## Практика на сегодня\n"
-        "- 4–6 конкретных шагов\n"
-        "**Итог:** 1 короткая поддерживающая фраза.\n\n"
-        "Ограничение: 140–220 слов, без воды."
-    )
-
-    user_prompt = (
-        f"Тема: {topic}\n"
-        f"Вопрос: {question}\n"
-        f"Карта: {card['name']} ({orient})\n"
-        f"Смысл карты (для тебя как справка): {meaning}\n"
-        "Сгенерируй ответ."
-    )
+    if has_question:
+        system_prompt = (
+            "Ты — человечный таролог-психолог. Пиши на русском, живо и понятно.\n"
+            "Не делай точных предсказаний и не выдумывай факты о людях.\n"
+            "Опирайся на вопрос пользователя и смысл карты.\n\n"
+            "Формат строго в markdown:\n"
+            "## Суть\n"
+            "2–3 предложения, коротко и по вопросу.\n"
+            "## Что это значит в контексте вопроса\n"
+            "2–4 предложения.\n"
+            "## Практика на сегодня\n"
+            "- 4–6 конкретных шагов\n"
+            "**Итог:** 1 короткая поддерживающая фраза.\n\n"
+            "Ограничение: 140–220 слов, без воды."
+        )
+        user_prompt = (
+            f"Тема: {topic}\n"
+            f"Вопрос: {question}\n"
+            f"Карта: {card['name']} ({orient})\n"
+            f"Смысл карты (для тебя как справка): {meaning}\n"
+            "Сгенерируй ответ."
+        )
+    else:
+        system_prompt = (
+            "Ты — человечный таролог-психолог. Пиши на русском, живо и понятно.\n"
+            "Не делай точных предсказаний и не выдумывай факты о людях.\n"
+            "Вопрос отсутствует: не упоминай «контекст вопроса» и не придумывай вопрос.\n"
+            "Опирайся только на смысл карты и тему дня.\n\n"
+            "Формат строго в markdown:\n"
+            "## Суть\n"
+            "2–3 предложения по значению карты на день.\n"
+            "## Практика на сегодня\n"
+            "- 4–6 конкретных шагов\n"
+            "**Итог:** 1 короткая поддерживающая фраза.\n\n"
+            "Ограничение: 120–200 слов, без воды."
+        )
+        user_prompt = (
+            f"Тема: {topic}\n"
+            f"Карта: {card['name']} ({orient})\n"
+            f"Смысл карты (для тебя как справка): {meaning}\n"
+            "Сгенерируй ответ."
+        )
 
     last_err: Optional[Exception] = None
     for attempt in range(2):
@@ -333,7 +380,9 @@ async def generate_card_text_llm(
                 temperature=0.72,
                 max_tokens=560,
             )
-            text = (text or "").strip()
+            text = _sanitize_memory_meta_phrases((text or "").strip())
+            if not has_question:
+                text = _strip_question_context_section(text)
             if text:
                 return text
             raise RuntimeError("Empty LLM response")
@@ -387,14 +436,30 @@ async def generate_spread_text_llm(
         "Ты — человечный таролог-психолог. Пиши как живой эксперт, без шаблонов.\n"
         "Не делай точных предсказаний и не повторяй дословно входные значения карт.\n"
         "Собери карты в одну понятную картину по вопросу пользователя.\n\n"
+        "Если во входе есть блок 'Контекст из истории', используй его аккуратно и только по фактам из входа.\n"
+        "Важно: при наличии исторического контекста обязательно подмешай его уже в блок 'Общий вектор' "
+        "(1 естественная фраза про динамику ситуации), а не только в отдельный итоговый блок.\n"
+        "Если во входе есть блок 'Карточная динамика по вашей истории', обязательно используй минимум 1 факт "
+        "про конкретную карту (повтор/разворот/пауза) в 'Общий вектор' или в 'Тогда vs сейчас'.\n"
+        "Если во входе есть подпункт 'Сравнение (тогда vs сейчас)', добавь отдельный блок в конце ответа:\n"
+        "## Тогда vs сейчас\n"
+        "- 2–3 короткие строки: что совпало, что изменилось, практический вывод.\n"
+        "- Практический вывод обязан быть конкретным действием (что сделать сегодня/в ближайшие 24 часа).\n"
+        "- Запрещены шаблонные формулировки типа: "
+        "'сравните текущее решение с прошлым', 'в этом точка развилки', 'смотрите динамику'.\n"
+        "Опирайся только на факты из контекста: прошлый вопрос, прошлый краткий итог, прошлые карты.\n"
+        "Нельзя писать служебные фразы вроде 'AI заметил', 'повторяющийся паттерн', 'триггер', "
+        "'другое', 'open question' и т.п.\n\n"
         "Формат строго в markdown:\n"
         "## Общий вектор\n"
-        "1 абзац (3–4 предложения) по вопросу.\n"
+        "1 абзац (3–4 предложения) по вопросу; при наличии исторического контекста мягко упомяни динамику.\n"
         "## По картам\n"
         "Для каждой позиции в исходном порядке: **Название позиции: карта** + 2–3 предложения.\n"
         "## Рекомендации\n"
         "- 5–7 конкретных шагов\n"
-        "**Итог:** 1 короткая практичная мысль.\n\n"
+        "**Итог:** 1 короткая практичная мысль.\n"
+        "## Тогда vs сейчас\n"
+        "Показывай только если есть исторический контекст. Этот блок должен быть последним.\n\n"
         "Ограничение: 220–340 слов."
     )
 
@@ -417,8 +482,14 @@ async def generate_spread_text_llm(
                 temperature=0.7,
                 max_tokens=780,
             )
-            text = (text or "").strip()
+            text = _sanitize_memory_meta_phrases((text or "").strip())
             if text:
+                then_vs_now_lines = _extract_then_vs_now_lines_from_context(extra_context)
+                history_hint = _extract_history_hint_from_context(extra_context)
+                if then_vs_now_lines:
+                    text = _ensure_then_vs_now_block(text, context_lines=then_vs_now_lines)
+                if history_hint:
+                    text = _ensure_history_in_general_vector(text, history_hint=history_hint)
                 return text
             raise RuntimeError("Empty LLM response")
         except Exception as e:
@@ -465,7 +536,118 @@ def _extract_json_obj(text: str) -> Optional[dict]:
             return obj
     except Exception:
         return None
-    return None
+
+
+def _sanitize_memory_meta_phrases(text: str) -> str:
+    src = str(text or "")
+    if not src.strip():
+        return ""
+
+    patterns = [
+        r"(?im)^\s*.*ai\s+заметил.*\n?",
+        r"(?im)^\s*.*повторяющ[а-я]*\s+паттерн.*\n?",
+        r"(?im)^\s*.*эта\s+тема\s+возвращается.*(?:другое|open).*\n?",
+        r"(?im)^\s*.*(?:trigger|триггер).*\n?",
+    ]
+    cleaned = src
+    for pat in patterns:
+        cleaned = re.sub(pat, "", cleaned)
+
+    cleaned = cleaned.replace("open question", "").replace("другое", "")
+    cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
+    return cleaned.strip()
+
+
+def _extract_then_vs_now_lines_from_context(extra_context: str) -> List[str]:
+    lines: List[str] = []
+    src_lines = str(extra_context or "").splitlines()
+    in_block = False
+    for raw in src_lines:
+        line = str(raw or "").strip()
+        if not line:
+            if in_block:
+                break
+            continue
+        if "Сравнение (тогда vs сейчас)" in line:
+            in_block = True
+            continue
+        if not in_block:
+            continue
+        if line.startswith("-"):
+            clean = re.sub(r"^\-\s*", "", line).strip(" .")
+            if clean:
+                lines.append(clean)
+            if len(lines) >= 3:
+                break
+        else:
+            # закончился целевой блок
+            break
+    return lines[:3]
+
+
+def _extract_history_hint_from_context(extra_context: str) -> str:
+    src_lines = str(extra_context or "").splitlines()
+    for raw in src_lines:
+        line = str(raw or "").strip()
+        if line.lower().startswith("сравнение карт:"):
+            return re.sub(r"^сравнение карт:\s*", "", line, flags=re.IGNORECASE).strip(" .")
+    for raw in src_lines:
+        line = str(raw or "").strip()
+        if line.lower().startswith("прошлый похожий вопрос:"):
+            return line.strip(" .")
+    return ""
+
+
+def _ensure_then_vs_now_block(text: str, *, context_lines: List[str]) -> str:
+    if not context_lines:
+        return text
+    block = "## Тогда vs сейчас\n" + "\n".join(f"- {line}" for line in context_lines) + "\n"
+    pattern = re.compile(
+        r"(?is)(^|\n)\s*##\s*Тогда\s*vs\s*сейчас\s*\n(?P<body>.*?)(?=\n\s*##\s|\Z)"
+    )
+    match = pattern.search(text)
+    if not match:
+        return (text.rstrip() + "\n\n" + block).strip()
+
+    body = str(match.group("body") or "")
+    low = body.lower()
+    bad_markers = (
+        "сравните текущее решение с прошлым",
+        "в этом точка развилки",
+        "смотрите динамику",
+        "ai заметил",
+        "повторяющийся паттерн",
+    )
+    if len(body.strip()) < 70 or any(marker in low for marker in bad_markers):
+        repl = (match.group(1) or "\n") + block
+        return pattern.sub(repl, text, count=1).strip()
+    return text
+
+
+def _ensure_history_in_general_vector(text: str, *, history_hint: str) -> str:
+    hint = str(history_hint or "").strip()
+    if not hint:
+        return text
+    pattern = re.compile(
+        r"(?is)(^|\n)\s*##\s*Общий\s+вектор\s*\n(?P<body>.*?)(?=\n\s*##\s|\Z)"
+    )
+    match = pattern.search(text)
+    if not match:
+        return text
+    body = str(match.group("body") or "").strip()
+    low = body.lower()
+    markers = ("в прошл", "раньше", "как и тогда", "по сравнению", "снова")
+    if any(m in low for m in markers):
+        return text
+
+    concise_hint = re.sub(r"\s+", " ", hint).strip(" .")
+    if len(concise_hint) > 180:
+        concise_hint = concise_hint[:180].rsplit(" ", 1)[0]
+    if concise_hint:
+        body = (body + "\n\n" + concise_hint + ".").strip()
+        repl = (match.group(1) or "\n") + "## Общий вектор\n" + body + "\n"
+        return pattern.sub(repl, text, count=1).strip()
+    return text
 
 
 def _normalize_cards(cards: Any) -> List[dict]:
@@ -586,9 +768,9 @@ async def generate_photo_analysis_llm(
             obj = _extract_json_obj(text)
             if not obj:
                 # if model didn't follow JSON, return as description only
-                return (text, [])
+                return (_sanitize_memory_meta_phrases(text), [])
 
-            desc = str(obj.get("description") or "").strip()
+            desc = _sanitize_memory_meta_phrases(str(obj.get("description") or "").strip())
             cards_raw = _normalize_cards(obj.get("cards"))
             cards_enriched = _enrich_with_deck(cards_raw)
 

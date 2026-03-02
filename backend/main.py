@@ -20,7 +20,7 @@ from fastapi import FastAPI, Depends, HTTPException, Header, UploadFile, File, F
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, RedirectResponse
 from pydantic import BaseModel, Field
-from sqlalchemy import select, desc, func
+from sqlalchemy import select, desc, func, and_, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 from dotenv import load_dotenv
 
@@ -45,6 +45,8 @@ from tarot_deck import get_card_by_index, DECK_SIZE
 from llm_card_of_day import generate_card_text_llm, generate_spread_text_llm, generate_photo_analysis_llm
 from features.common.flags import FEATURE_FLAGS
 from features.common.timezone import resolve_tz_name
+from features.analytics.schemas import KpiOut
+from features.analytics import service as analytics_service
 from features.memory.schemas import MemorySummaryOut
 from features.memory import service as memory_service
 from features.support_tickets import service as support_ticket_service
@@ -54,6 +56,9 @@ from features.retention.scheduler import run_retention_cycle
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("api")
+# Do not log request URLs from low-level HTTP clients (can leak bot token in path).
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("httpcore").setLevel(logging.WARNING)
 
 load_dotenv()
 
@@ -118,6 +123,7 @@ SBP_AUTOPAY_PLAN_CODE = (os.getenv("SBP_AUTOPAY_PLAN_CODE") or "sub_month").stri
 SBP_AUTOPAY_INTERVAL_DAYS = max(1, int(os.getenv("SBP_AUTOPAY_INTERVAL_DAYS", "30")))
 SBP_AUTOPAY_MAX_FAILS = max(1, int(os.getenv("SBP_AUTOPAY_MAX_FAILS", "3")))
 SBP_AUTOPAY_WORKER_INTERVAL_SEC = max(60, int(os.getenv("SBP_AUTOPAY_WORKER_INTERVAL_SEC", "300")))
+ANALYTICS_ADMIN_TOKEN = (os.getenv("ANALYTICS_ADMIN_TOKEN") or "").strip()
 
 
 # ============================ CORS ============================
@@ -509,7 +515,10 @@ async def _ensure_runtime_schema(conn) -> None:
     statements = [
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS subscription_until TIMESTAMPTZ NULL;",
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS paid_readings_balance INTEGER NOT NULL DEFAULT 0;",
-        "ALTER TABLE users ADD COLUMN IF NOT EXISTS memory_opt_in BOOLEAN NOT NULL DEFAULT FALSE;",
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS memory_opt_in BOOLEAN NOT NULL DEFAULT TRUE;",
+        "ALTER TABLE users ALTER COLUMN memory_opt_in SET DEFAULT TRUE;",
+        "UPDATE users SET memory_opt_in = TRUE WHERE memory_opt_in IS NULL;",
+        "ALTER TABLE users ALTER COLUMN memory_opt_in SET NOT NULL;",
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS retention_nudges_opt_in BOOLEAN NOT NULL DEFAULT FALSE;",
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS retention_nudge_hour_local INTEGER NULL;",
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS retention_nudge_tz VARCHAR(64) NULL;",
@@ -603,6 +612,7 @@ async def _ensure_runtime_schema(conn) -> None:
         "CREATE INDEX IF NOT EXISTS ix_user_memory_events_topic ON user_memory_events (topic);",
         "CREATE INDEX IF NOT EXISTS ix_user_memory_events_spread_type ON user_memory_events (spread_type);",
         "CREATE INDEX IF NOT EXISTS ix_user_memory_events_primary_card ON user_memory_events (primary_card);",
+        "CREATE UNIQUE INDEX IF NOT EXISTS uq_user_memory_events_source ON user_memory_events (user_id, source_kind, source_id) WHERE source_id IS NOT NULL;",
         """
         CREATE TABLE IF NOT EXISTS user_memory_profiles (
             id SERIAL PRIMARY KEY,
@@ -697,7 +707,14 @@ async def _consume_reading_quota_or_raise(
     )
 
 
-async def _memory_context_for_user(db: AsyncSession, user: User) -> tuple[dict, str, str]:
+async def _memory_context_for_user(
+    db: AsyncSession,
+    user: User,
+    *,
+    question: str = "",
+    current_cards: Optional[list] = None,
+    include_summary: bool = False,
+) -> tuple[dict, str, str]:
     """
     Returns: (summary, prompt_context, inline_hint)
     """
@@ -705,10 +722,82 @@ async def _memory_context_for_user(db: AsyncSession, user: User) -> tuple[dict, 
         return {}, "", ""
     if not bool(getattr(user, "memory_opt_in", False)):
         return {}, "", ""
-    summary = await memory_service.get_summary(db, user_id=int(user.id))
-    prompt_context = memory_service.build_prompt_context(summary)
-    hint = memory_service.build_inline_hint(summary)
+    summary: dict = {}
+    if include_summary:
+        summary = await memory_service.get_summary(db, user_id=int(user.id))
+        last_changes = dict(summary.get("last_changes") or {})
+        needs_profile_refresh = (
+            not last_changes.get("updated_at")
+            or "home_hint" not in last_changes
+            or "recurring_question_signals" not in last_changes
+        )
+        if needs_profile_refresh:
+            try:
+                await memory_service.backfill_user_history(
+                    db,
+                    user_id=int(user.id),
+                    max_readings=1200,
+                    max_card_days=365,
+                )
+                summary = await memory_service.rebuild_profile(db, user_id=int(user.id), days=90)
+                await db.commit()
+            except Exception as exc:
+                await db.rollback()
+                log.warning("Lazy memory init failed for user_id=%s: %s", user.id, repr(exc))
+
+    prompt_context = ""
+    if str(question or "").strip():
+        try:
+            prompt_context = await memory_service.build_runtime_prompt_context(
+                db,
+                user_id=int(user.id),
+                question=question,
+                current_cards=list(current_cards or []),
+                days=90,
+            )
+        except Exception as exc:
+            log.warning("Runtime memory context lookup failed for user_id=%s: %s", user.id, repr(exc))
+
+    hint = ""
     return summary, prompt_context, hint
+
+
+async def _ensure_card_day_memory_event(
+    db: AsyncSession,
+    *,
+    user: User,
+    row: CardOfDay,
+    is_reversed_hint: Optional[bool] = None,
+) -> None:
+    if not FEATURE_FLAGS.memory_v1 or not bool(user.memory_opt_in):
+        return
+    reversed_flag = (
+        bool(is_reversed_hint)
+        if is_reversed_hint is not None
+        else memory_service.infer_reversed_from_text(str(row.description or ""))
+    )
+    try:
+        cards_payload = memory_service.build_card_of_day_cards_payload(
+            card_index=int(row.card_index),
+            card_name=str(row.card_name or ""),
+            is_reversed=reversed_flag,
+        )
+        inserted = await memory_service.ingest_event_if_missing(
+            db,
+            user_id=int(user.id),
+            source_kind="card_of_day",
+            source_id=int(row.id),
+            topic=str(row.topic or "other"),
+            spread_type="card_day",
+            question=str(row.question or ""),
+            cards=cards_payload,
+            description=str(row.description or ""),
+        )
+        if inserted:
+            await db.commit()
+    except Exception as exc:
+        await db.rollback()
+        log.warning("Memory ingest failed for card_of_day id=%s: %s", row.id, repr(exc))
 
 
 def _get_bearer_token(authorization: Optional[str]) -> str:
@@ -725,7 +814,11 @@ async def get_current_user(
     authorization: Optional[str] = Header(default=None),
 ) -> User:
     token = _get_bearer_token(authorization)
-    payload = decode_jwt(token)
+    try:
+        payload = decode_jwt(token)
+    except Exception:
+        # Never leak JWT parsing details to clients.
+        raise HTTPException(status_code=401, detail="Invalid or expired token")
 
     user_id = payload.get("user_id") or payload.get("sub")
     if not user_id:
@@ -754,21 +847,21 @@ class MeOut(BaseModel):
     paid_readings_balance: int = 0
     subscription_until: Optional[datetime] = None
     has_active_subscription: bool = False
-    memory_opt_in: bool = False
+    memory_opt_in: bool = True
     retention_nudges_opt_in: bool = False
     retention_nudge_hour_local: Optional[int] = None
     retention_nudge_tz: Optional[str] = None
 
 
 class MePreferencesIn(BaseModel):
-    memory_opt_in: bool = False
+    memory_opt_in: bool = True
     retention_nudges_opt_in: bool = False
     retention_nudge_hour_local: Optional[int] = Field(default=None, ge=0, le=23)
     retention_nudge_tz: Optional[str] = None
 
 
 class MePreferencesOut(BaseModel):
-    memory_opt_in: bool = False
+    memory_opt_in: bool = True
     retention_nudges_opt_in: bool = False
     retention_nudge_hour_local: Optional[int] = None
     retention_nudge_tz: Optional[str] = None
@@ -873,7 +966,6 @@ class ReadingOut(BaseModel):
     cards: List[ReadingCard]
     description: str
     created_at: datetime
-    memory_hint: Optional[str] = None
 
 
 class ReadingHistoryItem(ReadingOut):
@@ -896,7 +988,6 @@ class PhotoAnalysisOut(BaseModel):
     topic: str = "other"
     question: str = ""
     spread_type: str = "photo_analysis"
-    memory_hint: Optional[str] = None
 
 
 # ================================== AUTH ==================================
@@ -924,6 +1015,7 @@ async def auth_telegram(payload: dict, db: AsyncSession = Depends(get_db)):
             first_name=tg_user.get("first_name"),
             last_name=tg_user.get("last_name"),
             photo_url=tg_user.get("photo_url"),
+            memory_opt_in=True,
         )
         db.add(user)
         await db.commit()
@@ -948,7 +1040,11 @@ async def me(current_user: User = Depends(get_current_user)):
         "paid_readings_balance": int(current_user.paid_readings_balance or 0),
         "subscription_until": sub_until,
         "has_active_subscription": has_sub,
-        "memory_opt_in": bool(current_user.memory_opt_in),
+        "memory_opt_in": (
+            bool(current_user.memory_opt_in)
+            if current_user.memory_opt_in is not None
+            else True
+        ),
         "retention_nudges_opt_in": bool(current_user.retention_nudges_opt_in),
         "retention_nudge_hour_local": (
             int(current_user.retention_nudge_hour_local)
@@ -965,6 +1061,8 @@ async def update_me_preferences(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    was_memory_opt_in = bool(current_user.memory_opt_in)
+
     tz_name: Optional[str] = None
     if payload.retention_nudge_tz is not None:
         raw_tz = str(payload.retention_nudge_tz or "").strip()
@@ -989,6 +1087,28 @@ async def update_me_preferences(
 
     await db.commit()
     await db.refresh(current_user)
+
+    if FEATURE_FLAGS.memory_v1 and (not was_memory_opt_in) and bool(current_user.memory_opt_in):
+        try:
+            backfill_stats = await memory_service.backfill_user_history(
+                db,
+                user_id=int(current_user.id),
+                max_readings=1200,
+                max_card_days=365,
+            )
+            await memory_service.rebuild_profile(db, user_id=int(current_user.id), days=90)
+            await db.commit()
+            if any(int(backfill_stats.get(k) or 0) for k in ("readings_inserted", "card_days_inserted")):
+                log.info(
+                    "Memory backfill done: user_id=%s readings=%s card_days=%s",
+                    current_user.id,
+                    int(backfill_stats.get("readings_inserted") or 0),
+                    int(backfill_stats.get("card_days_inserted") or 0),
+                )
+        except Exception as exc:
+            await db.rollback()
+            log.exception("Memory backfill failed for user_id=%s: %s", current_user.id, repr(exc))
+
     return {
         "memory_opt_in": bool(current_user.memory_opt_in),
         "retention_nudges_opt_in": bool(current_user.retention_nudges_opt_in),
@@ -1013,7 +1133,7 @@ async def get_memory_summary(
             status_code=403,
             detail={"code": "MEMORY_NOT_ENABLED", "message": "Включите «Память раскладов» в профиле."},
         )
-    summary = await memory_service.get_summary(db, user_id=int(current_user.id))
+    summary, _, _ = await _memory_context_for_user(db, current_user, include_summary=True)
     return MemorySummaryOut(**summary)
 
 
@@ -1032,6 +1152,37 @@ async def support_tickets_me(
     )
     items = [SupportTicketOut(**row) for row in rows]
     return SupportTicketListOut(items=items)
+
+
+def _assert_analytics_access(current_user: User, x_analytics_token: Optional[str]) -> None:
+    """
+    Access policy:
+      1) If ANALYTICS_ADMIN_TOKEN is configured -> require X-Analytics-Token header.
+      2) Else if SUPPORT_ADMIN_IDS is configured -> require current user to be support admin.
+      3) Else allow any authenticated user (single-tenant fallback).
+    """
+    if ANALYTICS_ADMIN_TOKEN:
+        got = str(x_analytics_token or "").strip()
+        if not got or not hmac.compare_digest(got, ANALYTICS_ADMIN_TOKEN):
+            raise HTTPException(status_code=403, detail="Forbidden: invalid analytics token")
+        return
+
+    if SUPPORT_ADMIN_IDS and int(current_user.telegram_id) not in SUPPORT_ADMIN_IDS:
+        raise HTTPException(status_code=403, detail="Forbidden: admin access required")
+
+
+@app.get("/analytics/kpi", response_model=KpiOut)
+async def analytics_kpi(
+    x_analytics_token: Optional[str] = Header(default=None, alias="X-Analytics-Token"),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    _assert_analytics_access(current_user, x_analytics_token)
+    snapshot = await analytics_service.build_kpi_snapshot(
+        db,
+        free_limit=FREE_READINGS_PER_MONTH,
+    )
+    return KpiOut(**snapshot)
 
 
 @app.get("/billing/status", response_model=BillingStatusOut)
@@ -1615,8 +1766,6 @@ async def _retry_sbp_success_notifications(db: AsyncSession, *, limit: int = 20)
 
 async def _run_autopay_maintenance(*, force: bool = False) -> None:
     global _autopay_last_run_ts
-    if not _yookassa_sbp_configured():
-        return
 
     now_ts = time.time()
     if not force and (now_ts - _autopay_last_run_ts) < SBP_AUTOPAY_WORKER_INTERVAL_SEC:
@@ -2763,6 +2912,12 @@ async def create_or_get_card_of_day(
     )
     existing = result.scalar_one_or_none()
     if existing:
+        await _ensure_card_day_memory_event(
+            db,
+            user=current_user,
+            row=existing,
+            is_reversed_hint=memory_service.infer_reversed_from_text(str(existing.description or "")),
+        )
         return {
             "day_key": existing.day_key,
             "topic": existing.topic,
@@ -2808,6 +2963,12 @@ async def create_or_get_card_of_day(
     db.add(row)
     await db.commit()
     await db.refresh(row)
+    await _ensure_card_day_memory_event(
+        db,
+        user=current_user,
+        row=row,
+        is_reversed_hint=bool(is_reversed),
+    )
 
     return {
         "day_key": row.day_key,
@@ -2834,6 +2995,13 @@ async def get_card_of_day_today(
     existing = result.scalar_one_or_none()
     if not existing:
         raise HTTPException(status_code=404, detail="No card-of-day for today yet")
+
+    await _ensure_card_day_memory_event(
+        db,
+        user=current_user,
+        row=existing,
+        is_reversed_hint=memory_service.infer_reversed_from_text(str(existing.description or "")),
+    )
 
     return {
         "day_key": existing.day_key,
@@ -2885,7 +3053,6 @@ def _spread_layout(payload: ReadingCreateIn) -> List[tuple[str, str]]:
         return [
             ("option_a", f"Вариант A: {a}" if payload.option_a.strip() else "Вариант A"),
             ("option_b", f"Вариант B: {b}" if payload.option_b.strip() else "Вариант B"),
-            ("advice", "Совет"),
         ]
 
     if st == "custom":
@@ -2976,15 +3143,18 @@ async def create_reading(
         if dec_ctx:
             extra_context = ("\n".join(dec_ctx) + ("\n\n" + extra_context if extra_context else "")).strip()
 
-    memory_hint = ""
-    _, memory_prompt_context, _ = await _memory_context_for_user(db, current_user)
+    _, memory_prompt_context, _ = await _memory_context_for_user(
+        db,
+        current_user,
+        question=payload.question,
+        current_cards=cards_for_store,
+    )
     if memory_prompt_context:
         extra_context = (
             f"{extra_context}\n\n{memory_prompt_context}".strip()
             if extra_context
             else memory_prompt_context
         )
-
     try:
         description = await generate_spread_text_llm(
             topic=payload.topic,
@@ -3027,12 +3197,10 @@ async def create_reading(
                 cards=list(row.cards or []),
                 description=str(row.description or ""),
             )
-            summary = await memory_service.rebuild_profile(db, user_id=int(current_user.id), days=90)
-            memory_hint = memory_service.build_inline_hint(summary)
             await db.commit()
         except Exception as exc:
             await db.rollback()
-            log.warning("Memory ingest/rebuild failed for reading_id=%s: %s", row.id, repr(exc))
+            log.warning("Memory ingest failed for reading_id=%s: %s", row.id, repr(exc))
 
     return {
         "id": row.id,
@@ -3042,7 +3210,6 @@ async def create_reading(
         "cards": row.cards,
         "description": row.description,
         "created_at": row.created_at,
-        "memory_hint": memory_hint or None,
     }
 
 
@@ -3116,8 +3283,11 @@ async def photo_analysis(
         raise HTTPException(status_code=413, detail="File too large (max 8MB)")
 
     await _consume_reading_quota_or_raise(db, current_user.id)
-    memory_hint = ""
-    _, memory_prompt_context, _ = await _memory_context_for_user(db, current_user)
+    _, memory_prompt_context, _ = await _memory_context_for_user(
+        db,
+        current_user,
+        question=question,
+    )
 
     try:
         context = (extra_context or "").strip()
@@ -3125,7 +3295,6 @@ async def photo_analysis(
             context = f"{context}\nИгнорируй перевёрнутые позиции, считай карты прямыми.".strip()
         if memory_prompt_context:
             context = f"{context}\n\n{memory_prompt_context}".strip() if context else memory_prompt_context
-
         description, cards = await generate_photo_analysis_llm(
             topic=topic,
             question=question,
@@ -3171,8 +3340,6 @@ async def photo_analysis(
                 cards=list(cards or []),
                 description=str(description or ""),
             )
-            summary = await memory_service.rebuild_profile(db, user_id=int(current_user.id), days=90)
-            memory_hint = memory_service.build_inline_hint(summary)
             await db.commit()
     except Exception as e:
         await db.rollback()
@@ -3184,7 +3351,6 @@ async def photo_analysis(
         "topic": topic,
         "question": question,
         "spread_type": "photo_analysis",
-        "memory_hint": memory_hint or None,
     }
 
 
@@ -3213,9 +3379,73 @@ async def get_unified_history(
     )
     rd_rows = rd_res.scalars().all()
 
+    reading_ids = [int(r.id) for r in rd_rows if getattr(r, "id", None) is not None]
+    cod_ids = [int(r.id) for r in cod_rows if getattr(r, "id", None) is not None]
+    reading_capsule_by_id: Dict[int, str] = {}
+    cod_capsule_by_id: Dict[int, str] = {}
+    if reading_ids or cod_ids:
+        mem_filters = []
+        if reading_ids:
+            mem_filters.append(
+                and_(
+                    UserMemoryEvent.source_kind.in_(["reading", "photo_analysis"]),
+                    UserMemoryEvent.source_id.in_(reading_ids),
+                )
+            )
+        if cod_ids:
+            mem_filters.append(
+                and_(
+                    UserMemoryEvent.source_kind == "card_of_day",
+                    UserMemoryEvent.source_id.in_(cod_ids),
+                )
+            )
+        if mem_filters:
+            mem_res = await db.execute(
+                select(UserMemoryEvent).where(
+                    UserMemoryEvent.user_id == current_user.id,
+                    or_(*mem_filters),
+                )
+            )
+            for ev in mem_res.scalars().all():
+                if ev.source_id is None:
+                    continue
+                ev_summary = ev.summary if isinstance(ev.summary, dict) else {}
+                capsule = str(ev_summary.get("capsule") or "").strip()
+                low_capsule = capsule.lower()
+                if low_capsule in {"other", "другое", "open", "open question", "открытый вопрос", "эта тема"}:
+                    capsule = ""
+                if not capsule:
+                    capsule = memory_service.build_event_capsule(
+                        topic=str(ev.topic or ""),
+                        spread_type=str(ev.spread_type or ""),
+                        question=str(ev.question or ""),
+                        description=str(ev_summary.get("description_excerpt") or ""),
+                        cards=list(ev.cards or []),
+                    )
+                if not capsule:
+                    continue
+                source_id = int(ev.source_id)
+                if str(ev.source_kind or "") == "card_of_day":
+                    cod_capsule_by_id[source_id] = capsule
+                else:
+                    reading_capsule_by_id[source_id] = capsule
+
     items: List[dict] = []
 
     for r in cod_rows:
+        cod_capsule = cod_capsule_by_id.get(int(r.id))
+        if not cod_capsule:
+            cod_capsule = memory_service.build_event_capsule(
+                topic=str(r.topic or ""),
+                spread_type="card_of_day",
+                question=str(r.question or ""),
+                description=str(r.description or ""),
+                cards=memory_service.build_card_of_day_cards_payload(
+                    card_index=int(r.card_index or 0),
+                    card_name=str(r.card_name or ""),
+                    is_reversed=memory_service.infer_reversed_from_text(str(r.description or "")),
+                ),
+            )
         items.append(
             {
                 "kind": "card_of_day",
@@ -3227,11 +3457,21 @@ async def get_unified_history(
                     "card_index": r.card_index,
                     "card_name": r.card_name,
                     "description": r.description,
+                    "theme_capsule": cod_capsule or None,
                 },
             }
         )
 
     for r in rd_rows:
+        reading_capsule = reading_capsule_by_id.get(int(r.id))
+        if not reading_capsule:
+            reading_capsule = memory_service.build_event_capsule(
+                topic=str(r.topic or ""),
+                spread_type=str(r.spread_type or ""),
+                question=str(r.question or ""),
+                description=str(r.description or ""),
+                cards=list(r.cards or []),
+            )
         items.append(
             {
                 "kind": "reading",
@@ -3243,6 +3483,7 @@ async def get_unified_history(
                     "question": r.question,
                     "cards": r.cards,
                     "description": r.description,
+                    "theme_capsule": reading_capsule or None,
                 },
             }
         )

@@ -598,20 +598,19 @@ function SpreadIcon({ kind }: { kind: 'sun' | 'clock' | 'cards' | 'branch' }) {
 function StartReadingIcon() {
   return (
     <svg viewBox="0 0 24 24" aria-hidden="true" fill="none">
-      <g stroke="currentColor" strokeWidth="1.45" strokeLinecap="round" strokeLinejoin="round">
-        <circle cx="12" cy="12" r="4.2" />
-        <path d="M12 2.7c.65 1.6.83 3.05.83 5.15" />
-        <path d="M21.3 12c-1.6.65-3.05.83-5.15.83" />
-        <path d="M12 21.3c-.65-1.6-.83-3.05-.83-5.15" />
-        <path d="M2.7 12c1.6-.65 3.05-.83 5.15-.83" />
-        <path d="M18.55 5.45c-.95 1.44-1.93 2.43-3.47 3.48" />
-        <path d="M18.55 18.55c-1.44-.95-2.43-1.93-3.48-3.47" />
-        <path d="M5.45 18.55c.95-1.44 1.93-2.43 3.47-3.48" />
-        <path d="M5.45 5.45c1.44.95 2.43 1.93 3.48 3.47" />
-        <path d="M12 4.1c.25 1.1.33 2.08.33 3.22" opacity="0.7" />
-        <path d="M19.9 12c-1.1.25-2.08.33-3.22.33" opacity="0.7" />
-        <path d="M12 19.9c-.25-1.1-.33-2.08-.33-3.22" opacity="0.7" />
-        <path d="M4.1 12c1.1-.25 2.08-.33 3.22-.33" opacity="0.7" />
+      <g stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+        <circle cx="12" cy="12" r="4.25" />
+        <circle cx="12" cy="12" r="5.8" opacity="0.55" />
+
+        <path d="M12 2.2c.6 1 .95 2 .95 3.35" />
+        <path d="M21.8 12c-1 .6-2 .95-3.35.95" />
+        <path d="M12 21.8c-.6-1-.95-2-.95-3.35" />
+        <path d="M2.2 12c1-.6 2-.95 3.35-.95" />
+
+        <path d="M18.6 5.4c-.95 1-1.95 1.65-3.1 2.25" />
+        <path d="M18.6 18.6c-1-.95-1.65-1.95-2.25-3.1" />
+        <path d="M5.4 18.6c.95-1 1.95-1.65 3.1-2.25" />
+        <path d="M5.4 5.4c1 .95 1.65 1.95 2.25 3.1" />
       </g>
     </svg>
   )

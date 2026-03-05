@@ -672,6 +672,11 @@ body,
   z-index: 26;
 }
 
+.home-primary-footer .glass-cta {
+  width: 100%;
+  max-width: none;
+}
+
 .home-primary-footer::before {
   display: none;
 }
@@ -690,18 +695,18 @@ body,
 }
 
 .glass-cta--primary-footer .glass-cta__inner {
-  height: 58px;
-  border-radius: 22px;
-  border: 1px solid rgba(176, 220, 255, 0.42);
+  height: 56px;
+  border-radius: 18px;
+  border: 1px solid rgba(170, 214, 255, 0.44);
   background:
-    radial-gradient(140px 88px at 16% 18%, rgba(255, 255, 255, 0.18), transparent 50%),
-    radial-gradient(180px 110px at 84% 82%, rgba(100, 181, 255, 0.16), transparent 58%),
-    linear-gradient(180deg, rgba(72, 133, 255, 0.46), rgba(24, 68, 164, 0.5));
+    radial-gradient(135px 82px at 16% 18%, rgba(255, 255, 255, 0.18), transparent 52%),
+    radial-gradient(170px 105px at 84% 82%, rgba(100, 181, 255, 0.18), transparent 60%),
+    linear-gradient(180deg, rgba(67, 145, 255, 0.38), rgba(19, 82, 196, 0.46));
   box-shadow:
-    0 16px 32px rgba(19, 74, 179, 0.26),
-    0 0 0 1px rgba(255, 255, 255, 0.08) inset;
-  backdrop-filter: blur(24px) saturate(1.2);
-  -webkit-backdrop-filter: blur(24px) saturate(1.2);
+    0 12px 28px rgba(15, 84, 211, 0.32),
+    0 0 0 1px rgba(255, 255, 255, 0.09) inset;
+  backdrop-filter: blur(22px) saturate(1.16);
+  -webkit-backdrop-filter: blur(22px) saturate(1.16);
   transition:
     transform 200ms ease-out,
     filter 200ms ease-out,
@@ -713,15 +718,15 @@ body,
 
 .glass-cta--primary-footer .glass-cta__rim {
   inset: 1px;
-  border-radius: 21px;
+  border-radius: 17px;
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.28), rgba(255, 255, 255, 0.08) 44%, rgba(255, 255, 255, 0.02));
-  opacity: 0.82;
+  opacity: 0.72;
 }
 
 .glass-cta--primary-footer .glass-cta__spark {
   display: block;
-  border-radius: 22px;
-  opacity: 0.42;
+  border-radius: 18px;
+  opacity: 0.34;
   background:
     radial-gradient(96px 46px at var(--rx, 50%) var(--ry, 50%), rgba(255, 255, 255, 0.14), transparent 72%);
 }
@@ -729,20 +734,20 @@ body,
 .glass-cta--primary-footer .glass-cta__icon {
   position: relative;
   z-index: 1;
-  width: 22px;
-  height: 22px;
-  margin-right: 9px;
+  width: 20px;
+  height: 20px;
+  margin-right: 8px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  color: rgba(245, 251, 255, 0.96);
+  color: rgba(248, 252, 255, 0.98);
 }
 
 .glass-cta--primary-footer .glass-cta__icon svg {
-  width: 22px;
-  height: 22px;
+  width: 20px;
+  height: 20px;
   display: block;
-  filter: drop-shadow(0 2px 8px rgba(11, 30, 72, 0.22));
+  filter: drop-shadow(0 2px 8px rgba(11, 30, 72, 0.3));
 }
 
 .glass-cta--primary-footer .glass-cta__text {
@@ -750,7 +755,7 @@ body,
   z-index: 1;
   color: rgba(246, 251, 255, 0.98);
   font-size: 17px;
-  font-weight: 720;
+  font-weight: 600;
   letter-spacing: -0.01em;
   text-shadow: 0 10px 22px rgba(7, 21, 56, 0.28);
 }

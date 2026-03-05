@@ -53,6 +53,14 @@ load_dotenv()
 
 logger = logging.getLogger("telegram_bot")
 
+
+def _env_int(name: str, default: int = 0) -> int:
+    raw = str(os.environ.get(name) or "").strip()
+    if raw.lstrip("-").isdigit():
+        return int(raw)
+    return int(default)
+
+
 BOT_TOKEN = (os.environ.get("TELEGRAM_BOT_TOKEN") or "").strip()
 PROVIDER_TOKEN = (
     os.environ.get("TELEGRAM_PROVIDER_TOKEN")
@@ -75,6 +83,12 @@ SBP_BOT_LINK_SECRET = (
     or os.environ.get("YOOKASSA_WEBHOOK_TOKEN")
     or ""
 ).strip()
+CLICK_BOT_LINK_SECRET = (
+    os.environ.get("CLICK_BOT_LINK_SECRET")
+    or SBP_BOT_LINK_SECRET
+    or ""
+).strip()
+CLICK_BOT_LINK_TTL_SEC = max(60, int(os.environ.get("CLICK_BOT_LINK_TTL_SEC", "900")))
 SBP_AUTOPAY_ENABLED = str(os.environ.get("SBP_AUTOPAY_ENABLED", "1")).strip().lower() not in {"0", "false", "no"}
 SBP_AUTOPAY_PLAN_KEY = (os.environ.get("SBP_AUTOPAY_PLAN_CODE") or "sub_month").strip().lower()
 
@@ -87,6 +101,8 @@ YOOKASSA_CONTACT_MODE = (os.environ.get("YOOKASSA_CONTACT_MODE") or "email").str
 ENABLE_YOOKASSA_PAYMENTS = str(os.environ.get("ENABLE_YOOKASSA_PAYMENTS", "1")).strip().lower() not in {"0", "false", "no"}
 ENABLE_STARS_FALLBACK = str(os.environ.get("ENABLE_STARS_FALLBACK", "1")).strip().lower() not in {"0", "false", "no"}
 ENABLE_CLICK_PAYMENTS = str(os.environ.get("ENABLE_CLICK_PAYMENTS", "0")).strip().lower() not in {"0", "false", "no"}
+CLICK_SERVICE_ID = _env_int("CLICK_SERVICE_ID", 0)
+CLICK_MERCHANT_ID = _env_int("CLICK_MERCHANT_ID", 0)
 STARS_SUB_2WEEKS = max(1, int(os.environ.get("STARS_SUB_2WEEKS", "120")))
 STARS_SUB_MONTH = max(1, int(os.environ.get("STARS_SUB_MONTH", "199")))
 CLICK_CURRENCY = (os.environ.get("CLICK_CURRENCY") or "UZS").strip().upper()
@@ -333,14 +349,39 @@ def _build_sbp_autopay_link(*, tg_user_id: int, plan_key: str) -> Optional[str]:
     return f"{API_PUBLIC_BASE}/billing/sbp/autopay/bot-link?{query}"
 
 
+def _build_click_payment_link(*, tg_user_id: int, plan_key: str) -> Optional[str]:
+    if not API_PUBLIC_BASE or not CLICK_BOT_LINK_SECRET:
+        return None
+    exp = int(time.time()) + int(CLICK_BOT_LINK_TTL_SEC)
+    payload = f"{int(tg_user_id)}:{str(plan_key).strip().lower()}:{exp}"
+    sig = hmac.new(
+        CLICK_BOT_LINK_SECRET.encode("utf-8"),
+        payload.encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
+    query = urlencode(
+        {
+            "tg_user_id": int(tg_user_id),
+            "plan_code": str(plan_key).strip().lower(),
+            "exp": exp,
+            "sig": sig,
+        }
+    )
+    return f"{API_PUBLIC_BASE}/billing/click/bot-link?{query}"
+
+
 def _products_for_mode(mode: str = "menu") -> List[Dict[str, Any]]:
     mode_l = str(mode or "menu").strip().lower()
     items = PRODUCTS
+    click_link_available = bool(
+        API_PUBLIC_BASE and CLICK_BOT_LINK_SECRET and CLICK_SERVICE_ID > 0 and CLICK_MERCHANT_ID > 0
+    )
+    click_available = bool(ENABLE_CLICK_PAYMENTS and (CLICK_PROVIDER_TOKEN or click_link_available))
     if not ENABLE_YOOKASSA_PAYMENTS:
         items = [p for p in items if str(p.get("provider_mode") or "").lower() != "yookassa"]
     if not ENABLE_STARS_FALLBACK:
         items = [p for p in items if str(p.get("currency") or "RUB").upper() != "XTR"]
-    if not ENABLE_CLICK_PAYMENTS or not CLICK_PROVIDER_TOKEN:
+    if not click_available:
         items = [p for p in items if str(p.get("provider_mode") or "").lower() != "click"]
     items = [p for p in items if int(p.get("amount") or 0) > 0]
 
@@ -2155,11 +2196,32 @@ async def buy_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         logger.error("TELEGRAM_PROVIDER_TOKEN is not set for yookassa product=%s", product_code)
         return
     if provider_mode == "click" and not CLICK_PROVIDER_TOKEN:
+        tg_user_id = int(getattr(query.from_user, "id", 0) or 0)
+        plan_key = _plan_key_from_code(product_code)
+        payment_link = _build_click_payment_link(tg_user_id=tg_user_id, plan_key=plan_key) if tg_user_id > 0 else None
+        if not payment_link:
+            if query.message:
+                await query.message.reply_text(
+                    "Оплата через CLICK временно недоступна. Выберите другой способ оплаты."
+                )
+            logger.error("CLICK payment link is not available for product=%s", product_code)
+            return
         if query.message:
+            rows = [
+                [InlineKeyboardButton("🇺🇿 Оплатить через CLICK", url=payment_link)],
+                [InlineKeyboardButton("⬅️ Назад к способам оплаты", callback_data=f"plan:uz:{plan_key}")],
+            ]
             await query.message.reply_text(
-                "Оплата через CLICK временно недоступна. Выберите другой способ оплаты."
+                (
+                    f"<b>Оплата через CLICK</b>\n"
+                    f"Тариф: {escape(str(product.get('title') or product_code))}\n"
+                    f"Сумма: {_format_amount_label(product)}\n\n"
+                    "Нажмите кнопку ниже и завершите оплату в CLICK."
+                ),
+                reply_markup=InlineKeyboardMarkup(rows),
+                parse_mode=ParseMode.HTML,
+                disable_web_page_preview=True,
             )
-        logger.error("CLICK provider token is not set for product=%s", product_code)
         return
 
     # payload должен быть уникальным и <= 128 байт

@@ -60,6 +60,11 @@ class User(Base):
         cascade="all, delete-orphan",
     )
 
+    click_orders: Mapped[List["ClickOrder"]] = relationship(
+        back_populates="user",
+        cascade="all, delete-orphan",
+    )
+
     sbp_autopay_subscriptions: Mapped[List["SbpAutopaySubscription"]] = relationship(
         back_populates="user",
         cascade="all, delete-orphan",
@@ -253,6 +258,47 @@ class SbpAutopaySubscription(Base):
     )
 
     user: Mapped["User"] = relationship(back_populates="sbp_autopay_subscriptions")
+
+
+class ClickOrder(Base):
+    __tablename__ = "click_orders"
+    __table_args__ = (
+        UniqueConstraint("order_id", name="uq_click_orders_order_id"),
+        UniqueConstraint("click_trans_id", name="uq_click_orders_click_trans_id"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+
+    order_id: Mapped[str] = mapped_column(String(80), index=True)
+    plan_code: Mapped[str] = mapped_column(String(64), index=True)
+    amount: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    currency: Mapped[str] = mapped_column(String(8), default="UZS")
+
+    status: Mapped[str] = mapped_column(String(32), default="pending", server_default="pending", index=True)
+    click_trans_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, index=True)
+    click_paydoc_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    merchant_prepare_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+
+    provider_error: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    provider_error_note: Mapped[Optional[str]] = mapped_column(String(256), nullable=True)
+    prepare_payload: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSON, nullable=True)
+    complete_payload: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSON, nullable=True)
+
+    activation_applied: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+    paid_at: Mapped[Optional[DateTime]] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    created_at: Mapped[DateTime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+    )
+    updated_at: Mapped[DateTime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+    user: Mapped["User"] = relationship(back_populates="click_orders")
 
 
 class SupportTicket(Base):

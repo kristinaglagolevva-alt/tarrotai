@@ -14,6 +14,7 @@ import uuid
 from datetime import date, datetime, timedelta, timezone
 from html import escape
 from typing import Optional, List, Literal, Dict, Any
+from urllib.parse import urlencode
 try:
     from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 except Exception:  # Python 3.8 fallback
@@ -36,6 +37,7 @@ from models import (
     Reading,
     PaymentTransaction,
     SbpOrder,
+    ClickOrder,
     SbpAutopaySubscription,
     SupportTicket,
     SupportTicketMessage,
@@ -129,6 +131,37 @@ SBP_AUTOPAY_PLAN_CODE = (os.getenv("SBP_AUTOPAY_PLAN_CODE") or "sub_month").stri
 SBP_AUTOPAY_INTERVAL_DAYS = max(1, int(os.getenv("SBP_AUTOPAY_INTERVAL_DAYS", "30")))
 SBP_AUTOPAY_MAX_FAILS = max(1, int(os.getenv("SBP_AUTOPAY_MAX_FAILS", "3")))
 SBP_AUTOPAY_WORKER_INTERVAL_SEC = max(60, int(os.getenv("SBP_AUTOPAY_WORKER_INTERVAL_SEC", "300")))
+CLICK_SERVICE_ID_RAW = (os.getenv("CLICK_SERVICE_ID") or "").strip()
+CLICK_MERCHANT_ID_RAW = (os.getenv("CLICK_MERCHANT_ID") or "").strip()
+CLICK_MERCHANT_USER_ID_RAW = (
+    os.getenv("CLICK_MERCHANT_USER_ID")
+    or os.getenv("CLICK_MERCHANT_USER")
+    or ""
+).strip()
+CLICK_SECRET_KEY = (os.getenv("CLICK_SECRET_KEY") or "").strip()
+CLICK_PAYMENT_BASE_URL = (os.getenv("CLICK_PAYMENT_BASE_URL") or "https://my.click.uz/services/pay").strip().rstrip("/")
+CLICK_RETURN_URL = (
+    os.getenv("CLICK_RETURN_URL")
+    or os.getenv("TELEGRAM_APP_URL")
+    or "https://tarrotai.ru"
+).strip()
+CLICK_CURRENCY = (os.getenv("CLICK_CURRENCY") or "UZS").strip().upper()
+CLICK_BOT_LINK_SECRET = (
+    os.getenv("CLICK_BOT_LINK_SECRET")
+    or SBP_BOT_LINK_SECRET
+    or ""
+).strip()
+CLICK_BOT_LINK_TTL_SEC = max(60, int(os.getenv("CLICK_BOT_LINK_TTL_SEC", "900")))
+CLICK_PLAN_2WEEKS_AMOUNT_RAW = (
+    os.getenv("CLICK_API_SUB_2WEEKS_AMOUNT")
+    or os.getenv("CLICK_SUB_2WEEKS_AMOUNT")
+    or "0"
+).strip()
+CLICK_PLAN_MONTH_AMOUNT_RAW = (
+    os.getenv("CLICK_API_SUB_MONTH_AMOUNT")
+    or os.getenv("CLICK_SUB_MONTH_AMOUNT")
+    or "0"
+).strip()
 ANALYTICS_ADMIN_TOKEN = (os.getenv("ANALYTICS_ADMIN_TOKEN") or "").strip()
 VISION_ESCALATION_COUNTER_KEY = "photo_analysis"
 VISION_ESCALATION_TZ_NAME = (os.getenv("OPENAI_VISION_ESCALATION_TZ") or "Asia/Tashkent").strip() or "Asia/Tashkent"
@@ -157,6 +190,38 @@ def _safe_env_int(name: str, default: int) -> int:
 VISION_ESCALATION_MAX_RATIO = min(1.0, max(0.0, _safe_env_float("OPENAI_VISION_ESCALATION_MAX_RATIO", 0.25)))
 VISION_ESCALATION_DAILY_MAX = max(0, _safe_env_int("OPENAI_VISION_ESCALATION_DAILY_MAX", 0))
 VISION_ESCALATION_MIN_SAMPLES = max(0, _safe_env_int("OPENAI_VISION_ESCALATION_MIN_SAMPLES", 20))
+
+
+def _parse_int_or_default(raw: str, default: int = 0) -> int:
+    try:
+        return int(str(raw or "").strip())
+    except Exception:
+        return int(default)
+
+
+CLICK_SERVICE_ID = max(0, _parse_int_or_default(CLICK_SERVICE_ID_RAW, 0))
+CLICK_MERCHANT_ID = max(0, _parse_int_or_default(CLICK_MERCHANT_ID_RAW, 0))
+CLICK_MERCHANT_USER_ID = max(0, _parse_int_or_default(CLICK_MERCHANT_USER_ID_RAW, 0))
+
+CLICK_PLANS: Dict[str, Dict[str, Any]] = {
+    "sub_2weeks": {
+        "code": "sub_2weeks",
+        "title": "Безлимит на 2 недели (CLICK)",
+        "description": "Подписка AI Tarot на 14 дней через CLICK",
+        "days": 14,
+        "amount": max(0, _parse_int_or_default(CLICK_PLAN_2WEEKS_AMOUNT_RAW, 0)),
+        "currency": CLICK_CURRENCY,
+    },
+    "sub_month": {
+        "code": "sub_month",
+        "title": "Безлимит на месяц (CLICK)",
+        "description": "Подписка AI Tarot на 30 дней через CLICK",
+        "days": 30,
+        "amount": max(0, _parse_int_or_default(CLICK_PLAN_MONTH_AMOUNT_RAW, 0)),
+        "currency": CLICK_CURRENCY,
+    },
+}
+
 try:
     VISION_ESCALATION_TZ = ZoneInfo(VISION_ESCALATION_TZ_NAME)
 except ZoneInfoNotFoundError:
@@ -222,6 +287,13 @@ def _validate_security_boot_config() -> None:
         min_len=24,
         required=False,
     )
+    # Click can work in parallel with other providers; validate a complete set only if any field is enabled.
+    click_any = bool(CLICK_SERVICE_ID or CLICK_MERCHANT_ID or CLICK_SECRET_KEY)
+    click_all = bool(CLICK_SERVICE_ID > 0 and CLICK_MERCHANT_ID > 0 and CLICK_SECRET_KEY)
+    if click_any and not click_all:
+        raise RuntimeError(
+            "CLICK config is incomplete. Set CLICK_SERVICE_ID, CLICK_MERCHANT_ID and CLICK_SECRET_KEY together."
+        )
 
 
 # ============================ CORS ============================
@@ -351,6 +423,7 @@ async def health() -> dict:
         "time": datetime.utcnow().isoformat(),
         "sbp_configured": _yookassa_sbp_configured(),
         "sbp_autopay_enabled": SBP_AUTOPAY_ENABLED,
+        "click_configured": _click_api_configured(),
     }
 
 
@@ -521,6 +594,121 @@ def _yookassa_sbp_configured() -> bool:
 
 def _is_sbp_autopay_plan(plan_code: str) -> bool:
     return str(plan_code or "").strip().lower() == SBP_AUTOPAY_PLAN_CODE
+
+
+def _click_api_configured() -> bool:
+    return bool(CLICK_SERVICE_ID > 0 and CLICK_MERCHANT_ID > 0 and CLICK_SECRET_KEY)
+
+
+def _get_click_plan(plan_code: str) -> Dict[str, Any]:
+    code = str(plan_code or "").strip().lower()
+    plan = CLICK_PLANS.get(code)
+    if not plan:
+        raise HTTPException(status_code=400, detail={"code": "INVALID_PLAN", "message": "Неизвестный тариф Click."})
+    if int(plan.get("amount") or 0) <= 0:
+        raise HTTPException(
+            status_code=503,
+            detail={"code": "CLICK_PLAN_DISABLED", "message": f"Тариф Click '{code}' пока не настроен."},
+        )
+    return plan
+
+
+def _click_sign_raw(
+    *,
+    click_trans_id: str,
+    service_id: str,
+    merchant_trans_id: str,
+    amount: str,
+    action: str,
+    sign_time: str,
+    merchant_prepare_id: str = "",
+) -> str:
+    payload = (
+        f"{str(click_trans_id)}"
+        f"{str(service_id)}"
+        f"{CLICK_SECRET_KEY}"
+        f"{str(merchant_trans_id)}"
+        f"{str(merchant_prepare_id)}"
+        f"{str(amount)}"
+        f"{str(action)}"
+        f"{str(sign_time)}"
+    )
+    return hashlib.md5(payload.encode("utf-8")).hexdigest()
+
+
+def _click_build_payment_url(*, order_id: str, amount: int, return_url: Optional[str] = None) -> str:
+    params: Dict[str, str] = {
+        "service_id": str(CLICK_SERVICE_ID),
+        "merchant_id": str(CLICK_MERCHANT_ID),
+        "amount": str(max(0, int(amount))),
+        "transaction_param": str(order_id),
+    }
+    if CLICK_MERCHANT_USER_ID > 0:
+        params["merchant_user_id"] = str(CLICK_MERCHANT_USER_ID)
+    target_return = str(return_url or CLICK_RETURN_URL or "").strip()
+    if target_return:
+        params["return_url"] = _append_query_param(target_return, "click_order_id", str(order_id))
+    return f"{CLICK_PAYMENT_BASE_URL}?{urlencode(params)}"
+
+
+def _click_amount_matches(*, request_amount: str, expected_amount: int) -> bool:
+    try:
+        value = float(str(request_amount or "").strip())
+    except Exception:
+        return False
+    return abs(value - float(int(expected_amount))) < 0.01
+
+
+def _click_bot_link_signature(*, tg_user_id: int, plan_code: str, exp: int) -> str:
+    payload = f"{int(tg_user_id)}:{str(plan_code).strip().lower()}:{int(exp)}"
+    return hmac.new(
+        CLICK_BOT_LINK_SECRET.encode("utf-8"),
+        payload.encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
+
+
+def _verify_click_bot_link_signature(*, tg_user_id: int, plan_code: str, exp: int, sig: str) -> bool:
+    if not CLICK_BOT_LINK_SECRET:
+        return False
+    expected = _click_bot_link_signature(tg_user_id=tg_user_id, plan_code=plan_code, exp=exp)
+    actual = str(sig or "").strip().lower()
+    return bool(actual) and hmac.compare_digest(expected, actual)
+
+
+CLICK_ERROR_NOTES: Dict[int, str] = {
+    0: "Success",
+    -1: "SIGN CHECK FAILED!",
+    -2: "Incorrect parameter amount",
+    -3: "Action not found",
+    -4: "Already paid",
+    -5: "User does not exist",
+    -6: "Transaction does not exist",
+    -7: "Failed to update user",
+    -8: "Error in request from click",
+    -9: "Transaction cancelled",
+}
+
+
+def _click_build_response(
+    *,
+    click_trans_id: str,
+    merchant_trans_id: str,
+    error: int,
+    merchant_prepare_id: Optional[int] = None,
+    merchant_confirm_id: Optional[int] = None,
+) -> Dict[str, Any]:
+    out: Dict[str, Any] = {
+        "click_trans_id": str(click_trans_id or ""),
+        "merchant_trans_id": str(merchant_trans_id or ""),
+        "error": int(error),
+        "error_note": CLICK_ERROR_NOTES.get(int(error), "Error in request from click"),
+    }
+    if merchant_prepare_id is not None:
+        out["merchant_prepare_id"] = int(merchant_prepare_id)
+    if merchant_confirm_id is not None:
+        out["merchant_confirm_id"] = int(merchant_confirm_id)
+    return out
 
 
 def _rub_value_from_kopecks(kopecks: int) -> str:
@@ -705,6 +893,48 @@ async def _apply_subscription_from_sbp(
     return True, new_sub_until
 
 
+async def _apply_subscription_from_click(
+    db: AsyncSession,
+    *,
+    user: User,
+    plan: Dict[str, Any],
+    click_trans_id: str,
+    order_id: str,
+) -> tuple[bool, Optional[datetime]]:
+    provider_ref = str(click_trans_id or "").strip() or str(order_id or "").strip()
+    if not provider_ref:
+        return False, _to_utc(user.subscription_until)
+
+    provider_charge_id = f"click_api:{provider_ref}"
+    exists_q = await db.execute(
+        select(PaymentTransaction.id).where(PaymentTransaction.provider_payment_charge_id == provider_charge_id)
+    )
+    exists = exists_q.scalar_one_or_none()
+    if exists:
+        return False, _to_utc(user.subscription_until)
+
+    now = datetime.now(timezone.utc)
+    sub_until = _to_utc(user.subscription_until)
+    base = sub_until if sub_until and sub_until > now else now
+    new_sub_until = base + timedelta(days=int(plan["days"]))
+    user.subscription_until = new_sub_until
+
+    tx = PaymentTransaction(
+        user_id=int(user.id),
+        invoice_payload=f"click:{order_id}",
+        product_code=f"{str(plan['code'])}_click",
+        kind="subscription",
+        amount=int(plan["amount"]),
+        currency=str(plan.get("currency") or CLICK_CURRENCY),
+        credits_delta=0,
+        subscription_days=int(plan["days"]),
+        telegram_payment_charge_id=None,
+        provider_payment_charge_id=provider_charge_id,
+    )
+    db.add(tx)
+    return True, new_sub_until
+
+
 async def _recompute_user_subscription_until(db: AsyncSession, user: User) -> Optional[datetime]:
     """
     Rebuild subscription_until from non-refunded subscription transactions.
@@ -781,6 +1011,33 @@ async def _ensure_runtime_schema(conn) -> None:
         "CREATE UNIQUE INDEX IF NOT EXISTS uq_sbp_autopay_user_id ON sbp_autopay_subscriptions (user_id);",
         "CREATE UNIQUE INDEX IF NOT EXISTS uq_sbp_autopay_payment_method ON sbp_autopay_subscriptions (payment_method_id);",
         "CREATE INDEX IF NOT EXISTS ix_sbp_autopay_status_next_charge ON sbp_autopay_subscriptions (status, next_charge_at);",
+        """
+        CREATE TABLE IF NOT EXISTS click_orders (
+            id SERIAL PRIMARY KEY,
+            user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            order_id VARCHAR(80) NOT NULL,
+            plan_code VARCHAR(64) NOT NULL,
+            amount INTEGER NOT NULL DEFAULT 0,
+            currency VARCHAR(8) NOT NULL DEFAULT 'UZS',
+            status VARCHAR(32) NOT NULL DEFAULT 'pending',
+            click_trans_id VARCHAR(64) NULL,
+            click_paydoc_id VARCHAR(64) NULL,
+            merchant_prepare_id INTEGER NULL,
+            provider_error INTEGER NULL,
+            provider_error_note VARCHAR(256) NULL,
+            prepare_payload JSON NULL,
+            complete_payload JSON NULL,
+            activation_applied BOOLEAN NOT NULL DEFAULT FALSE,
+            paid_at TIMESTAMPTZ NULL,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+        """,
+        "CREATE UNIQUE INDEX IF NOT EXISTS uq_click_orders_order_id ON click_orders (order_id);",
+        "CREATE UNIQUE INDEX IF NOT EXISTS uq_click_orders_click_trans_id ON click_orders (click_trans_id);",
+        "CREATE INDEX IF NOT EXISTS ix_click_orders_user_id ON click_orders (user_id);",
+        "CREATE INDEX IF NOT EXISTS ix_click_orders_status ON click_orders (status);",
+        "CREATE INDEX IF NOT EXISTS ix_click_orders_plan_code ON click_orders (plan_code);",
         """
         CREATE TABLE IF NOT EXISTS support_tickets (
             id SERIAL PRIMARY KEY,
@@ -1147,6 +1404,31 @@ class SbpStatusOut(BaseModel):
     message: str = ""
 
 
+class ClickCreateIn(BaseModel):
+    plan_code: Literal["sub_2weeks", "sub_month"] = "sub_2weeks"
+
+
+class ClickCreateOut(BaseModel):
+    order_id: str
+    plan_code: str
+    amount: int
+    currency: str
+    status: str
+    payment_url: str
+
+
+class ClickStatusOut(BaseModel):
+    order_id: str
+    plan_code: str
+    status: str
+    amount: int
+    currency: str
+    paid_at: Optional[datetime] = None
+    has_active_subscription: bool = False
+    subscription_until: Optional[datetime] = None
+    message: str = ""
+
+
 class CardOfDayCreateIn(BaseModel):
     topic: str = "other"
     question: str = ""
@@ -1485,6 +1767,19 @@ def _sbp_status_message(status: str) -> str:
         return "Ожидаем завершения оплаты в банке."
     if normalized == "waiting_for_capture":
         return "Платёж получен и подтверждается."
+    return "Статус платежа обновляется."
+
+
+def _click_status_message(status: str) -> str:
+    normalized = str(status or "").strip().lower()
+    if normalized == "succeeded":
+        return "Оплата через CLICK подтверждена, подписка активирована."
+    if normalized in {"cancelled", "canceled"}:
+        return "Платёж CLICK отменён."
+    if normalized == "prepared":
+        return "Счёт в CLICK подготовлен, ожидаем завершения оплаты."
+    if normalized == "pending":
+        return "Счёт создан, ожидаем подтверждения от CLICK."
     return "Статус платежа обновляется."
 
 
@@ -3137,6 +3432,524 @@ async def billing_sbp_webhook(
 
     await db.commit()
     return {"ok": True}
+
+
+def _click_collect_payload(**kwargs: Optional[str]) -> Dict[str, str]:
+    return {k: str(v or "").strip() for k, v in kwargs.items()}
+
+
+def _click_missing_fields(payload: Dict[str, str], required: List[str]) -> List[str]:
+    missing: List[str] = []
+    for key in required:
+        if not str(payload.get(key) or "").strip():
+            missing.append(key)
+    return missing
+
+
+@app.post("/billing/click/create", response_model=ClickCreateOut)
+async def billing_click_create(
+    payload: ClickCreateIn,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    if not _click_api_configured():
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "code": "CLICK_NOT_CONFIGURED",
+                "message": "Click пока не настроен: задайте CLICK_SERVICE_ID, CLICK_MERCHANT_ID и CLICK_SECRET_KEY.",
+            },
+        )
+    plan = _get_click_plan(payload.plan_code)
+    order_id = f"click_{current_user.id}_{secrets.token_hex(8)}"
+    payment_url = _click_build_payment_url(order_id=order_id, amount=int(plan["amount"]))
+
+    row = ClickOrder(
+        user_id=int(current_user.id),
+        order_id=order_id,
+        plan_code=str(plan["code"]),
+        amount=int(plan["amount"]),
+        currency=str(plan.get("currency") or CLICK_CURRENCY),
+        status="pending",
+    )
+    db.add(row)
+    await db.commit()
+
+    return {
+        "order_id": order_id,
+        "plan_code": str(plan["code"]),
+        "amount": int(plan["amount"]),
+        "currency": str(plan.get("currency") or CLICK_CURRENCY),
+        "status": "pending",
+        "payment_url": payment_url,
+    }
+
+
+@app.get("/billing/click/bot-link")
+async def billing_click_bot_link(
+    tg_user_id: int = Query(..., ge=1),
+    plan_code: Literal["sub_2weeks", "sub_month"] = Query(...),
+    exp: int = Query(..., ge=1),
+    sig: str = Query(..., min_length=16, max_length=128),
+    db: AsyncSession = Depends(get_db),
+):
+    if not _click_api_configured():
+        raise HTTPException(status_code=503, detail={"code": "CLICK_NOT_CONFIGURED", "message": "Click ещё не настроен."})
+    if not CLICK_BOT_LINK_SECRET:
+        raise HTTPException(status_code=503, detail={"code": "CLICK_LINK_SECRET_MISSING", "message": "CLICK_BOT_LINK_SECRET не задан."})
+
+    now_ts = int(datetime.now(timezone.utc).timestamp())
+    if exp < now_ts - 30:
+        raise HTTPException(status_code=401, detail={"code": "CLICK_LINK_EXPIRED", "message": "Ссылка устарела."})
+    if exp > now_ts + max(3600, CLICK_BOT_LINK_TTL_SEC):
+        raise HTTPException(status_code=401, detail={"code": "CLICK_LINK_INVALID", "message": "Некорректная ссылка."})
+    if not _verify_click_bot_link_signature(tg_user_id=tg_user_id, plan_code=plan_code, exp=exp, sig=sig):
+        raise HTTPException(status_code=401, detail={"code": "CLICK_LINK_INVALID", "message": "Некорректная подпись."})
+
+    plan = _get_click_plan(plan_code)
+
+    q_user = await db.execute(select(User).where(User.telegram_id == int(tg_user_id)))
+    user = q_user.scalar_one_or_none()
+    if not user:
+        user = User(telegram_id=int(tg_user_id), paid_readings_balance=0)
+        db.add(user)
+        await db.flush()
+
+    order_id = f"click_tg_{user.id}_{secrets.token_hex(8)}"
+    payment_url = _click_build_payment_url(order_id=order_id, amount=int(plan["amount"]))
+    row = ClickOrder(
+        user_id=int(user.id),
+        order_id=order_id,
+        plan_code=str(plan["code"]),
+        amount=int(plan["amount"]),
+        currency=str(plan.get("currency") or CLICK_CURRENCY),
+        status="pending",
+    )
+    db.add(row)
+    await db.commit()
+
+    return RedirectResponse(url=payment_url, status_code=302)
+
+
+@app.get("/billing/click/status", response_model=ClickStatusOut)
+async def billing_click_status(
+    order_id: str = Query(..., min_length=8, max_length=96),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    q = await db.execute(
+        select(ClickOrder).where(
+            ClickOrder.order_id == str(order_id),
+            ClickOrder.user_id == int(current_user.id),
+        )
+    )
+    order = q.scalar_one_or_none()
+    if not order:
+        raise HTTPException(status_code=404, detail={"code": "CLICK_ORDER_NOT_FOUND", "message": "Счёт не найден."})
+
+    if str(order.status or "").strip().lower() == "succeeded" and not bool(order.activation_applied):
+        plan = _get_click_plan(order.plan_code)
+        await _apply_subscription_from_click(
+            db,
+            user=current_user,
+            plan=plan,
+            click_trans_id=str(order.click_trans_id or ""),
+            order_id=str(order.order_id),
+        )
+        order.activation_applied = True
+        if not order.paid_at:
+            order.paid_at = datetime.now(timezone.utc)
+        await db.commit()
+
+    await db.refresh(current_user)
+    await db.refresh(order)
+    sub_until = _to_utc(current_user.subscription_until)
+    has_sub = bool(sub_until and sub_until > datetime.now(timezone.utc))
+    return {
+        "order_id": str(order.order_id),
+        "plan_code": str(order.plan_code),
+        "status": str(order.status or "pending"),
+        "amount": int(order.amount or 0),
+        "currency": str(order.currency or CLICK_CURRENCY),
+        "paid_at": _to_utc(order.paid_at),
+        "has_active_subscription": has_sub,
+        "subscription_until": sub_until,
+        "message": _click_status_message(str(order.status or "pending")),
+    }
+
+
+@app.post("/billing/click/prepare")
+async def billing_click_prepare(
+    click_trans_id: Optional[str] = Form(default=None),
+    service_id: Optional[str] = Form(default=None),
+    click_paydoc_id: Optional[str] = Form(default=None),
+    merchant_trans_id: Optional[str] = Form(default=None),
+    amount: Optional[str] = Form(default=None),
+    action: Optional[str] = Form(default=None),
+    error: Optional[str] = Form(default=None),
+    error_note: Optional[str] = Form(default=None),
+    sign_time: Optional[str] = Form(default=None),
+    sign_string: Optional[str] = Form(default=None),
+    db: AsyncSession = Depends(get_db),
+):
+    payload = _click_collect_payload(
+        click_trans_id=click_trans_id,
+        service_id=service_id,
+        click_paydoc_id=click_paydoc_id,
+        merchant_trans_id=merchant_trans_id,
+        amount=amount,
+        action=action,
+        error=error,
+        error_note=error_note,
+        sign_time=sign_time,
+        sign_string=sign_string,
+    )
+    missing = _click_missing_fields(
+        payload,
+        [
+            "click_trans_id",
+            "service_id",
+            "click_paydoc_id",
+            "merchant_trans_id",
+            "amount",
+            "action",
+            "error",
+            "error_note",
+            "sign_time",
+            "sign_string",
+        ],
+    )
+    if missing:
+        return _click_build_response(
+            click_trans_id=payload.get("click_trans_id", ""),
+            merchant_trans_id=payload.get("merchant_trans_id", ""),
+            error=-8,
+            merchant_prepare_id=0,
+        )
+
+    if not _click_api_configured():
+        return _click_build_response(
+            click_trans_id=payload["click_trans_id"],
+            merchant_trans_id=payload["merchant_trans_id"],
+            error=-8,
+            merchant_prepare_id=0,
+        )
+    if payload["action"] != "0":
+        return _click_build_response(
+            click_trans_id=payload["click_trans_id"],
+            merchant_trans_id=payload["merchant_trans_id"],
+            error=-3,
+            merchant_prepare_id=0,
+        )
+    if payload["service_id"] != str(CLICK_SERVICE_ID):
+        return _click_build_response(
+            click_trans_id=payload["click_trans_id"],
+            merchant_trans_id=payload["merchant_trans_id"],
+            error=-8,
+            merchant_prepare_id=0,
+        )
+
+    sign_expected = _click_sign_raw(
+        click_trans_id=payload["click_trans_id"],
+        service_id=payload["service_id"],
+        merchant_trans_id=payload["merchant_trans_id"],
+        amount=payload["amount"],
+        action=payload["action"],
+        sign_time=payload["sign_time"],
+        merchant_prepare_id="",
+    )
+    if sign_expected != payload["sign_string"].lower():
+        return _click_build_response(
+            click_trans_id=payload["click_trans_id"],
+            merchant_trans_id=payload["merchant_trans_id"],
+            error=-1,
+            merchant_prepare_id=0,
+        )
+
+    q = await db.execute(select(ClickOrder).where(ClickOrder.order_id == payload["merchant_trans_id"]))
+    order = q.scalar_one_or_none()
+    if not order:
+        return _click_build_response(
+            click_trans_id=payload["click_trans_id"],
+            merchant_trans_id=payload["merchant_trans_id"],
+            error=-5,
+            merchant_prepare_id=0,
+        )
+    if not _click_amount_matches(request_amount=payload["amount"], expected_amount=int(order.amount or 0)):
+        return _click_build_response(
+            click_trans_id=payload["click_trans_id"],
+            merchant_trans_id=payload["merchant_trans_id"],
+            error=-2,
+            merchant_prepare_id=int(order.merchant_prepare_id or order.id),
+        )
+
+    status = str(order.status or "").strip().lower()
+    if status == "succeeded":
+        return _click_build_response(
+            click_trans_id=payload["click_trans_id"],
+            merchant_trans_id=payload["merchant_trans_id"],
+            error=-4,
+            merchant_prepare_id=int(order.merchant_prepare_id or order.id),
+        )
+    if status in {"cancelled", "canceled"}:
+        return _click_build_response(
+            click_trans_id=payload["click_trans_id"],
+            merchant_trans_id=payload["merchant_trans_id"],
+            error=-9,
+            merchant_prepare_id=int(order.merchant_prepare_id or order.id),
+        )
+    if order.click_trans_id and str(order.click_trans_id) != payload["click_trans_id"]:
+        return _click_build_response(
+            click_trans_id=payload["click_trans_id"],
+            merchant_trans_id=payload["merchant_trans_id"],
+            error=-8,
+            merchant_prepare_id=int(order.merchant_prepare_id or order.id),
+        )
+
+    if not order.merchant_prepare_id:
+        order.merchant_prepare_id = int(order.id)
+    order.status = "prepared"
+    order.click_trans_id = payload["click_trans_id"]
+    order.click_paydoc_id = payload["click_paydoc_id"]
+    try:
+        order.provider_error = int(payload["error"])
+    except Exception:
+        order.provider_error = None
+    order.provider_error_note = payload["error_note"][:255] if payload["error_note"] else None
+    order.prepare_payload = payload
+    await db.commit()
+
+    return _click_build_response(
+        click_trans_id=payload["click_trans_id"],
+        merchant_trans_id=payload["merchant_trans_id"],
+        error=0,
+        merchant_prepare_id=int(order.merchant_prepare_id or order.id),
+    )
+
+
+@app.post("/billing/click/complete")
+async def billing_click_complete(
+    click_trans_id: Optional[str] = Form(default=None),
+    service_id: Optional[str] = Form(default=None),
+    click_paydoc_id: Optional[str] = Form(default=None),
+    merchant_trans_id: Optional[str] = Form(default=None),
+    merchant_prepare_id: Optional[str] = Form(default=None),
+    amount: Optional[str] = Form(default=None),
+    action: Optional[str] = Form(default=None),
+    error: Optional[str] = Form(default=None),
+    error_note: Optional[str] = Form(default=None),
+    sign_time: Optional[str] = Form(default=None),
+    sign_string: Optional[str] = Form(default=None),
+    db: AsyncSession = Depends(get_db),
+):
+    payload = _click_collect_payload(
+        click_trans_id=click_trans_id,
+        service_id=service_id,
+        click_paydoc_id=click_paydoc_id,
+        merchant_trans_id=merchant_trans_id,
+        merchant_prepare_id=merchant_prepare_id,
+        amount=amount,
+        action=action,
+        error=error,
+        error_note=error_note,
+        sign_time=sign_time,
+        sign_string=sign_string,
+    )
+    missing = _click_missing_fields(
+        payload,
+        [
+            "click_trans_id",
+            "service_id",
+            "click_paydoc_id",
+            "merchant_trans_id",
+            "merchant_prepare_id",
+            "amount",
+            "action",
+            "error",
+            "error_note",
+            "sign_time",
+            "sign_string",
+        ],
+    )
+    if missing:
+        return _click_build_response(
+            click_trans_id=payload.get("click_trans_id", ""),
+            merchant_trans_id=payload.get("merchant_trans_id", ""),
+            error=-8,
+            merchant_confirm_id=0,
+        )
+
+    if not _click_api_configured():
+        return _click_build_response(
+            click_trans_id=payload["click_trans_id"],
+            merchant_trans_id=payload["merchant_trans_id"],
+            error=-8,
+            merchant_confirm_id=0,
+        )
+    if payload["action"] != "1":
+        return _click_build_response(
+            click_trans_id=payload["click_trans_id"],
+            merchant_trans_id=payload["merchant_trans_id"],
+            error=-3,
+            merchant_confirm_id=0,
+        )
+    if payload["service_id"] != str(CLICK_SERVICE_ID):
+        return _click_build_response(
+            click_trans_id=payload["click_trans_id"],
+            merchant_trans_id=payload["merchant_trans_id"],
+            error=-8,
+            merchant_confirm_id=0,
+        )
+
+    sign_expected = _click_sign_raw(
+        click_trans_id=payload["click_trans_id"],
+        service_id=payload["service_id"],
+        merchant_trans_id=payload["merchant_trans_id"],
+        merchant_prepare_id=payload["merchant_prepare_id"],
+        amount=payload["amount"],
+        action=payload["action"],
+        sign_time=payload["sign_time"],
+    )
+    if sign_expected != payload["sign_string"].lower():
+        return _click_build_response(
+            click_trans_id=payload["click_trans_id"],
+            merchant_trans_id=payload["merchant_trans_id"],
+            error=-1,
+            merchant_confirm_id=0,
+        )
+
+    q = await db.execute(select(ClickOrder).where(ClickOrder.order_id == payload["merchant_trans_id"]))
+    order = q.scalar_one_or_none()
+    if not order:
+        return _click_build_response(
+            click_trans_id=payload["click_trans_id"],
+            merchant_trans_id=payload["merchant_trans_id"],
+            error=-5,
+            merchant_confirm_id=0,
+        )
+    if not _click_amount_matches(request_amount=payload["amount"], expected_amount=int(order.amount or 0)):
+        return _click_build_response(
+            click_trans_id=payload["click_trans_id"],
+            merchant_trans_id=payload["merchant_trans_id"],
+            error=-2,
+            merchant_confirm_id=int(order.merchant_prepare_id or order.id),
+        )
+    if order.click_trans_id and str(order.click_trans_id) != payload["click_trans_id"]:
+        return _click_build_response(
+            click_trans_id=payload["click_trans_id"],
+            merchant_trans_id=payload["merchant_trans_id"],
+            error=-6,
+            merchant_confirm_id=int(order.merchant_prepare_id or order.id),
+        )
+
+    try:
+        merchant_prepare_id_int = int(payload["merchant_prepare_id"])
+    except Exception:
+        return _click_build_response(
+            click_trans_id=payload["click_trans_id"],
+            merchant_trans_id=payload["merchant_trans_id"],
+            error=-6,
+            merchant_confirm_id=int(order.merchant_prepare_id or order.id),
+        )
+    if order.merchant_prepare_id and int(order.merchant_prepare_id) != merchant_prepare_id_int:
+        return _click_build_response(
+            click_trans_id=payload["click_trans_id"],
+            merchant_trans_id=payload["merchant_trans_id"],
+            error=-6,
+            merchant_confirm_id=int(order.merchant_prepare_id),
+        )
+    if not order.merchant_prepare_id:
+        order.merchant_prepare_id = merchant_prepare_id_int
+
+    status = str(order.status or "").strip().lower()
+    if status == "succeeded":
+        return _click_build_response(
+            click_trans_id=payload["click_trans_id"],
+            merchant_trans_id=payload["merchant_trans_id"],
+            error=-4,
+            merchant_confirm_id=int(order.merchant_prepare_id or order.id),
+        )
+    if status in {"cancelled", "canceled"}:
+        return _click_build_response(
+            click_trans_id=payload["click_trans_id"],
+            merchant_trans_id=payload["merchant_trans_id"],
+            error=-9,
+            merchant_confirm_id=int(order.merchant_prepare_id or order.id),
+        )
+
+    incoming_error = 0
+    try:
+        incoming_error = int(payload["error"])
+    except Exception:
+        incoming_error = -8
+
+    order.click_trans_id = payload["click_trans_id"]
+    order.click_paydoc_id = payload["click_paydoc_id"]
+    order.complete_payload = payload
+    order.provider_error = incoming_error
+    order.provider_error_note = payload["error_note"][:255] if payload["error_note"] else None
+
+    if incoming_error < 0:
+        order.status = "cancelled"
+        await db.commit()
+        return _click_build_response(
+            click_trans_id=payload["click_trans_id"],
+            merchant_trans_id=payload["merchant_trans_id"],
+            error=-9,
+            merchant_confirm_id=int(order.merchant_prepare_id or order.id),
+        )
+    if incoming_error != 0:
+        order.status = "cancelled"
+        await db.commit()
+        return _click_build_response(
+            click_trans_id=payload["click_trans_id"],
+            merchant_trans_id=payload["merchant_trans_id"],
+            error=-8,
+            merchant_confirm_id=int(order.merchant_prepare_id or order.id),
+        )
+
+    if not bool(order.activation_applied):
+        user_q = await db.execute(select(User).where(User.id == int(order.user_id)))
+        user = user_q.scalar_one_or_none()
+        if not user:
+            return _click_build_response(
+                click_trans_id=payload["click_trans_id"],
+                merchant_trans_id=payload["merchant_trans_id"],
+                error=-5,
+                merchant_confirm_id=int(order.merchant_prepare_id or order.id),
+            )
+        try:
+            plan = _get_click_plan(order.plan_code)
+            await _apply_subscription_from_click(
+                db,
+                user=user,
+                plan=plan,
+                click_trans_id=payload["click_trans_id"],
+                order_id=str(order.order_id),
+            )
+            order.activation_applied = True
+        except Exception as exc:
+            log.exception("CLICK complete failed to apply subscription order_id=%s: %s", order.order_id, repr(exc))
+            order.provider_error = -7
+            order.provider_error_note = CLICK_ERROR_NOTES.get(-7)
+            await db.commit()
+            return _click_build_response(
+                click_trans_id=payload["click_trans_id"],
+                merchant_trans_id=payload["merchant_trans_id"],
+                error=-7,
+                merchant_confirm_id=int(order.merchant_prepare_id or order.id),
+            )
+
+    order.status = "succeeded"
+    if not order.paid_at:
+        order.paid_at = datetime.now(timezone.utc)
+    await db.commit()
+    return _click_build_response(
+        click_trans_id=payload["click_trans_id"],
+        merchant_trans_id=payload["merchant_trans_id"],
+        error=0,
+        merchant_confirm_id=int(order.merchant_prepare_id or order.id),
+    )
 
 
 # ================================== CARD OF DAY ==================================

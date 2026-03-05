@@ -578,15 +578,8 @@ body,
   overflow: hidden;
   isolation: isolate;
   height: 62px;
-  border-color: rgba(255, 230, 160, 0.88);
-  background:
-    radial-gradient(
-      220px 120px at var(--rx, 50%) var(--ry, 50%),
-      rgba(255,255,255,0.16),
-      rgba(255,255,255,0.04) 72%
-    ),
-    linear-gradient(108deg, rgba(255, 206, 88, 0.96) 0%, rgba(255, 154, 68, 0.91) 34%, rgba(176, 108, 255, 0.9) 67%, rgba(94, 204, 255, 0.86) 100%),
-    linear-gradient(180deg, rgba(94, 113, 188, 0.84), rgba(56, 74, 145, 0.86));
+  border-color: rgba(255, 205, 117, 0.46);
+  background: rgba(255, 169, 23, 0.96);
   box-shadow:
     0 3px 8px rgba(9, 16, 45, 0.22),
     0 0 0 1px rgba(255, 255, 255, 0.16) inset,

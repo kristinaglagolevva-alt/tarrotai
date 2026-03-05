@@ -30,7 +30,7 @@ import cameraIcon from './assets/icons/camera.png'
 import futureIcon from './assets/icons/future_icon.png'
 import threeCardIcon from './assets/icons/three_card_icon.png'
 import selectCardIcon from './assets/icons/select_icon.png'
-import spellBookIcon from './assets/icons/spell-book.png'
+import spellBookIcon from './assets/icons/start-sun-clean.png'
 
 // ✅ ЗАДНЯЯ СТОРОНА КАРТЫ — ВСЕГДА ТОЛЬКО ЭТА
 import backCardImg from './assets/cards/back/back.png'
@@ -877,11 +877,57 @@ const LEGAL_DOC_BOT_DEEPLINK: Record<LegalDocKind, string> = {
   privacy: PRIVACY_URL,
 }
 
+const JWT_STORAGE_KEY = 'jwt'
+
+const readStoredJwt = (): string | null => {
+  try {
+    const current = sessionStorage.getItem(JWT_STORAGE_KEY)
+    if (current && current.trim()) return current.trim()
+  } catch {}
+
+  // One-time migration from old localStorage location.
+  try {
+    const legacy = localStorage.getItem(JWT_STORAGE_KEY)
+    if (legacy && legacy.trim()) {
+      try {
+        sessionStorage.setItem(JWT_STORAGE_KEY, legacy.trim())
+      } catch {}
+      localStorage.removeItem(JWT_STORAGE_KEY)
+      return legacy.trim()
+    }
+    localStorage.removeItem(JWT_STORAGE_KEY)
+  } catch {}
+  return null
+}
+
+const writeStoredJwt = (token: string) => {
+  const value = String(token || '').trim()
+  if (!value) {
+    clearStoredJwt()
+    return
+  }
+  try {
+    sessionStorage.setItem(JWT_STORAGE_KEY, value)
+  } catch {}
+  try {
+    localStorage.removeItem(JWT_STORAGE_KEY)
+  } catch {}
+}
+
+const clearStoredJwt = () => {
+  try {
+    sessionStorage.removeItem(JWT_STORAGE_KEY)
+  } catch {}
+  try {
+    localStorage.removeItem(JWT_STORAGE_KEY)
+  } catch {}
+}
+
 export default function App() {
   /* =============================================================================================
    АВТОРИЗАЦИЯ В ТГ (при запуске мини‑приложения)
    Логика:
-     1) если есть jwt в localStorage — пробуем /me
+     1) если есть jwt в sessionStorage — пробуем /me
      2) если jwt невалиден / отсутствует — делаем POST /auth/telegram с initData
      3) пока идёт авторизация — показываем лоадер (фон/канвасы остаются)
 ============================================================================================= */
@@ -889,11 +935,7 @@ export default function App() {
 type AuthStatus = 'loading' | 'ready' | 'error'
 
 const [token, setToken] = useState<string | null>(() => {
-  try {
-    return localStorage.getItem('jwt')
-  } catch {
-    return null
-  }
+  return readStoredJwt()
 })
 
 const [user, setUser] = useState<MeDto | null>(null)
@@ -957,9 +999,7 @@ useEffect(() => {
         return
       } catch {
         // jwt невалиден — очищаем и продолжаем телеграм‑авторизацию
-        try {
-          localStorage.removeItem('jwt')
-        } catch {}
+        clearStoredJwt()
         safe(() => {
           setToken(null)
           setUser(null)
@@ -984,9 +1024,7 @@ useEffect(() => {
         billingOut = await getBillingStatus(res.token)
       } catch {}
 
-      try {
-        localStorage.setItem('jwt', res.token)
-      } catch {}
+      writeStoredJwt(res.token)
 
       safe(() => {
         setToken(res.token)
@@ -996,9 +1034,7 @@ useEffect(() => {
       })
     } catch (e) {
       console.error('Auth error', e)
-      try {
-        localStorage.removeItem('jwt')
-      } catch {}
+      clearStoredJwt()
 
       safe(() => {
         setToken(null)
@@ -2042,9 +2078,7 @@ useEffect(() => {
   }
 
   const handleProfileLogout = () => {
-    try {
-      localStorage.removeItem('jwt')
-    } catch {}
+    clearStoredJwt()
 
     setToken(null)
     setUser(null)
@@ -2774,6 +2808,7 @@ useEffect(() => {
 
   const galleryInputRef = useRef<HTMLInputElement | null>(null)
   const cameraInputRef = useRef<HTMLInputElement | null>(null)
+  const photoResultRef = useRef<HTMLDivElement | null>(null)
 
   useEffect(() => {
     // cleanup old URL
@@ -2804,6 +2839,17 @@ useEffect(() => {
       } catch {}
     }
   }, [photoFile])
+
+  useEffect(() => {
+    if (view !== 'photo_analysis') return
+    if (photoStatus !== 'done' || !photoResult) return
+    const t = window.setTimeout(() => {
+      try {
+        photoResultRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+      } catch {}
+    }, 120)
+    return () => window.clearTimeout(t)
+  }, [photoStatus, photoResult, view])
 
   const openPhotoAnalysis = () => {
     setPhotoFile(null)
@@ -2929,6 +2975,7 @@ useEffect(() => {
 
     setPhotoStatus('uploading')
     setPhotoError('')
+    setPhotoResult(null)
 
     try {
       const sourceFile = photoFile
@@ -5036,9 +5083,7 @@ useEffect(() => {
           type="button"
           className="glassbtn"
           onClick={() => {
-            try {
-              localStorage.removeItem('jwt')
-            } catch {}
+            clearStoredJwt()
             setToken(null)
           }}
         >
@@ -5933,7 +5978,7 @@ useEffect(() => {
                 >
                   <span className="glass-cta__inner">
                     <span className="glass-cta__rim" aria-hidden="true" />
-                    <span className="glass-cta__text">{photoStatus === 'uploading' ? 'Анализируем…' : 'Проанализировать фото'}</span>
+                    <span className="glass-cta__text">{photoStatus === 'uploading' ? 'Анализируем фото…' : 'Начать AI-анализ фото'}</span>
                     <span className="glass-cta__spark" aria-hidden="true" />
                   </span>
                 </button>
@@ -5943,7 +5988,7 @@ useEffect(() => {
               {photoError ? <div className="photo-error">{photoError}</div> : null}
 
               {photoResult && (
-                <div className="photo-result">
+                <div ref={photoResultRef} className="photo-result">
                   <div className="result-card">
                     <div className="result-card__title">Результат AI анализа</div>
                     <div className="result-card__name">Фото расклада</div>

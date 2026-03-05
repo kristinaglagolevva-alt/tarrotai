@@ -1,7 +1,11 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from zoneinfo import ZoneInfo
+
+try:  # Python 3.9+
+    from zoneinfo import ZoneInfo
+except Exception:  # Python 3.8 fallback
+    from backports.zoneinfo import ZoneInfo  # type: ignore
 
 
 def resolve_tz_name(name: str | None) -> str:

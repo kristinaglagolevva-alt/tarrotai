@@ -29,3 +29,9 @@ preview-*.png
 migration-backup/
 *.dump
 *.tgz
+
+# Local temp/debug artifacts
+tmp/
+._*
+*.bak-20*
+*.bak_20*

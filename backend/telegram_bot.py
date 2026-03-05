@@ -109,8 +109,11 @@ START_ONBOARDING_TEXT = (
     os.environ.get("TELEGRAM_START_ONBOARDING_TEXT")
     or (
         "👋 <b>Добро пожаловать в AI Taro</b>\n\n"
-        "Нажмите <b>«🚀 Открыть AI Taro»</b> ниже.\n\n"
-        "Мини‑приложение откроется сразу, без дополнительных команд.\n\n"
+        "<b>Бесплатно доступно:</b>\n"
+        "• карта дня каждый день\n"
+        "• <b>5 раскладов в месяц</b>\n\n"
+        "Если нужен безлимит — нажмите <b>«💎 Подключить подписку»</b>.\n"
+        "Чтобы начать, нажмите <b>«🚀 Открыть AI Taro»</b>.\n\n"
         "Открывая приложение, вы принимаете Пользовательское соглашение и Политику конфиденциальности."
     )
 ).strip()
@@ -214,15 +217,32 @@ PLAN_TITLES = {
     "sub_2weeks": "2 недели",
     "sub_month": "Месяц",
 }
+COUNTRY_CHOICES: List[Dict[str, str]] = [
+    {"code": "ru", "label": "🇷🇺 Россия"},
+    {"code": "uz", "label": "🇺🇿 Узбекистан"},
+    {"code": "kz", "label": "🇰🇿 Казахстан"},
+    {"code": "by", "label": "🇧🇾 Беларусь"},
+    {"code": "kg", "label": "🇰🇬 Кыргызстан"},
+    {"code": "other", "label": "🌍 Другая страна"},
+]
+DEFAULT_COUNTRY_CODE = "ru"
 TERMS_PLACEHOLDER_TEXT = (
     "Пользовательское соглашение AI Taro (черновик)\n\n"
-    "Этот документ временный и будет заменен на финальную юридическую версию.\n"
-    "Используя сервис, пользователь соглашается с правилами использования."
+    "1) AI Taro предоставляет информационные интерпретации и не заменяет медицинскую, юридическую или финансовую консультацию.\n"
+    "2) При первом входе пользователь подтверждает согласие с документами и отдельное согласие на персональную память раскладов.\n"
+    "3) Персональная память используется только для персонализации ответов и хранится до 90 дней.\n"
+    "4) Память можно отключить в разделе «Персонализация».\n"
+    "5) Для полного удаления персональных данных используйте команду /forgetme.\n"
+    "6) Для поддержки используйте /support."
 )
 PRIVACY_PLACEHOLDER_TEXT = (
     "Политика конфиденциальности AI Taro (черновик)\n\n"
-    "Этот документ временный и будет заменен на финальную юридическую версию.\n"
-    "Сервис обрабатывает данные Telegram-профиля и пользовательские запросы для работы приложения."
+    "1) Сервис обрабатывает данные Telegram-профиля и пользовательские запросы для работы приложения.\n"
+    "2) При включенной персональной памяти сохраняются структурированные данные раскладов (тема, тип расклада, карты, итоговый вывод).\n"
+    "3) Срок хранения персональной памяти — до 90 дней.\n"
+    "4) Данные не продаются третьим лицам.\n"
+    "5) Полное удаление данных доступно командой /forgetme.\n"
+    "6) По медико-кризисным темам сервис выдает мягкое предупреждение и контакты помощи по региону без постановки диагнозов."
 )
 
 # Простое хранилище заказов в памяти (для валидации precheckout и подтверждения оплаты)
@@ -371,99 +391,255 @@ def _available_plan_keys() -> List[str]:
     return [k for k in PLAN_ORDER if k in keys]
 
 
-def _plan_summary_label(plan_key: str) -> str:
+def _normalize_country_code(country_code: str) -> str:
+    code = str(country_code or "").strip().lower()
+    available = {item["code"] for item in COUNTRY_CHOICES}
+    return code if code in available else DEFAULT_COUNTRY_CODE
+
+
+def _country_label(country_code: str) -> str:
+    safe = _normalize_country_code(country_code)
+    for item in COUNTRY_CHOICES:
+        if item["code"] == safe:
+            return item["label"]
+    return safe.upper()
+
+
+def _available_plan_keys_for_country(country_code: str) -> List[str]:
+    safe_country = _normalize_country_code(country_code)
+    visible = _products_for_mode("menu")
+    card_keys = {
+        _plan_key_from_code(p.get("code") or "")
+        for p in visible
+        if str(p.get("provider_mode") or "").lower() == "yookassa"
+    }
+    click_keys = {
+        _plan_key_from_code(p.get("code") or "")
+        for p in visible
+        if str(p.get("provider_mode") or "").lower() == "click"
+    }
+    stars_keys = {
+        _plan_key_from_code(p.get("code") or "")
+        for p in visible
+        if str(p.get("provider_mode") or "").lower() == "stars"
+    }
+    visible_keys = {_plan_key_from_code(p.get("code") or "") for p in visible}
+
+    result: List[str] = []
+    for key in PLAN_ORDER:
+        if key not in visible_keys:
+            continue
+        if safe_country == "uz":
+            if key in click_keys or key in card_keys or key in stars_keys:
+                result.append(key)
+        elif safe_country == "ru":
+            if key in card_keys or key in stars_keys:
+                result.append(key)
+        else:
+            if key in card_keys or key in stars_keys:
+                result.append(key)
+    return result
+
+
+def _plan_summary_label(plan_key: str, country_code: str) -> str:
     title = PLAN_TITLES.get(plan_key, plan_key)
-    values: List[str] = []
+    safe_country = _normalize_country_code(country_code)
+
     card_product = _product_for_plan_and_provider(plan_key, "yookassa")
     click_product = _product_for_plan_and_provider(plan_key, "click")
+    stars_product = _product_for_plan_and_provider(plan_key, "stars")
+
+    if safe_country == "uz" and click_product:
+        return f"{title} — {_format_amount_label(click_product)}"
     if card_product:
-        values.append(_format_amount_label(card_product))
+        return f"{title} — {_format_amount_label(card_product)}"
     if click_product:
-        values.append(_format_amount_label(click_product))
-    if not values:
-        return title
-    return f"{title} — {' / '.join(values)}"
+        return f"{title} — {_format_amount_label(click_product)}"
+    if stars_product:
+        return f"{title} — {_format_amount_label(stars_product)}"
+    return title
 
 
-def _plans_keyboard() -> InlineKeyboardMarkup:
+def _country_keyboard() -> InlineKeyboardMarkup:
     rows: List[List[InlineKeyboardButton]] = []
-    for plan_key in _available_plan_keys():
-        rows.append([InlineKeyboardButton(_plan_summary_label(plan_key), callback_data=f"plan:{plan_key}")])
-    if not rows:
-        rows.append([InlineKeyboardButton("Обновить", callback_data="menu")])
+    for country in COUNTRY_CHOICES:
+        rows.append([InlineKeyboardButton(country["label"], callback_data=f"country:{country['code']}")])
     return InlineKeyboardMarkup(rows)
 
 
-def _format_plan_list() -> str:
+def _format_country_list() -> str:
+    return (
+        "<b>Тарифы AI Tarot</b>\n"
+        "Шаг 1 из 3: выберите страну.\n\n"
+        "Мы покажем подходящие способы оплаты и корректную валюту."
+    )
+
+
+def _plans_keyboard(country_code: str) -> InlineKeyboardMarkup:
+    safe_country = _normalize_country_code(country_code)
+    rows: List[List[InlineKeyboardButton]] = []
+    for plan_key in _available_plan_keys_for_country(safe_country):
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    _plan_summary_label(plan_key, safe_country),
+                    callback_data=f"plan:{safe_country}:{plan_key}",
+                )
+            ]
+        )
+    if not rows:
+        rows.append([InlineKeyboardButton("Обновить", callback_data=f"country:{safe_country}")])
+    rows.append([InlineKeyboardButton("⬅️ Назад к выбору страны", callback_data="country_menu")])
+    return InlineKeyboardMarkup(rows)
+
+
+def _format_plan_list(country_code: str) -> str:
+    safe_country = _normalize_country_code(country_code)
     parts: List[str] = [
         "<b>Тарифы AI Tarot</b>",
-        "Шаг 1 из 2: выберите план в рублях/сумах.",
-        "После выбора плана покажу способы оплаты: СБП, СБП автоплатёж, CLICK, по карте.",
+        f"Страна: <b>{_country_label(safe_country)}</b>",
+        "Шаг 2 из 3: выберите период подписки.",
         "",
     ]
-    for plan_key in _available_plan_keys():
-        parts.append(f"• <b>{_plan_summary_label(plan_key)}</b>")
+    for plan_key in _available_plan_keys_for_country(safe_country):
+        parts.append(f"• <b>{_plan_summary_label(plan_key, safe_country)}</b>")
     parts.append("")
     parts.append("Нажмите на подходящий план.")
     return "\n".join(parts).strip()
 
 
-def _method_keyboard(plan_key: str) -> InlineKeyboardMarkup:
+def _method_keyboard(plan_key: str, country_code: str) -> InlineKeyboardMarkup:
+    safe_country = _normalize_country_code(country_code)
     rows: List[List[InlineKeyboardButton]] = []
 
     card_product = _product_for_plan_and_provider(plan_key, "yookassa")
     click_product = _product_for_plan_and_provider(plan_key, "click")
+    stars_product = _product_for_plan_and_provider(plan_key, "stars")
 
-    if card_product:
-        rows.append([InlineKeyboardButton(f"🟢 СБП — {_format_amount_label(card_product)}", callback_data=f"sbp:{plan_key}")])
-    if card_product and SBP_AUTOPAY_ENABLED and str(plan_key) == SBP_AUTOPAY_PLAN_KEY:
-        rows.append(
-            [
-                InlineKeyboardButton(
-                    f"🔁 СБП автоплатёж — {_format_amount_label(card_product)}",
-                    callback_data=f"sbp_auto:{plan_key}",
+    if safe_country == "ru":
+        if card_product:
+            rows.append(
+                [
+                    InlineKeyboardButton(
+                        f"🟢 СБП — {_format_amount_label(card_product)}",
+                        callback_data=f"sbp:{safe_country}:{plan_key}",
+                    )
+                ]
+            )
+            if SBP_AUTOPAY_ENABLED and str(plan_key) == SBP_AUTOPAY_PLAN_KEY:
+                rows.append(
+                    [
+                        InlineKeyboardButton(
+                            f"🔁 СБП автоплатёж — {_format_amount_label(card_product)}",
+                            callback_data=f"sbp_auto:{safe_country}:{plan_key}",
+                        )
+                    ]
                 )
-            ]
-        )
-    if click_product:
+            rows.append(
+                [
+                    InlineKeyboardButton(
+                        f"💳 По карте или SberPay — {_format_amount_label(card_product)}",
+                        callback_data=f"buy:{card_product['code']}",
+                    )
+                ]
+            )
+    elif safe_country == "uz":
+        if click_product:
+            rows.append(
+                [
+                    InlineKeyboardButton(
+                        f"🇺🇿 CLICK — {_format_amount_label(click_product)}",
+                        callback_data=f"buy:{click_product['code']}",
+                    )
+                ]
+            )
+        if card_product:
+            rows.append(
+                [
+                    InlineKeyboardButton(
+                        f"💳 Международная карта — {_format_amount_label(card_product)}",
+                        callback_data=f"buy:{card_product['code']}",
+                    )
+                ]
+            )
+    else:
+        if card_product:
+            rows.append(
+                [
+                    InlineKeyboardButton(
+                        f"💳 Карта МИР / ЮMoney — {_format_amount_label(card_product)}",
+                        callback_data=f"buy:{card_product['code']}",
+                    )
+                ]
+            )
+
+    if stars_product:
         rows.append(
             [
                 InlineKeyboardButton(
-                    f"🇺🇿 CLICK — {_format_amount_label(click_product)}",
-                    callback_data=f"buy:{click_product['code']}",
-                )
-            ]
-        )
-    if card_product:
-        rows.append(
-            [
-                InlineKeyboardButton(
-                    f"💳 По карте или SberPay — {_format_amount_label(card_product)}",
-                    callback_data=f"buy:{card_product['code']}",
+                    f"⭐ Telegram Stars — {_format_amount_label(stars_product)}",
+                    callback_data=f"buy:{stars_product['code']}",
                 )
             ]
         )
 
-    rows.append([InlineKeyboardButton("⬅️ Назад к планам", callback_data="menu")])
+    rows.append([InlineKeyboardButton("⬅️ Назад к планам", callback_data=f"country:{safe_country}")])
     return InlineKeyboardMarkup(rows)
 
 
-def _format_methods_text(plan_key: str) -> str:
+def _format_methods_text(plan_key: str, country_code: str) -> str:
+    safe_country = _normalize_country_code(country_code)
     title = PLAN_TITLES.get(plan_key, plan_key)
-    methods: List[str] = ["• СБП"]
-    if SBP_AUTOPAY_ENABLED and str(plan_key) == SBP_AUTOPAY_PLAN_KEY:
-        methods.append("• СБП автоплатёж (ежемесячно)")
-    methods.extend(
-        [
-            "• CLICK",
-            "• По карте / SberPay",
-        ]
-    )
+    methods: List[str] = []
+
+    card_product = _product_for_plan_and_provider(plan_key, "yookassa")
+    click_product = _product_for_plan_and_provider(plan_key, "click")
+    stars_product = _product_for_plan_and_provider(plan_key, "stars")
+
+    if safe_country == "ru":
+        if card_product:
+            methods.append(f"• СБП — {_format_amount_label(card_product)}")
+            if SBP_AUTOPAY_ENABLED and str(plan_key) == SBP_AUTOPAY_PLAN_KEY:
+                methods.append(f"• СБП автоплатёж — {_format_amount_label(card_product)} / месяц")
+            methods.append(f"• По карте / SberPay — {_format_amount_label(card_product)}")
+    elif safe_country == "uz":
+        if click_product:
+            methods.append(f"• CLICK — {_format_amount_label(click_product)}")
+        if card_product:
+            methods.append(f"• Международная карта — {_format_amount_label(card_product)}")
+    else:
+        if card_product:
+            methods.append(f"• Карта МИР / ЮMoney — {_format_amount_label(card_product)}")
+            methods.append("• Извините, Visa/Mastercard пока не поддерживаются. Доступны МИР и ЮMoney")
+
+    if stars_product:
+        methods.append(f"• Telegram Stars — {_format_amount_label(stars_product)}")
+
+    if not methods:
+        methods.append("• Способы оплаты временно недоступны")
+
     return (
         f"<b>{title}</b>\n"
-        f"Шаг 2 из 2: выберите способ оплаты.\n\n"
+        f"Страна: <b>{_country_label(safe_country)}</b>\n"
+        "Шаг 3 из 3: выберите способ оплаты.\n\n"
         + "\n".join(methods)
     )
+
+
+def _parse_country_plan_callback(data: str, prefix: str) -> Tuple[str, str]:
+    raw = str(data or "").strip()
+    if not raw.startswith(f"{prefix}:"):
+        return DEFAULT_COUNTRY_CODE, ""
+
+    parts = raw.split(":")
+    if len(parts) >= 3:
+        country_code = _normalize_country_code(parts[1])
+        plan_key = str(parts[2] or "").strip().lower()
+        return country_code, plan_key
+    if len(parts) == 2:
+        # Backward compatibility: old callbacks had no country, only plan key.
+        return DEFAULT_COUNTRY_CODE, str(parts[1] or "").strip().lower()
+    return DEFAULT_COUNTRY_CODE, ""
 
 
 def _format_price_list(mode: str = "menu") -> str:
@@ -557,7 +733,7 @@ def _welcome_keyboard() -> InlineKeyboardMarkup:
         rows.append([app_btn])
     rows.append(
         [
-            InlineKeyboardButton("💳 Тарифы и оплата", callback_data="menu"),
+            InlineKeyboardButton("💎 Подключить подписку", callback_data="menu"),
             InlineKeyboardButton("💬 Поддержка", callback_data="support"),
         ]
     )
@@ -580,7 +756,7 @@ def _quick_reply_keyboard() -> Optional[ReplyKeyboardMarkup]:
     elif APP_URL_RAW:
         rows.append([KeyboardButton("🚀 Открыть AI Taro")])
 
-    rows.append([KeyboardButton("💳 Тарифы и оплата"), KeyboardButton("💬 Поддержка")])
+    rows.append([KeyboardButton("💎 Подключить подписку"), KeyboardButton("💬 Поддержка")])
     rows.append([KeyboardButton("📄 Соглашение"), KeyboardButton("🔐 Политика")])
     rows.append([KeyboardButton("ℹ️ Как начать")])
     return ReplyKeyboardMarkup(
@@ -598,10 +774,11 @@ def _howto_text() -> str:
         "1) Нажмите <b>🚀 Открыть AI Taro</b>\n"
         "2) Разрешите открытие мини‑приложения в Telegram\n"
         "3) Задайте вопрос и выберите расклад\n\n"
-        "💡 Оплату можно открыть кнопкой <b>«Тарифы и оплата»</b>.\n"
+        "💡 Оплату можно открыть кнопкой <b>«💎 Подключить подписку»</b>.\n"
         "💬 Поддержка: <b>/support</b>\n"
         "📄 Соглашение: <b>/terms</b>\n"
-        "🔐 Политика: <b>/privacy</b>"
+        "🔐 Политика: <b>/privacy</b>\n"
+        "🗑 Удаление данных: <b>/forgetme</b>"
     )
 
 
@@ -672,6 +849,44 @@ async def _send_legal_document(
         document=InputFile(content, filename=filename),
         caption=f"{caption}\nФинальную версию заменим позже без изменения кнопок.",
     )
+
+
+def _forgetme_confirm_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [
+            [InlineKeyboardButton("🗑 Да, удалить мои данные", callback_data="forgetme_confirm")],
+            [InlineKeyboardButton("Отмена", callback_data="forgetme_cancel")],
+        ]
+    )
+
+
+def _cleanup_support_runtime_for_user(telegram_user_id: int) -> None:
+    if telegram_user_id <= 0:
+        return
+    SUPPORT_PENDING_USERS.discard(telegram_user_id)
+    SUPPORT_PENDING_TICKET_BY_USER.pop(telegram_user_id, None)
+    active_ticket = SUPPORT_ACTIVE_TICKET_BY_USER.pop(telegram_user_id, None)
+    if active_ticket:
+        SUPPORT_TICKETS.pop(str(active_ticket), None)
+
+
+async def _forgetme_delete_user_data(*, telegram_user_id: int) -> Dict[str, Any]:
+    if telegram_user_id <= 0:
+        return {"ok": False, "reason": "invalid_user"}
+    async with SessionLocal() as db:
+        try:
+            q = await db.execute(select(User).where(User.telegram_id == int(telegram_user_id)))
+            row = q.scalar_one_or_none()
+            if not row:
+                return {"ok": True, "deleted": False}
+            await db.delete(row)
+            await db.commit()
+            _cleanup_support_runtime_for_user(int(telegram_user_id))
+            return {"ok": True, "deleted": True}
+        except Exception as exc:
+            await db.rollback()
+            logger.exception("forgetme failed for tg_user=%s: %s", telegram_user_id, exc)
+            return {"ok": False, "reason": "db_error", "error": str(exc)}
 
 
 def _support_target_enabled() -> bool:
@@ -1035,6 +1250,7 @@ async def _ensure_bot_ui(context: ContextTypes.DEFAULT_TYPE) -> None:
                 BotCommand("support", "Написать в поддержку"),
                 BotCommand("terms", "Пользовательское соглашение"),
                 BotCommand("privacy", "Политика конфиденциальности"),
+                BotCommand("forgetme", "Удалить персональные данные"),
             ]
         )
         await context.bot.set_my_short_description(BOT_SHORT_DESCRIPTION)
@@ -1240,12 +1456,21 @@ async def _send_menu(
     mode: str = "menu",
 ) -> None:
     mode_l = str(mode or "menu").strip().lower()
-    if mode_l in {"menu", "buy_credits", "credits", "buy"}:
-        text = _format_plan_list()
-        markup = _plans_keyboard()
+    if mode_l in {"menu", "buy_credits", "credits", "buy", "country_menu"}:
+        text = _format_country_list()
+        markup = _country_keyboard()
+    elif mode_l in {"click", "uz", "uzbekistan"}:
+        text = _format_plan_list("uz")
+        markup = _plans_keyboard("uz")
+    elif mode_l in {"card", "cards", "sberpay", "card_sberpay", "ru", "russia"}:
+        text = _format_plan_list("ru")
+        markup = _plans_keyboard("ru")
+    elif mode_l in {"kz", "by", "kg", "other"}:
+        text = _format_plan_list(mode_l)
+        markup = _plans_keyboard(mode_l)
     else:
-        text = _format_price_list(mode_l)
-        markup = _price_keyboard(mode_l)
+        text = _format_country_list()
+        markup = _country_keyboard()
 
     if message:
         await message.edit_text(text, reply_markup=markup, parse_mode=ParseMode.HTML)
@@ -1322,6 +1547,19 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if mode in {"privacy", "policy"}:
         await _send_legal_document(chat_id=update.effective_chat.id, context=context, kind="privacy")
         return
+    if mode in {"forgetme", "delete_me", "delete_data"}:
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text=(
+                "🗑 <b>Удаление персональных данных</b>\n\n"
+                "Это действие удалит ваш профиль, историю раскладов, персональную память,\n"
+                "историю обращений в поддержку и связанные платежные записи в AI Taro.\n\n"
+                "Действие необратимо. Продолжить?"
+            ),
+            parse_mode=ParseMode.HTML,
+            reply_markup=_forgetme_confirm_keyboard(),
+        )
+        return
 
     await _send_start_panel(update.effective_chat.id, context)
 
@@ -1378,6 +1616,23 @@ async def privacy_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     await _send_legal_document(chat_id=update.effective_chat.id, context=context, kind="privacy")
 
 
+async def forgetme_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not update.effective_chat:
+        return
+    await _ensure_bot_ui(context)
+    await context.bot.send_message(
+        chat_id=update.effective_chat.id,
+        text=(
+            "🗑 <b>Удаление персональных данных</b>\n\n"
+            "Это действие удалит ваш профиль, историю раскладов, персональную память,\n"
+            "историю обращений в поддержку и связанные платежные записи в AI Taro.\n\n"
+            "Действие необратимо. Продолжить?"
+        ),
+        parse_mode=ParseMode.HTML,
+        reply_markup=_forgetme_confirm_keyboard(),
+    )
+
+
 async def reply_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not update.effective_chat:
         return
@@ -1422,6 +1677,32 @@ async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     await _safe_answer_query(query)
     if query.message:
         await _send_menu(query.message.chat.id, context, message=query.message, include_app_link=False, mode="menu")
+
+
+async def country_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    if not query:
+        return
+    await _safe_answer_query(query)
+    if not query.message:
+        return
+
+    data = str(query.data or "").strip().lower()
+    if data == "country_menu":
+        await query.message.edit_text(
+            _format_country_list(),
+            reply_markup=_country_keyboard(),
+            parse_mode=ParseMode.HTML,
+        )
+        return
+
+    _, _, code = data.partition(":")
+    safe_country = _normalize_country_code(code)
+    await query.message.edit_text(
+        _format_plan_list(safe_country),
+        reply_markup=_plans_keyboard(safe_country),
+        parse_mode=ParseMode.HTML,
+    )
 
 
 async def howto_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -1544,6 +1825,44 @@ async def doc_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         await _send_legal_document(chat_id=query.message.chat.id, context=context, kind=kind)
 
 
+async def forgetme_confirm_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    if not query:
+        return
+    await _safe_answer_query(query)
+    tg_user_id = int(getattr(query.from_user, "id", 0) or 0)
+    result = await _forgetme_delete_user_data(telegram_user_id=tg_user_id)
+
+    text = ""
+    if result.get("ok") and result.get("deleted"):
+        text = (
+            "✅ Данные удалены.\n\n"
+            "Если захотите вернуться, нажмите /start и заново пройдите вход."
+        )
+    elif result.get("ok"):
+        text = "Данные не найдены. Возможно, профиль уже был удалён ранее."
+    else:
+        text = "Не удалось удалить данные сейчас. Попробуйте ещё раз позже или напишите в /support."
+
+    if query.message:
+        try:
+            await query.message.edit_text(text)
+        except Exception:
+            await query.message.reply_text(text)
+
+
+async def forgetme_cancel_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    if not query:
+        return
+    await _safe_answer_query(query)
+    if query.message:
+        try:
+            await query.message.edit_text("Удаление данных отменено.")
+        except Exception:
+            await query.message.reply_text("Удаление данных отменено.")
+
+
 async def text_fallback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     message = update.message
     if not message or not message.text:
@@ -1563,7 +1882,14 @@ async def text_fallback_handler(update: Update, context: ContextTypes.DEFAULT_TY
             await context.bot.send_message(chat_id=message.chat.id, text="Запрос в поддержку отменён.")
             return
 
-        if text in {"💳 тарифы и оплата", "🚀 открыть ai taro", "ℹ️ как начать", "📄 соглашение", "🔐 политика"}:
+        if text in {
+            "💳 тарифы и оплата",
+            "💎 подключить подписку",
+            "🚀 открыть ai taro",
+            "ℹ️ как начать",
+            "📄 соглашение",
+            "🔐 политика",
+        }:
             SUPPORT_PENDING_USERS.discard(user_id)
             SUPPORT_PENDING_TICKET_BY_USER.pop(user_id, None)
         else:
@@ -1611,7 +1937,7 @@ async def text_fallback_handler(update: Update, context: ContextTypes.DEFAULT_TY
                 )
             return
 
-    if "тариф" in text or "оплат" in text or "price" in text:
+    if text == "💎 подключить подписку" or "тариф" in text or "оплат" in text or "price" in text:
         await _send_menu(message.chat.id, context, include_app_link=False, mode="menu")
         return
 
@@ -1630,6 +1956,23 @@ async def text_fallback_handler(update: Update, context: ContextTypes.DEFAULT_TY
 
     if "политик" in text or text in {"🔐 политика", "/privacy", "privacy"}:
         await _send_legal_document(chat_id=message.chat.id, context=context, kind="privacy")
+        return
+
+    if (
+        "удалить данные" in text
+        or text in {"/forgetme", "forgetme", "delete me", "delete data", "🗑 удалить данные"}
+    ):
+        await context.bot.send_message(
+            chat_id=message.chat.id,
+            text=(
+                "🗑 <b>Удаление персональных данных</b>\n\n"
+                "Это действие удалит ваш профиль, историю раскладов, персональную память,\n"
+                "историю обращений в поддержку и связанные платежные записи в AI Taro.\n\n"
+                "Действие необратимо. Продолжить?"
+            ),
+            parse_mode=ParseMode.HTML,
+            reply_markup=_forgetme_confirm_keyboard(),
+        )
         return
 
     if "как начать" in text or "помощ" in text or text in {"help", "start", "старт", "ℹ️ как начать"}:
@@ -1663,8 +2006,16 @@ async def plan_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         return
     await _safe_answer_query(query)
 
-    _, plan_key = (query.data.split(":", 1) + [""])[:2]
-    plan_key = str(plan_key or "").strip().lower()
+    country_code, plan_key = _parse_country_plan_callback(query.data, "plan")
+    if plan_key not in _available_plan_keys_for_country(country_code):
+        # Backward compatibility fallback for older buttons without country.
+        if plan_key in _available_plan_keys():
+            country_code = DEFAULT_COUNTRY_CODE
+        else:
+            if query.message:
+                await query.message.reply_text("Этот план временно недоступен. Выберите другой.")
+            return
+
     if plan_key not in _available_plan_keys():
         if query.message:
             await query.message.reply_text("Этот план временно недоступен. Выберите другой.")
@@ -1672,8 +2023,8 @@ async def plan_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
     if query.message:
         await query.message.edit_text(
-            _format_methods_text(plan_key),
-            reply_markup=_method_keyboard(plan_key),
+            _format_methods_text(plan_key, country_code),
+            reply_markup=_method_keyboard(plan_key, country_code),
             parse_mode=ParseMode.HTML,
         )
 
@@ -1684,8 +2035,8 @@ async def sbp_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         return
     await _safe_answer_query(query)
 
-    _, plan_key = (query.data.split(":", 1) + [""])[:2]
-    plan_key = str(plan_key or "").strip().lower()
+    country_code, plan_key = _parse_country_plan_callback(query.data, "sbp")
+    country_code = _normalize_country_code(country_code)
     card_product = _product_for_plan_and_provider(plan_key, "yookassa")
     if not card_product:
         if query.message:
@@ -1706,7 +2057,7 @@ async def sbp_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
     rows: List[List[InlineKeyboardButton]] = [
         [InlineKeyboardButton("🟢 Открыть оплату СБП", url=payment_link)],
-        [InlineKeyboardButton("⬅️ Назад к способам оплаты", callback_data=f"plan:{plan_key}")],
+        [InlineKeyboardButton("⬅️ Назад к способам оплаты", callback_data=f"plan:{country_code}:{plan_key}")],
     ]
     text = (
         f"<b>СБП — {PLAN_TITLES.get(plan_key, plan_key)}</b>\n"
@@ -1729,8 +2080,8 @@ async def sbp_auto_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         return
     await _safe_answer_query(query)
 
-    _, plan_key = (query.data.split(":", 1) + [""])[:2]
-    plan_key = str(plan_key or "").strip().lower()
+    country_code, plan_key = _parse_country_plan_callback(query.data, "sbp_auto")
+    country_code = _normalize_country_code(country_code)
     card_product = _product_for_plan_and_provider(plan_key, "yookassa")
     if not card_product:
         if query.message:
@@ -1755,7 +2106,7 @@ async def sbp_auto_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
     rows: List[List[InlineKeyboardButton]] = [
         [InlineKeyboardButton("🔁 Подключить СБП автоплатёж", url=payment_link)],
-        [InlineKeyboardButton("⬅️ Назад к способам оплаты", callback_data=f"plan:{plan_key}")],
+        [InlineKeyboardButton("⬅️ Назад к способам оплаты", callback_data=f"plan:{country_code}:{plan_key}")],
     ]
     text = (
         f"<b>СБП автоплатёж — {PLAN_TITLES.get(plan_key, plan_key)}</b>\n"
@@ -2050,8 +2401,10 @@ def create_application() -> Application:
     application.add_handler(CommandHandler("support", support_command))
     application.add_handler(CommandHandler("terms", terms_command))
     application.add_handler(CommandHandler("privacy", privacy_command))
+    application.add_handler(CommandHandler("forgetme", forgetme_command))
     application.add_handler(CommandHandler("reply", reply_command))
     application.add_handler(CallbackQueryHandler(buy_handler, pattern=r"^buy:"))
+    application.add_handler(CallbackQueryHandler(country_callback, pattern=r"^(country_menu|country:)"))
     application.add_handler(CallbackQueryHandler(plan_callback, pattern=r"^plan:"))
     application.add_handler(CallbackQueryHandler(sbp_auto_callback, pattern=r"^sbp_auto:"))
     application.add_handler(CallbackQueryHandler(sbp_callback, pattern=r"^sbp:"))
@@ -2060,6 +2413,8 @@ def create_application() -> Application:
     application.add_handler(CallbackQueryHandler(support_callback, pattern=r"^support(?::.+)?$"))
     application.add_handler(CallbackQueryHandler(support_close_callback, pattern=r"^support_close(?::.+)?$"))
     application.add_handler(CallbackQueryHandler(doc_callback, pattern=r"^doc:(terms|privacy)$"))
+    application.add_handler(CallbackQueryHandler(forgetme_confirm_callback, pattern=r"^forgetme_confirm$"))
+    application.add_handler(CallbackQueryHandler(forgetme_cancel_callback, pattern=r"^forgetme_cancel$"))
     application.add_handler(CallbackQueryHandler(howto_callback, pattern=r"^howto$"))
     application.add_handler(CallbackQueryHandler(menu_callback, pattern=r"^menu"))
     application.add_handler(PreCheckoutQueryHandler(precheckout_handler))
@@ -2084,6 +2439,9 @@ async def _run_standalone() -> None:
 
 def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+    # Silence low-level HTTP request-line logs to avoid leaking bot token in URLs.
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("httpcore").setLevel(logging.WARNING)
     if not BOT_TOKEN:
         raise RuntimeError("TELEGRAM_BOT_TOKEN is not set")
     asyncio.run(_run_standalone())

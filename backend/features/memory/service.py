@@ -177,6 +177,88 @@ _MOTIF_KEYWORDS = {
     ),
 }
 
+_BEHAVIOR_KEYWORDS = {
+    "confirmation": (
+        "подтвер",
+        "правиль",
+        "точно",
+        "знак",
+        "стоит ли",
+        "получится ли",
+        "сбудет",
+    ),
+    "control": (
+        "контрол",
+        "управ",
+        "влиять",
+        "удерж",
+        "застав",
+        "подчин",
+    ),
+    "decision_avoidance": (
+        "не могу реш",
+        "не реш",
+        "сомнева",
+        "боюсь выб",
+        "отлож",
+        "не знаю как",
+    ),
+    "anxiety_cycle": (
+        "трев",
+        "боюсь",
+        "паник",
+        "страш",
+        "пережив",
+        "накруч",
+    ),
+    "rational_check": (
+        "план",
+        "срок",
+        "бюджет",
+        "расчет",
+        "логик",
+        "факт",
+        "стратег",
+        "вариант",
+    ),
+}
+
+_BEHAVIOR_LABELS = {
+    "confirmation": "поиск подтверждения",
+    "control": "запрос на контроль",
+    "decision_avoidance": "избегание выбора",
+    "anxiety_cycle": "тревожный цикл",
+    "rational_check": "рациональная проверка",
+    "none": "",
+}
+
+_BEHAVIOR_HINTS = {
+    "confirmation": "мягко переведи ответ из поиска «знака» в один проверяемый шаг",
+    "control": "снизь давление, предложи фокус на зоне личного влияния",
+    "decision_avoidance": "помоги сузить выбор до 1–2 критериев и шага на сегодня",
+    "anxiety_cycle": "держи тон спокойным и поддерживающим, без усиления тревоги",
+    "rational_check": "дай структурный и конкретный ответ по фактам и действиям",
+}
+
+_TONE_PROFILES = {
+    "rational": {
+        "label": "рациональный",
+        "guidance": "пиши структурно, без мистификации, с конкретными критериями и шагами",
+    },
+    "supportive": {
+        "label": "поддерживающий",
+        "guidance": "сначала коротко валидируй состояние, затем дай мягкие и выполнимые шаги",
+    },
+    "direct": {
+        "label": "прямой",
+        "guidance": "говори коротко и ясно, без лишних оборотов, с фокусом на решении",
+    },
+    "mystic_lite": {
+        "label": "мистический (лёгкий)",
+        "guidance": "допустим 1 символический образ, но выводы должны быть практичными",
+    },
+}
+
 _SEMANTIC_CONCEPT_RULES = {
     "переезд": (
         "переезд",
@@ -1121,15 +1203,35 @@ def _history_card_stats(events: Sequence[Any]) -> tuple[Counter, dict[str, datet
     return counts, last_seen, display_names
 
 
+def _history_card_occurrences(events: Sequence[Any]) -> dict[str, list[tuple[datetime, bool]]]:
+    out: dict[str, list[tuple[datetime, bool]]] = {}
+    for ev in events:
+        event_at = getattr(ev, "event_at", None)
+        if not isinstance(event_at, datetime):
+            continue
+        for row in list(getattr(ev, "cards", []) or []):
+            if not isinstance(row, dict):
+                continue
+            raw = str(row.get("card_name") or "").strip().lower()
+            if not raw:
+                continue
+            out.setdefault(raw, []).append((event_at, bool(row.get("is_reversed"))))
+    for key in list(out.keys()):
+        out[key] = sorted(out[key], key=lambda x: x[0], reverse=True)
+    return out
+
+
 def _build_card_relationship_lines(
     *,
     current_cards: list[Any],
+    events: Sequence[Any],
     history_counts: Counter,
     history_last_seen: dict[str, datetime],
     history_display_names: dict[str, str],
 ) -> list[str]:
     lines: list[str] = []
     now = _now_utc()
+    history_occ = _history_card_occurrences(events)
     current_keys: list[str] = []
     seen: set[str] = set()
     for row in list(current_cards or []):
@@ -1144,7 +1246,35 @@ def _build_card_relationship_lines(
         count = int(history_counts.get(key, 0))
         if count >= 2:
             display = history_display_names.get(key) or _display_card_name(raw)
-            lines.append(f"Карта «{display}» уже появлялась у вас {count} раз раньше.")
+            # N раз за X дней (приоритетно по окну 30 дней)
+            occ = list(history_occ.get(key) or [])
+            count_30 = sum(1 for dt, _ in occ if (now - dt).days <= 30)
+            if count_30 >= 2:
+                lines.append(f"Карта «{display}» приходит {count_30} раз за 30 дней.")
+            elif count >= 3:
+                lines.append(f"Карта «{display}» уже появлялась у вас {count} раз.")
+
+            # Повторилась в той же / обратной позиции
+            prev = occ[0] if occ else None
+            current_rev = bool(row.get("is_reversed"))
+            if prev:
+                prev_rev = bool(prev[1])
+                if prev_rev == current_rev:
+                    lines.append(
+                        f"«{display}» повторилась в той же позиции: {_orientation_label(current_rev)}."
+                    )
+                else:
+                    lines.append(
+                        f"«{display}» вернулась в обратной позиции: было {_orientation_label(prev_rev)}, "
+                        f"сейчас {_orientation_label(current_rev)}."
+                    )
+
+            # Не появлялась N дней и вернулась
+            last_at = history_last_seen.get(key)
+            if isinstance(last_at, datetime):
+                gap_days = max(1, int((now - last_at).days))
+                if gap_days >= 14:
+                    lines.append(f"«{display}» не появлялась {gap_days} дней и вернулась.")
 
     top = history_counts.most_common(3)
     for key, count in top:
@@ -1159,7 +1289,16 @@ def _build_card_relationship_lines(
             lines.append(f"Карта «{display}» не появлялась около {days} дней и сейчас это заметный сдвиг.")
             break
 
-    return lines[:3]
+    # Убираем дубли и ограничиваем длину блока
+    dedup: list[str] = []
+    seen_lines: set[str] = set()
+    for line in lines:
+        norm = re.sub(r"\s+", " ", str(line or "")).strip()
+        if not norm or norm in seen_lines:
+            continue
+        seen_lines.add(norm)
+        dedup.append(norm)
+    return dedup[:5]
 
 
 def _cards_similarity_snapshot(*, current_cards: list[Any], previous_cards: list[Any]) -> dict[str, Any]:
@@ -1432,6 +1571,73 @@ def _build_then_vs_now_lines(
     ]
 
 
+def _detect_behavior_pattern(
+    *,
+    question: str,
+    matched_concepts: Sequence[str],
+    matched_tokens: Sequence[str],
+    same_cards_count: int,
+) -> dict[str, str]:
+    src = str(question or "").lower().replace("ё", "е")
+    scores: Counter = Counter()
+
+    for code, needles in _BEHAVIOR_KEYWORDS.items():
+        for needle in needles:
+            if needle in src:
+                scores[code] += 1
+
+    # Семантический повтор темы/слов и стабильные карты обычно дают паттерн "ищу подтверждение"
+    if matched_concepts:
+        scores["confirmation"] += 1
+    if len(matched_tokens) >= 2:
+        scores["confirmation"] += 1
+    if same_cards_count >= 1:
+        scores["confirmation"] += 1
+    if any(x in src for x in ("или", "вариант", "выбор")):
+        scores["decision_avoidance"] += 1
+
+    if not scores:
+        return {"code": "none", "label": "", "hint": ""}
+
+    code, score = scores.most_common(1)[0]
+    if score <= 0:
+        return {"code": "none", "label": "", "hint": ""}
+
+    return {
+        "code": str(code),
+        "label": str(_BEHAVIOR_LABELS.get(code) or ""),
+        "hint": str(_BEHAVIOR_HINTS.get(code) or ""),
+    }
+
+
+def _select_adaptive_tone(
+    *,
+    question: str,
+    behavior_code: str,
+    matched_concepts: Sequence[str],
+) -> dict[str, str]:
+    src = str(question or "").lower().replace("ё", "е")
+    risk = classify_safety_risk(src)
+
+    if risk in {"medical", "crisis"}:
+        profile = _TONE_PROFILES["supportive"]
+    elif behavior_code == "anxiety_cycle":
+        profile = _TONE_PROFILES["supportive"]
+    elif behavior_code in {"control", "decision_avoidance"}:
+        profile = _TONE_PROFILES["direct"]
+    elif behavior_code == "rational_check" or any(c in {"финансы", "карьера", "экзамен"} for c in matched_concepts):
+        profile = _TONE_PROFILES["rational"]
+    elif any(k in src for k in ("знак", "вселен", "судьб", "маг", "интуиц")):
+        profile = _TONE_PROFILES["mystic_lite"]
+    else:
+        profile = _TONE_PROFILES["supportive"]
+
+    return {
+        "label": str(profile.get("label") or ""),
+        "guidance": str(profile.get("guidance") or ""),
+    }
+
+
 async def build_runtime_prompt_context(
     db: AsyncSession,
     *,
@@ -1529,8 +1735,15 @@ async def build_runtime_prompt_context(
     if cards_delta:
         parts.append(f"Сравнение карт: {cards_delta}")
 
+    snapshot = _cards_similarity_snapshot(
+        current_cards=list(current_cards or []),
+        previous_cards=list(getattr(best_event, "cards", []) or []),
+    )
+    same_cards_count = len(list(snapshot.get("same_cards") or []))
+
     card_relationship_lines = _build_card_relationship_lines(
         current_cards=list(current_cards or []),
+        events=events,
         history_counts=history_counts,
         history_last_seen=history_last_seen,
         history_display_names=history_display_names,
@@ -1549,6 +1762,27 @@ async def build_runtime_prompt_context(
     if then_vs_now:
         parts.append("Сравнение (тогда vs сейчас):")
         parts.extend([f"- {line}" for line in then_vs_now if str(line or "").strip()])
+
+    behavior = _detect_behavior_pattern(
+        question=q_text,
+        matched_concepts=sorted(list(best_matched_concepts)),
+        matched_tokens=sorted(list(best_matched_tokens)),
+        same_cards_count=same_cards_count,
+    )
+    if behavior.get("label"):
+        parts.append(f"Поведенческий паттерн: {behavior['label']}.")
+    if behavior.get("hint"):
+        parts.append(f"Как вести ответ: {behavior['hint']}.")
+
+    tone = _select_adaptive_tone(
+        question=q_text,
+        behavior_code=str(behavior.get("code") or ""),
+        matched_concepts=sorted(list(best_matched_concepts)),
+    )
+    if tone.get("label"):
+        parts.append(f"Тон ответа: {tone['label']}.")
+    if tone.get("guidance"):
+        parts.append(f"Стиль: {tone['guidance']}.")
 
     if not parts:
         return ""

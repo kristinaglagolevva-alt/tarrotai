@@ -9,7 +9,9 @@ from dotenv import load_dotenv
 load_dotenv()
 
 BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-INITDATA_TTL_SECONDS = int(os.getenv("TELEGRAM_INITDATA_TTL_SECONDS", "86400"))
+_INITDATA_TTL_RAW = int(os.getenv("TELEGRAM_INITDATA_TTL_SECONDS", "900"))
+# Keep TTL strictly in a 10-15 minute window.
+INITDATA_TTL_SECONDS = max(600, min(900, _INITDATA_TTL_RAW))
 INITDATA_MAX_FUTURE_SKEW_SECONDS = int(os.getenv("TELEGRAM_INITDATA_MAX_FUTURE_SKEW_SECONDS", "300"))
 
 

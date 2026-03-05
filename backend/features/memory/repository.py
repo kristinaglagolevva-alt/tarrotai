@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
-from typing import Optional, Sequence
+from typing import Iterable, Optional, Sequence
 
 from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -102,3 +102,45 @@ async def purge_old_events(db: AsyncSession, *, days: int = 90) -> int:
     for row in rows:
         await db.delete(row)
     return len(rows)
+
+
+async def has_source_event(
+    db: AsyncSession,
+    *,
+    user_id: int,
+    source_kind: str,
+    source_id: Optional[int],
+) -> bool:
+    if source_id is None:
+        return False
+    q = (
+        select(UserMemoryEvent.id)
+        .where(
+            UserMemoryEvent.user_id == int(user_id),
+            UserMemoryEvent.source_kind == str(source_kind),
+            UserMemoryEvent.source_id == int(source_id),
+        )
+        .limit(1)
+    )
+    res = await db.execute(q)
+    return res.scalar_one_or_none() is not None
+
+
+async def list_existing_source_ids(
+    db: AsyncSession,
+    *,
+    user_id: int,
+    source_kind: str,
+    source_ids: Iterable[int],
+) -> set[int]:
+    normalized = sorted({int(x) for x in source_ids if x is not None})
+    if not normalized:
+        return set()
+    q = await db.execute(
+        select(UserMemoryEvent.source_id).where(
+            UserMemoryEvent.user_id == int(user_id),
+            UserMemoryEvent.source_kind == str(source_kind),
+            UserMemoryEvent.source_id.in_(normalized),
+        )
+    )
+    return {int(x) for x in q.scalars().all() if x is not None}

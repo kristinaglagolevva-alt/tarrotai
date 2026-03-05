@@ -41,6 +41,29 @@ def _pick_tags(question: str, topic: str, spread_type: str) -> List[str]:
     return list(dict.fromkeys(tags))
 
 
+def _compact_description(description: str, *, max_sentences: int = 2, max_chars: int = 260) -> str:
+    src = re.sub(r"\s+", " ", str(description or "").strip())
+    if not src:
+        return ""
+
+    parts = [p.strip(" .") for p in re.split(r"(?<=[.!?])\s+", src) if p.strip()]
+    selected: List[str] = []
+    for part in parts:
+        selected.append(part)
+        if len(selected) >= max_sentences:
+            break
+    if not selected:
+        selected = [src]
+
+    out = ". ".join(selected).strip()
+    if out and not out.endswith((".", "!", "?")):
+        out = f"{out}."
+    if len(out) <= max_chars:
+        return out
+    cut = out[:max_chars].rsplit(" ", 1)[0].strip()
+    return (cut or out[:max_chars]).strip() + "…"
+
+
 def build_memory_event_payload(
     *,
     source_kind: str,
@@ -78,5 +101,5 @@ def build_memory_event_payload(
         "sentiment_label": sentiment,
         "tags": tags,
         "question_tokens": tokens[:16],
-        "description_excerpt": str(description or "").strip()[:700],
+        "description_excerpt": _compact_description(description, max_sentences=2, max_chars=260),
     }

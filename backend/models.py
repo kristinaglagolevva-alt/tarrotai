@@ -30,7 +30,7 @@ class User(Base):
     photo_url: Mapped[Optional[str]] = mapped_column(String(512))
     subscription_until: Mapped[Optional[DateTime]] = mapped_column(DateTime(timezone=True), nullable=True)
     paid_readings_balance: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
-    memory_opt_in: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+    memory_opt_in: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
     retention_nudges_opt_in: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
     retention_nudge_hour_local: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     retention_nudge_tz: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
@@ -383,3 +383,26 @@ class RetentionNudgeLog(Base):
     )
 
     user: Mapped["User"] = relationship(back_populates="retention_nudge_logs")
+
+
+class VisionEscalationCounter(Base):
+    __tablename__ = "vision_escalation_counters"
+    __table_args__ = (
+        UniqueConstraint("counter_key", "day_key", name="uq_vision_escalation_counter_day"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    counter_key: Mapped[str] = mapped_column(String(64), default="photo_analysis", server_default="photo_analysis", index=True)
+    day_key: Mapped[str] = mapped_column(String(10), index=True)
+    total_requests: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    escalated_requests: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+
+    created_at: Mapped[DateTime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+    )
+    updated_at: Mapped[DateTime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+    )

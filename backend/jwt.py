@@ -1,7 +1,6 @@
 import time
 import os
 import re
-import warnings
 from jose import jwt
 from dotenv import load_dotenv
 
@@ -10,7 +9,32 @@ load_dotenv()
 JWT_EXPIRE_SECONDS = int(os.getenv("JWT_EXPIRE_SECONDS", "2592000"))
 JWT_ALG = "HS256"
 JWT_SECRET_MIN_LENGTH = int(os.getenv("JWT_SECRET_MIN_LENGTH", "32"))
-JWT_ALLOW_WEAK_SECRET = (os.getenv("JWT_ALLOW_WEAK_SECRET") or "").strip().lower() in {"1", "true", "yes"}
+
+_WEAK_SECRET_VALUES = {
+    "changeme",
+    "change_me",
+    "change-me",
+    "default",
+    "secret",
+    "supersecret",
+    "super_secret",
+    "super-secret",
+    "jwtsecret",
+    "jwt_secret",
+    "jwt-secret",
+    "password",
+    "test",
+    "example",
+    "admin",
+    "root",
+    "12345",
+    "qwerty",
+    "super_secret_change_me",
+}
+_WEAK_SECRET_HINT_RE = re.compile(
+    r"(change.?me|replace.?me|default|example|test.?key|test.?secret|jwt.?secret)",
+    re.IGNORECASE,
+)
 
 
 def _load_jwt_secret() -> str:
@@ -18,17 +42,18 @@ def _load_jwt_secret() -> str:
     if not secret:
         raise RuntimeError("JWT_SECRET is not set")
 
-    weak_by_len = len(secret) < JWT_SECRET_MIN_LENGTH
-    weak_by_pattern = bool(re.search(r"(change|secret|default|test|12345|qwerty)", secret, re.IGNORECASE))
-    if weak_by_len or weak_by_pattern:
-        msg = (
-            f"JWT_SECRET is too weak (len={len(secret)}). "
+    if len(secret) < JWT_SECRET_MIN_LENGTH:
+        raise RuntimeError(
+            f"JWT_SECRET is too short (len={len(secret)}). "
             f"Use at least {JWT_SECRET_MIN_LENGTH} random characters."
         )
-        if JWT_ALLOW_WEAK_SECRET:
-            warnings.warn(msg)
-        else:
-            raise RuntimeError(msg)
+
+    normalized = re.sub(r"[^a-z0-9]+", "", secret.lower())
+    if normalized in _WEAK_SECRET_VALUES or _WEAK_SECRET_HINT_RE.search(secret):
+        raise RuntimeError(
+            "JWT_SECRET looks like a default/weak placeholder. "
+            "Set a strong random value and restart."
+        )
     return secret
 
 

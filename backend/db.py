@@ -1,12 +1,12 @@
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
 from sqlalchemy.orm import DeclarativeBase
-from typing import AsyncGenerator
+from typing import AsyncGenerator, Optional
 import os
 from dotenv import load_dotenv
 
 load_dotenv()
 
-def _normalize_database_url(raw_url: str | None) -> str:
+def _normalize_database_url(raw_url: Optional[str]) -> str:
     if not raw_url:
         raise RuntimeError("DATABASE_URL is not set")
 

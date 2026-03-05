@@ -14,6 +14,10 @@ import uuid
 from datetime import date, datetime, timedelta, timezone
 from html import escape
 from typing import Optional, List, Literal, Dict, Any
+try:
+    from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+except Exception:  # Python 3.8 fallback
+    from backports.zoneinfo import ZoneInfo, ZoneInfoNotFoundError  # type: ignore
 
 import httpx
 from fastapi import FastAPI, Depends, HTTPException, Header, UploadFile, File, Form, Query
@@ -21,6 +25,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, RedirectResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import select, desc, func, and_, or_
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from dotenv import load_dotenv
 
@@ -37,6 +42,7 @@ from models import (
     UserMemoryEvent,
     UserMemoryProfile,
     RetentionNudgeLog,
+    VisionEscalationCounter,
 )
 from telegram_auth import validate_init_data
 from jwt import create_jwt, decode_jwt
@@ -124,6 +130,98 @@ SBP_AUTOPAY_INTERVAL_DAYS = max(1, int(os.getenv("SBP_AUTOPAY_INTERVAL_DAYS", "3
 SBP_AUTOPAY_MAX_FAILS = max(1, int(os.getenv("SBP_AUTOPAY_MAX_FAILS", "3")))
 SBP_AUTOPAY_WORKER_INTERVAL_SEC = max(60, int(os.getenv("SBP_AUTOPAY_WORKER_INTERVAL_SEC", "300")))
 ANALYTICS_ADMIN_TOKEN = (os.getenv("ANALYTICS_ADMIN_TOKEN") or "").strip()
+VISION_ESCALATION_COUNTER_KEY = "photo_analysis"
+VISION_ESCALATION_TZ_NAME = (os.getenv("OPENAI_VISION_ESCALATION_TZ") or "Asia/Tashkent").strip() or "Asia/Tashkent"
+
+
+def _safe_env_float(name: str, default: float) -> float:
+    raw = str(os.getenv(name) or "").strip()
+    if not raw:
+        return float(default)
+    try:
+        return float(raw)
+    except Exception:
+        return float(default)
+
+
+def _safe_env_int(name: str, default: int) -> int:
+    raw = str(os.getenv(name) or "").strip()
+    if not raw:
+        return int(default)
+    try:
+        return int(raw)
+    except Exception:
+        return int(default)
+
+
+VISION_ESCALATION_MAX_RATIO = min(1.0, max(0.0, _safe_env_float("OPENAI_VISION_ESCALATION_MAX_RATIO", 0.25)))
+VISION_ESCALATION_DAILY_MAX = max(0, _safe_env_int("OPENAI_VISION_ESCALATION_DAILY_MAX", 0))
+VISION_ESCALATION_MIN_SAMPLES = max(0, _safe_env_int("OPENAI_VISION_ESCALATION_MIN_SAMPLES", 20))
+try:
+    VISION_ESCALATION_TZ = ZoneInfo(VISION_ESCALATION_TZ_NAME)
+except ZoneInfoNotFoundError:
+    log.warning("OPENAI_VISION_ESCALATION_TZ=%s is invalid, fallback to UTC", VISION_ESCALATION_TZ_NAME)
+    VISION_ESCALATION_TZ = timezone.utc
+
+_WEAK_SECRET_VALUES = {
+    "changeme",
+    "change_me",
+    "change-me",
+    "default",
+    "secret",
+    "supersecret",
+    "super_secret",
+    "super-secret",
+    "password",
+    "test",
+    "example",
+    "admin",
+    "root",
+    "12345",
+    "qwerty",
+    "yookassa_webhook_token",
+}
+_WEAK_SECRET_HINT_RE = re.compile(
+    r"(change.?me|replace.?me|default|example|test.?key|test.?secret|webhook.?token)",
+    re.IGNORECASE,
+)
+
+
+def _assert_strong_secret(
+    secret_name: str,
+    secret_value: str,
+    *,
+    min_len: int = 24,
+    required: bool = True,
+) -> None:
+    value = str(secret_value or "").strip()
+    if not value:
+        if required:
+            raise RuntimeError(f"{secret_name} is required and must not be empty")
+        return
+    if len(value) < min_len:
+        raise RuntimeError(
+            f"{secret_name} is too short (len={len(value)}). "
+            f"Use at least {min_len} random characters."
+        )
+    normalized = re.sub(r"[^a-z0-9]+", "", value.lower())
+    if normalized in _WEAK_SECRET_VALUES or _WEAK_SECRET_HINT_RE.search(value):
+        raise RuntimeError(
+            f"{secret_name} looks like a default/weak placeholder. "
+            "Set a strong random value and restart."
+        )
+
+
+def _validate_security_boot_config() -> None:
+    # SBP/YooKassa webhook auth token is mandatory in production runtime.
+    _assert_strong_secret("YOOKASSA_WEBHOOK_TOKEN", YOOKASSA_WEBHOOK_TOKEN, min_len=24, required=True)
+    # Optional channel, but if configured then must be strong.
+    _assert_strong_secret(
+        "SUPPORT_INBOX_WEBHOOK_SECRET",
+        SUPPORT_INBOX_WEBHOOK_SECRET,
+        min_len=24,
+        required=False,
+    )
 
 
 # ============================ CORS ============================
@@ -217,6 +315,7 @@ async def _start_telegram_bot_background() -> None:
 @app.on_event("startup")
 async def on_startup() -> None:
     global _autopay_worker_task
+    _validate_security_boot_config()
     # БД
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
@@ -275,6 +374,137 @@ def _month_bounds_utc(now: datetime) -> tuple[datetime, datetime]:
     else:
         nxt = datetime(now.year, now.month + 1, 1, tzinfo=timezone.utc)
     return first, nxt
+
+
+def _vision_day_key_local(now: Optional[datetime] = None) -> str:
+    base = now.astimezone(VISION_ESCALATION_TZ) if now else datetime.now(VISION_ESCALATION_TZ)
+    return base.strftime("%Y-%m-%d")
+
+
+def _vision_snapshot(day_key: str, total: int, escalated: int) -> Dict[str, Any]:
+    return {
+        "day": str(day_key),
+        "total": int(total or 0),
+        "escalated": int(escalated or 0),
+    }
+
+
+async def _vision_register_request_global() -> Dict[str, Any]:
+    day_key = _vision_day_key_local()
+    try:
+        async with SessionLocal() as quota_db:
+            stmt = (
+                pg_insert(VisionEscalationCounter)
+                .values(
+                    counter_key=VISION_ESCALATION_COUNTER_KEY,
+                    day_key=day_key,
+                    total_requests=1,
+                    escalated_requests=0,
+                )
+                .on_conflict_do_update(
+                    index_elements=[VisionEscalationCounter.counter_key, VisionEscalationCounter.day_key],
+                    set_={
+                        "total_requests": VisionEscalationCounter.total_requests + 1,
+                        "updated_at": func.now(),
+                    },
+                )
+                .returning(
+                    VisionEscalationCounter.day_key,
+                    VisionEscalationCounter.total_requests,
+                    VisionEscalationCounter.escalated_requests,
+                )
+            )
+            row = (await quota_db.execute(stmt)).one()
+            await quota_db.commit()
+            return _vision_snapshot(row.day_key, row.total_requests, row.escalated_requests)
+    except Exception as exc:
+        log.warning("vision quota register failed (fallback fail-open): %s", repr(exc))
+        return _vision_snapshot(day_key, 0, 0)
+
+
+async def _vision_try_escalate_global() -> tuple[bool, str, Dict[str, Any]]:
+    day_key = _vision_day_key_local()
+    try:
+        async with SessionLocal() as quota_db:
+            await quota_db.execute(
+                pg_insert(VisionEscalationCounter)
+                .values(
+                    counter_key=VISION_ESCALATION_COUNTER_KEY,
+                    day_key=day_key,
+                    total_requests=0,
+                    escalated_requests=0,
+                )
+                .on_conflict_do_nothing(
+                    index_elements=[VisionEscalationCounter.counter_key, VisionEscalationCounter.day_key]
+                )
+            )
+            row = (
+                await quota_db.execute(
+                    select(VisionEscalationCounter)
+                    .where(
+                        VisionEscalationCounter.counter_key == VISION_ESCALATION_COUNTER_KEY,
+                        VisionEscalationCounter.day_key == day_key,
+                    )
+                    .with_for_update()
+                )
+            ).scalar_one()
+
+            total = int(row.total_requests or 0)
+            escalated = int(row.escalated_requests or 0)
+            snapshot = _vision_snapshot(day_key, total, escalated)
+
+            if VISION_ESCALATION_DAILY_MAX > 0 and escalated >= VISION_ESCALATION_DAILY_MAX:
+                await quota_db.rollback()
+                return False, "daily_max_reached", snapshot
+
+            if total >= VISION_ESCALATION_MIN_SAMPLES and total > 0:
+                current_ratio = escalated / float(total)
+                if current_ratio >= VISION_ESCALATION_MAX_RATIO:
+                    await quota_db.rollback()
+                    return False, "ratio_limit_reached", snapshot
+
+            row.escalated_requests = escalated + 1
+            await quota_db.commit()
+            return True, "ok", _vision_snapshot(day_key, total, escalated + 1)
+    except Exception as exc:
+        log.warning("vision quota escalate check failed (fail-open): %s", repr(exc))
+        return True, "db_error_fail_open", _vision_snapshot(day_key, 0, 0)
+
+
+async def _vision_mark_forced_escalation_global() -> Dict[str, Any]:
+    day_key = _vision_day_key_local()
+    try:
+        async with SessionLocal() as quota_db:
+            await quota_db.execute(
+                pg_insert(VisionEscalationCounter)
+                .values(
+                    counter_key=VISION_ESCALATION_COUNTER_KEY,
+                    day_key=day_key,
+                    total_requests=0,
+                    escalated_requests=0,
+                )
+                .on_conflict_do_nothing(
+                    index_elements=[VisionEscalationCounter.counter_key, VisionEscalationCounter.day_key]
+                )
+            )
+            row = (
+                await quota_db.execute(
+                    select(VisionEscalationCounter)
+                    .where(
+                        VisionEscalationCounter.counter_key == VISION_ESCALATION_COUNTER_KEY,
+                        VisionEscalationCounter.day_key == day_key,
+                    )
+                    .with_for_update()
+                )
+            ).scalar_one()
+            total = int(row.total_requests or 0)
+            escalated = int(row.escalated_requests or 0) + 1
+            row.escalated_requests = escalated
+            await quota_db.commit()
+            return _vision_snapshot(day_key, total, escalated)
+    except Exception as exc:
+        log.warning("vision quota forced escalation failed (fail-open): %s", repr(exc))
+        return _vision_snapshot(day_key, 0, 1)
 
 
 def _get_sbp_plan(plan_code: str) -> Dict[str, Any]:
@@ -642,6 +872,20 @@ async def _ensure_runtime_schema(conn) -> None:
         "CREATE INDEX IF NOT EXISTS ix_retention_nudge_log_user_id ON retention_nudge_log (user_id);",
         "CREATE INDEX IF NOT EXISTS ix_retention_nudge_log_sent_at ON retention_nudge_log (sent_at);",
         "CREATE INDEX IF NOT EXISTS ix_retention_nudge_log_status ON retention_nudge_log (status);",
+        """
+        CREATE TABLE IF NOT EXISTS vision_escalation_counters (
+            id SERIAL PRIMARY KEY,
+            counter_key VARCHAR(64) NOT NULL DEFAULT 'photo_analysis',
+            day_key VARCHAR(10) NOT NULL,
+            total_requests INTEGER NOT NULL DEFAULT 0,
+            escalated_requests INTEGER NOT NULL DEFAULT 0,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+        """,
+        "CREATE UNIQUE INDEX IF NOT EXISTS uq_vision_escalation_counter_day ON vision_escalation_counters (counter_key, day_key);",
+        "CREATE INDEX IF NOT EXISTS ix_vision_escalation_counters_counter_key ON vision_escalation_counters (counter_key);",
+        "CREATE INDEX IF NOT EXISTS ix_vision_escalation_counters_day_key ON vision_escalation_counters (day_key);",
     ]
     for stmt in statements:
         try:
@@ -2710,7 +2954,7 @@ async def billing_sbp_webhook(
     token: Optional[str] = Query(default=None),
     db: AsyncSession = Depends(get_db),
 ):
-    if YOOKASSA_WEBHOOK_TOKEN and str(token or "").strip() != YOOKASSA_WEBHOOK_TOKEN:
+    if str(token or "").strip() != YOOKASSA_WEBHOOK_TOKEN:
         raise HTTPException(status_code=401, detail="Invalid webhook token")
 
     event = str(payload.get("event") or "").strip()
@@ -3283,18 +3527,11 @@ async def photo_analysis(
         raise HTTPException(status_code=413, detail="File too large (max 8MB)")
 
     await _consume_reading_quota_or_raise(db, current_user.id)
-    _, memory_prompt_context, _ = await _memory_context_for_user(
-        db,
-        current_user,
-        question=question,
-    )
 
     try:
         context = (extra_context or "").strip()
         if not consider_reversed:
             context = f"{context}\nИгнорируй перевёрнутые позиции, считай карты прямыми.".strip()
-        if memory_prompt_context:
-            context = f"{context}\n\n{memory_prompt_context}".strip() if context else memory_prompt_context
         description, cards = await generate_photo_analysis_llm(
             topic=topic,
             question=question,
@@ -3302,6 +3539,9 @@ async def photo_analysis(
             image_mime=content_type,
             extra_context=context,
             require_llm=force_llm,
+            quota_register=_vision_register_request_global,
+            quota_try_escalate=_vision_try_escalate_global,
+            quota_mark_forced_escalation=_vision_mark_forced_escalation_global,
         )
     except Exception as e:
         log.exception("LLM photo-analysis failed: %s", repr(e))

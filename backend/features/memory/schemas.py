@@ -7,8 +7,11 @@ from pydantic import BaseModel, Field
 
 class MemorySummaryOut(BaseModel):
     recurring_topics: List[Dict[str, Any]] = Field(default_factory=list)
+    recurring_capsules: List[Dict[str, Any]] = Field(default_factory=list)
     repeated_cards: List[Dict[str, Any]] = Field(default_factory=list)
     cycle_hints: List[str] = Field(default_factory=list)
+    recurring_question_signals: List[Dict[str, Any]] = Field(default_factory=list)
+    home_hint: str = ""
     last_changes: Dict[str, Any] = Field(default_factory=dict)
 
 

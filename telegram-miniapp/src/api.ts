@@ -62,6 +62,9 @@ export type MemorySummaryDto = {
   recurring_topics: Array<{ topic?: string; count?: number; last_seen?: string | null }>
   repeated_cards: Array<{ card?: string; count?: number; last_seen?: string | null }>
   cycle_hints: string[]
+  recurring_question_signals?: Array<{ signal?: string; label?: string; count?: number; last_seen?: string | null }>
+  recurring_capsules?: Array<{ capsule?: string; count?: number; last_seen?: string | null }>
+  home_hint?: string
   last_changes: Record<string, any>
 }
 
@@ -275,7 +278,6 @@ export type ReadingOutDto = {
   cards: ReadingCardDto[]
   description: string
   created_at: string
-  memory_hint?: string | null
 }
 
 export type ReadingCreateParams = {
@@ -321,6 +323,7 @@ export type UnifiedHistoryCardOfDayPayload = {
   card_index: number
   card_name: string
   description: string
+  theme_capsule?: string
 }
 
 export type UnifiedHistoryReadingPayload = {
@@ -330,6 +333,7 @@ export type UnifiedHistoryReadingPayload = {
   question: string
   cards: ReadingCardDto[]
   description: string
+  theme_capsule?: string
 }
 
 export type UnifiedHistoryItem =
@@ -359,7 +363,6 @@ export type PhotoAnalysisOutDto = {
   topic?: string
   question?: string
   spread_type?: string
-  memory_hint?: string | null
 }
 
 export type PhotoAnalysisParams = {

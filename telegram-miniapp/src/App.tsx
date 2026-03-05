@@ -30,7 +30,6 @@ import cameraIcon from './assets/icons/camera.png'
 import futureIcon from './assets/icons/future_icon.png'
 import threeCardIcon from './assets/icons/three_card_icon.png'
 import selectCardIcon from './assets/icons/select_icon.png'
-import spellBookIcon from './assets/icons/start-sun-clean.png'
 
 // ✅ ЗАДНЯЯ СТОРОНА КАРТЫ — ВСЕГДА ТОЛЬКО ЭТА
 import backCardImg from './assets/cards/back/back.png'
@@ -592,6 +591,28 @@ function SpreadIcon({ kind }: { kind: 'sun' | 'clock' | 'cards' | 'branch' }) {
         strokeWidth="1.8"
         strokeLinecap="round"
       />
+    </svg>
+  )
+}
+
+function StartReadingIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true" fill="none">
+      <g stroke="currentColor" strokeWidth="1.45" strokeLinecap="round" strokeLinejoin="round">
+        <circle cx="12" cy="12" r="4.2" />
+        <path d="M12 2.7c.65 1.6.83 3.05.83 5.15" />
+        <path d="M21.3 12c-1.6.65-3.05.83-5.15.83" />
+        <path d="M12 21.3c-.65-1.6-.83-3.05-.83-5.15" />
+        <path d="M2.7 12c1.6-.65 3.05-.83 5.15-.83" />
+        <path d="M18.55 5.45c-.95 1.44-1.93 2.43-3.47 3.48" />
+        <path d="M18.55 18.55c-1.44-.95-2.43-1.93-3.48-3.47" />
+        <path d="M5.45 18.55c.95-1.44 1.93-2.43 3.47-3.48" />
+        <path d="M5.45 5.45c1.44.95 2.43 1.93 3.48 3.47" />
+        <path d="M12 4.1c.25 1.1.33 2.08.33 3.22" opacity="0.7" />
+        <path d="M19.9 12c-1.1.25-2.08.33-3.22.33" opacity="0.7" />
+        <path d="M12 19.9c-.25-1.1-.33-2.08-.33-3.22" opacity="0.7" />
+        <path d="M4.1 12c1.1-.25 2.08-.33 3.22-.33" opacity="0.7" />
+      </g>
     </svg>
   )
 }
@@ -1458,8 +1479,6 @@ useEffect(() => {
 
   const [ctaError, setCtaError] = useState(false)
   const ctaErrTRef = useRef<number | null>(null)
-  const toolbarStartTRef = useRef<number | null>(null)
-
   const [attnStage, setAttnStage] = useState<Stage | null>(null)
   const [attnNonce, setAttnNonce] = useState(0)
   const attnTRef = useRef<number | null>(null)
@@ -1551,14 +1570,10 @@ useEffect(() => {
   }
 
   const onBeginReading = () => {
-    const qOk = question.trim().length > 0
     const spreadOk = !!spread
 
-    if (!qOk || !spreadOk) {
+    if (!spreadOk) {
       pulseCtaRed()
-      if (!qOk) {
-        return flashStageBorder('question')
-      }
       return flashStageBorder('spread')
     }
 
@@ -1597,7 +1612,6 @@ useEffect(() => {
       if (ctaErrTRef.current) window.clearTimeout(ctaErrTRef.current)
       if (attnTRef.current) window.clearTimeout(attnTRef.current)
       if (bumpTRef.current) window.clearTimeout(bumpTRef.current)
-      if (toolbarStartTRef.current) window.clearTimeout(toolbarStartTRef.current)
     }
   }, [])
 
@@ -2010,7 +2024,6 @@ useEffect(() => {
   const onGlassPointerUp = () => setPressed(false)
 
   const shouldAttnSpreads = attnStage === 'spread' && !spread
-  const showKeyboardToolbar = askInputFocused
 
   const renderSafetyNotice = (sourceQuestion: string) => {
     const note = buildSafetyNotice(sourceQuestion)
@@ -2055,6 +2068,7 @@ useEffect(() => {
 
   // направление для data-dir (можно использовать в CSS для лёгких эффектов)
   const navDir: 'left' | 'right' | 'none' = navActiveIndex === navPrevIndex ? 'none' : navActiveIndex > navPrevIndex ? 'right' : 'left'
+  const showKeyboardToolbar = askInputFocused && !(view === 'home' && navTab === 'main')
 
   const onPickNav = (next: NavTab) => {
     if (next === navTab) return
@@ -5033,6 +5047,8 @@ useEffect(() => {
     ? `Активна до ${formatRuDate(billing?.subscription_until)}`
     : 'Не активна'
   const currentLegalDoc = activeLegalDoc ? LEGAL_DOCS[activeLegalDoc] : null
+  const canStartReading = !!spread
+  const showHomePrimaryCta = view === 'home' && navTab === 'main'
 
   return (
     <div className="app" ref={appRef}>
@@ -5149,7 +5165,7 @@ useEffect(() => {
   </div>
 )}
 
-      <div className="content">
+      <div className={`content ${showHomePrimaryCta ? 'content--with-home-cta' : ''}`}>
         {view === 'home' && (
           <>
             <div className={`home-head ${navTab !== 'main' ? 'is-subtab' : ''}`}>
@@ -5232,12 +5248,12 @@ useEffect(() => {
                     <div className="card-day__rim" aria-hidden="true" />
                     <div className="card-day__spark" aria-hidden="true" />
                     <div className="card-day__text">
-                      <div className="card-day__title">Анализ расклада</div>
-                      <div className="card-day__subtitle">
-                        <span>Сфотографируйте свои карты</span>
-                        <span>для AI анализа</span>
-                      </div>
+                    <div className="card-day__title">Фото расклада</div>
+                    <div className="card-day__subtitle">
+                      <span>Загрузите снимок расклада</span>
+                      <span>и получите AI-разбор</span>
                     </div>
+                  </div>
                     <div className="card-day__media" aria-hidden="true">
                       <img className="card-day__img" src={cameraIcon} alt="" />
                     </div>
@@ -5350,25 +5366,6 @@ useEffect(() => {
                     })}
                   </div>
 
-                  <button
-                    ref={btnRef}
-                    type="button"
-                    className={`glass-cta glass-cta--hero ${pressed ? 'pressed' : ''} ${ctaError ? 'is-error' : ''}`}
-                    onPointerDown={onGlassPointerDown}
-                    onPointerUp={onGlassPointerUp}
-                    onPointerCancel={onGlassPointerUp}
-                    onPointerLeave={onGlassPointerUp}
-                    onClick={onBeginReading}
-                  >
-                    <span className="glass-cta__inner">
-                      <span className="glass-cta__rim" aria-hidden="true" />
-                      <span className="glass-cta__icon">
-                        <img src={spellBookIcon} alt="" />
-                      </span>
-                      <span className="glass-cta__text">Начать расклад</span>
-                      <span className="glass-cta__spark" aria-hidden="true" />
-                    </span>
-                  </button>
                 </div>
 
                 <div className="nav-page" data-page="history">
@@ -5812,8 +5809,6 @@ useEffect(() => {
             <p>AI анализ фото расклада</p>
 
             <div className="photo-page">
-
-
               {/* скрытые инпуты */}
               <input
                 ref={galleryInputRef}
@@ -6872,6 +6867,34 @@ useEffect(() => {
         )}
       </div>
 
+      {showHomePrimaryCta && (
+        <div
+          className="home-primary-footer"
+          style={{ bottom: `${Math.max(0, keyboardInset)}px` }}
+        >
+          <button
+            ref={btnRef}
+            type="button"
+            className={`glass-cta glass-cta--primary-footer ${pressed ? 'pressed' : ''} ${ctaError ? 'is-error' : ''} ${canStartReading ? 'is-ready' : 'is-inactive'}`}
+            onPointerDown={onGlassPointerDown}
+            onPointerUp={onGlassPointerUp}
+            onPointerCancel={onGlassPointerUp}
+            onPointerLeave={onGlassPointerUp}
+            onClick={onBeginReading}
+            aria-disabled={!canStartReading}
+          >
+            <span className="glass-cta__inner">
+              <span className="glass-cta__rim" aria-hidden="true" />
+              <span className="glass-cta__icon" aria-hidden="true">
+                <StartReadingIcon />
+              </span>
+              <span className="glass-cta__text">Начать расклад</span>
+              <span className="glass-cta__spark" aria-hidden="true" />
+            </span>
+          </button>
+        </div>
+      )}
+
       {currentLegalDoc && (
         <div
           className="legal-doc-overlay"
@@ -7049,24 +7072,7 @@ useEffect(() => {
           className="keyboard-toolbar"
           style={{ bottom: `calc(env(safe-area-inset-bottom, 0px) + ${Math.max(8, keyboardInset + 8)}px)` }}
         >
-          {view === 'home' ? (
-            <button
-              type="button"
-              className="keyboard-toolbar__btn keyboard-toolbar__btn--start"
-              onClick={() => {
-                const active = document.activeElement
-                if (active instanceof HTMLElement) active.blur()
-                if (toolbarStartTRef.current) window.clearTimeout(toolbarStartTRef.current)
-                toolbarStartTRef.current = window.setTimeout(() => {
-                  onBeginReading()
-                }, isIOS ? 140 : 80)
-              }}
-            >
-              Начать расклад
-            </button>
-          ) : (
-            <span className="keyboard-toolbar__spacer" aria-hidden="true" />
-          )}
+          <span className="keyboard-toolbar__spacer" aria-hidden="true" />
 
           <button
             type="button"

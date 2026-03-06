@@ -225,7 +225,7 @@ CLICK_PLAN_MONTH_AMOUNT_RAW = (
 CLICK_PLAN_YEAR_AMOUNT_RAW = (
     os.getenv("CLICK_API_SUB_YEAR_AMOUNT")
     or os.getenv("CLICK_SUB_YEAR_AMOUNT")
-    or ""
+    or "219000"
 ).strip()
 ANALYTICS_ADMIN_TOKEN = (os.getenv("ANALYTICS_ADMIN_TOKEN") or "").strip()
 VISION_ESCALATION_COUNTER_KEY = "photo_analysis"
@@ -281,12 +281,7 @@ CLICK_PLAN_MONTH_AMOUNT = _apply_markup_minor(
 )
 _click_year_raw = max(0, _parse_int_or_default(CLICK_PLAN_YEAR_AMOUNT_RAW, 0))
 if _click_year_raw > 0:
-    CLICK_PLAN_YEAR_AMOUNT = _apply_markup_minor(
-        _click_year_raw,
-        PRICING_MARKUP_PERCENT,
-        step=100,
-        allow_zero=True,
-    )
+    CLICK_PLAN_YEAR_AMOUNT = _click_year_raw
 elif CLICK_PLAN_MONTH_AMOUNT > 0:
     CLICK_PLAN_YEAR_AMOUNT = _apply_markup_minor(
         CLICK_PLAN_MONTH_AMOUNT * 12,

@@ -140,6 +140,13 @@ USD_SUB_MONTH_CENTS_BASE = max(1, _env_int("USD_SUB_MONTH_CENTS_BASE", 179))
 CLICK_CURRENCY = (os.environ.get("CLICK_CURRENCY") or "UZS").strip().upper()
 CLICK_SUB_2WEEKS_AMOUNT_BASE = max(0, _env_int("CLICK_SUB_2WEEKS_AMOUNT", 0))
 CLICK_SUB_MONTH_AMOUNT_BASE = max(0, _env_int("CLICK_SUB_MONTH_AMOUNT", 0))
+CLICK_SUB_YEAR_AMOUNT_OVERRIDE = max(
+    0,
+    _env_int(
+        "CLICK_API_SUB_YEAR_AMOUNT",
+        _env_int("CLICK_SUB_YEAR_AMOUNT", 219000),
+    ),
+)
 RUB_SUB_2WEEKS_AMOUNT = _apply_markup_minor(
     RUB_SUB_2WEEKS_AMOUNT_BASE,
     PRICING_MARKUP_PERCENT,
@@ -182,12 +189,17 @@ CLICK_SUB_MONTH_AMOUNT = _apply_markup_minor(
     step=1,
     allow_zero=True,
 )
-CLICK_SUB_YEAR_AMOUNT = _apply_markup_minor(
-    CLICK_SUB_MONTH_AMOUNT * 12,
-    -YEARLY_DISCOUNT_PERCENT,
-    step=100,
-    allow_zero=True,
-) if CLICK_SUB_MONTH_AMOUNT > 0 else 0
+if CLICK_SUB_YEAR_AMOUNT_OVERRIDE > 0:
+    CLICK_SUB_YEAR_AMOUNT = CLICK_SUB_YEAR_AMOUNT_OVERRIDE
+elif CLICK_SUB_MONTH_AMOUNT > 0:
+    CLICK_SUB_YEAR_AMOUNT = _apply_markup_minor(
+        CLICK_SUB_MONTH_AMOUNT * 12,
+        -YEARLY_DISCOUNT_PERCENT,
+        step=100,
+        allow_zero=True,
+    )
+else:
+    CLICK_SUB_YEAR_AMOUNT = 0
 CLICK_SUB_2WEEKS_LABEL = (os.environ.get("CLICK_SUB_2WEEKS_LABEL") or "🇺🇿 CLICK — 2 недели").strip()
 CLICK_SUB_MONTH_LABEL = (os.environ.get("CLICK_SUB_MONTH_LABEL") or "🇺🇿 CLICK — месяц").strip()
 CLICK_SUB_YEAR_LABEL = (os.environ.get("CLICK_SUB_YEAR_LABEL") or "🇺🇿 CLICK — год").strip()

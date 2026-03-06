@@ -272,3 +272,146 @@ async def build_kpi_snapshot(
             "card_day_returns": "Доля пользователей, вернувшихся к 'Карте дня' хотя бы на 2 разных дня за последние 30 дней.",
         },
     }
+
+
+async def build_growth_snapshot(
+    db: AsyncSession,
+    *,
+    lookback_days: int = 30,
+    conversion_window_days: int = 30,
+    trial_product_code: str = "sub_week_click",
+    month_product_codes: Optional[Sequence[str]] = None,
+    ad_spend_uzs: int = 0,
+    now: Optional[datetime] = None,
+) -> dict:
+    now_utc = now or _utc_now()
+    period_days = max(1, int(lookback_days))
+    conversion_days = max(1, int(conversion_window_days))
+    since = now_utc - timedelta(days=period_days)
+    safe_trial_code = str(trial_product_code or "sub_week_click").strip().lower()
+    safe_month_codes = [
+        str(code or "").strip().lower()
+        for code in (month_product_codes or ("sub_month_click",))
+        if str(code or "").strip()
+    ]
+    if not safe_month_codes:
+        safe_month_codes = ["sub_month_click"]
+
+    trial_q = await db.execute(
+        select(PaymentTransaction.user_id, PaymentTransaction.created_at)
+        .where(
+            PaymentTransaction.kind == "subscription",
+            PaymentTransaction.refunded_at.is_(None),
+            PaymentTransaction.product_code == safe_trial_code,
+            PaymentTransaction.created_at >= since,
+        )
+        .order_by(PaymentTransaction.user_id.asc(), PaymentTransaction.created_at.asc())
+    )
+    first_trial_by_user: Dict[int, datetime] = {}
+    trial_purchases = 0
+    for user_id, created_at in trial_q.all():
+        if user_id is None or created_at is None:
+            continue
+        uid = int(user_id)
+        trial_purchases += 1
+        prev = first_trial_by_user.get(uid)
+        if prev is None or created_at < prev:
+            first_trial_by_user[uid] = created_at
+
+    trial_users = len(first_trial_by_user)
+    converted_users = 0
+    if trial_users > 0:
+        trial_user_ids = sorted(first_trial_by_user.keys())
+        month_q = await db.execute(
+            select(PaymentTransaction.user_id, PaymentTransaction.created_at)
+            .where(
+                PaymentTransaction.user_id.in_(trial_user_ids),
+                PaymentTransaction.kind == "subscription",
+                PaymentTransaction.refunded_at.is_(None),
+                PaymentTransaction.product_code.in_(safe_month_codes),
+            )
+            .order_by(PaymentTransaction.user_id.asc(), PaymentTransaction.created_at.asc())
+        )
+        month_by_user: Dict[int, List[datetime]] = defaultdict(list)
+        for user_id, created_at in month_q.all():
+            if user_id is None or created_at is None:
+                continue
+            month_by_user[int(user_id)].append(created_at)
+
+        window = timedelta(days=conversion_days)
+        for uid, trial_at in first_trial_by_user.items():
+            for month_at in month_by_user.get(uid, []):
+                if month_at >= trial_at and month_at <= trial_at + window:
+                    converted_users += 1
+                    break
+
+    conversion_rate = _safe_rate(converted_users, trial_users)
+
+    revenue_q = await db.execute(
+        select(
+            func.coalesce(func.sum(PaymentTransaction.amount), 0),
+            func.count(func.distinct(PaymentTransaction.user_id)),
+        ).where(
+            PaymentTransaction.kind == "subscription",
+            PaymentTransaction.refunded_at.is_(None),
+            PaymentTransaction.currency == "UZS",
+            PaymentTransaction.created_at >= since,
+        )
+    )
+    revenue_uzs_raw, paid_users_raw = revenue_q.one()
+    revenue_uzs = int(revenue_uzs_raw or 0)
+    paid_users = int(paid_users_raw or 0)
+    arppu_uzs = round(float(revenue_uzs) / float(paid_users), 2) if paid_users > 0 else 0.0
+
+    first_paid_sq = (
+        select(
+            PaymentTransaction.user_id.label("user_id"),
+            func.min(PaymentTransaction.created_at).label("first_paid_at"),
+        )
+        .where(
+            PaymentTransaction.kind == "subscription",
+            PaymentTransaction.refunded_at.is_(None),
+            PaymentTransaction.currency == "UZS",
+        )
+        .group_by(PaymentTransaction.user_id)
+        .subquery()
+    )
+    new_paid_q = await db.execute(
+        select(func.count(first_paid_sq.c.user_id)).where(first_paid_sq.c.first_paid_at >= since)
+    )
+    new_paid_users = int(new_paid_q.scalar() or 0)
+
+    ad_spend = max(0, int(ad_spend_uzs or 0))
+    cac_uzs = round(float(ad_spend) / float(new_paid_users), 2) if new_paid_users > 0 else 0.0
+    payback_months = round(float(cac_uzs) / float(arppu_uzs), 2) if arppu_uzs > 0 else 0.0
+    payback_days = round(float(payback_months) * 30.0, 1) if payback_months > 0 else 0.0
+
+    return {
+        "generated_at": now_utc,
+        "trial_to_month": {
+            "trial_product_code": safe_trial_code,
+            "month_product_codes": safe_month_codes,
+            "lookback_days": period_days,
+            "conversion_window_days": conversion_days,
+            "trial_users": trial_users,
+            "trial_purchases": int(trial_purchases),
+            "converted_users": int(converted_users),
+            "conversion_rate": conversion_rate,
+        },
+        "unit_economics": {
+            "period_days": period_days,
+            "revenue_uzs": revenue_uzs,
+            "paid_users": paid_users,
+            "arppu_uzs": arppu_uzs,
+            "new_paid_users": new_paid_users,
+            "ad_spend_uzs": ad_spend,
+            "cac_uzs": cac_uzs,
+            "payback_months": payback_months,
+            "payback_days": payback_days,
+        },
+        "notes": [
+            "trial_to_month: доля пользователей, купивших trial и затем месячный тариф в окне conversion_window_days.",
+            "cac_uzs: рекламные расходы за период / новые платящие за период.",
+            "payback_months: cac_uzs / arppu_uzs (по UZS-подпискам за период).",
+        ],
+    }

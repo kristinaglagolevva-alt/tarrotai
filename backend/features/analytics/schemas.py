@@ -36,3 +36,33 @@ class KpiOut(BaseModel):
     conversion_after_free: ConversionAfterFreeOut
     card_day_returns: CardDayReturnsOut
     definitions: dict[str, str]
+
+
+class TrialToMonthOut(BaseModel):
+    trial_product_code: str
+    month_product_codes: list[str]
+    lookback_days: int
+    conversion_window_days: int
+    trial_users: int
+    trial_purchases: int
+    converted_users: int
+    conversion_rate: float
+
+
+class UnitEconomicsOut(BaseModel):
+    period_days: int
+    revenue_uzs: int
+    paid_users: int
+    arppu_uzs: float
+    new_paid_users: int
+    ad_spend_uzs: int
+    cac_uzs: float
+    payback_months: float
+    payback_days: float
+
+
+class GrowthOut(BaseModel):
+    generated_at: datetime
+    trial_to_month: TrialToMonthOut
+    unit_economics: UnitEconomicsOut
+    notes: list[str]

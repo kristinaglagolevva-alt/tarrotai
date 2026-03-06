@@ -53,7 +53,7 @@ from tarot_deck import get_card_by_index, DECK_SIZE
 from llm_card_of_day import generate_card_text_llm, generate_spread_text_llm, generate_photo_analysis_llm
 from features.common.flags import FEATURE_FLAGS
 from features.common.timezone import resolve_tz_name
-from features.analytics.schemas import KpiOut
+from features.analytics.schemas import KpiOut, GrowthOut
 from features.analytics import service as analytics_service
 from features.memory.schemas import MemorySummaryOut
 from features.memory import service as memory_service
@@ -237,6 +237,11 @@ CLICK_PLAN_YEAR_AMOUNT_RAW = (
     or "219000"
 ).strip()
 ANALYTICS_ADMIN_TOKEN = (os.getenv("ANALYTICS_ADMIN_TOKEN") or "").strip()
+ANALYTICS_TRIAL_PRODUCT_CODE = (os.getenv("ANALYTICS_TRIAL_PRODUCT_CODE") or "sub_week_click").strip().lower()
+ANALYTICS_MONTH_PRODUCT_CODES_RAW = (
+    os.getenv("ANALYTICS_MONTH_PRODUCT_CODES")
+    or "sub_month_click"
+).strip()
 VISION_ESCALATION_COUNTER_KEY = "photo_analysis"
 VISION_ESCALATION_TZ_NAME = (os.getenv("OPENAI_VISION_ESCALATION_TZ") or "Asia/Tashkent").strip() or "Asia/Tashkent"
 
@@ -271,6 +276,25 @@ def _parse_int_or_default(raw: str, default: int = 0) -> int:
         return int(str(raw or "").strip())
     except Exception:
         return int(default)
+
+
+def _parse_csv_values(raw: str, *, lower: bool = True) -> List[str]:
+    values: List[str] = []
+    for part in str(raw or "").split(","):
+        item = str(part or "").strip()
+        if not item:
+            continue
+        values.append(item.lower() if lower else item)
+    return values
+
+
+ANALYTICS_GROWTH_LOOKBACK_DAYS = max(7, _safe_env_int("ANALYTICS_GROWTH_LOOKBACK_DAYS", 30))
+ANALYTICS_TRIAL_TO_MONTH_WINDOW_DAYS = max(1, _safe_env_int("ANALYTICS_TRIAL_TO_MONTH_WINDOW_DAYS", 30))
+ANALYTICS_AD_SPEND_UZS = max(0, _safe_env_int("ANALYTICS_AD_SPEND_UZS", 0))
+ANALYTICS_MONTH_PRODUCT_CODES = _parse_csv_values(
+    ANALYTICS_MONTH_PRODUCT_CODES_RAW,
+    lower=True,
+) or ["sub_month_click"]
 
 
 CLICK_SERVICE_ID = max(0, _parse_int_or_default(CLICK_SERVICE_ID_RAW, 0))
@@ -1847,6 +1871,27 @@ async def analytics_kpi(
     return KpiOut(**snapshot)
 
 
+@app.get("/analytics/growth", response_model=GrowthOut)
+async def analytics_growth(
+    x_analytics_token: Optional[str] = Header(default=None, alias="X-Analytics-Token"),
+    lookback_days: int = Query(default=ANALYTICS_GROWTH_LOOKBACK_DAYS, ge=7, le=180),
+    conversion_window_days: int = Query(default=ANALYTICS_TRIAL_TO_MONTH_WINDOW_DAYS, ge=1, le=90),
+    ad_spend_uzs: Optional[int] = Query(default=None, ge=0),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    _assert_analytics_access(current_user, x_analytics_token)
+    snapshot = await analytics_service.build_growth_snapshot(
+        db,
+        lookback_days=max(7, int(lookback_days)),
+        conversion_window_days=max(1, int(conversion_window_days)),
+        trial_product_code=ANALYTICS_TRIAL_PRODUCT_CODE,
+        month_product_codes=ANALYTICS_MONTH_PRODUCT_CODES,
+        ad_spend_uzs=int(ANALYTICS_AD_SPEND_UZS if ad_spend_uzs is None else ad_spend_uzs),
+    )
+    return GrowthOut(**snapshot)
+
+
 @app.get("/billing/status", response_model=BillingStatusOut)
 async def billing_status(
     current_user: User = Depends(get_current_user),
@@ -2140,6 +2185,7 @@ async def _configure_support_inbox_bot() -> None:
     commands = [
         {"command": "start", "description": "Справка по обработке тикетов"},
         {"command": "reply", "description": "Ответить пользователю: /reply <id> <текст>"},
+        {"command": "metrics", "description": "Рост: trial→month, CAC, payback"},
     ]
     help_text = (
         "✅ Support inbox подключен.\n"
@@ -2511,10 +2557,58 @@ async def support_inbox_webhook(
             "💬 Ответы поддержки\n\n"
             "• Ответьте в тикет через кнопку «Ответить»\n"
             "• /reply <telegram_id> <текст>\n"
+            "• /metrics [days] [ad_spend] — ключевые метрики роста\n"
             "• /open, /pending, /closed — фильтры тикетов\n"
             "• /ticket <ID> — карточка тикета\n\n"
             "Ответ будет доставлен пользователю в @Ttaarrroobot."
         )
+
+    def _fmt_num(value: Any) -> str:
+        try:
+            ivalue = int(round(float(value)))
+        except Exception:
+            ivalue = 0
+        return f"{ivalue:,}".replace(",", " ")
+
+    def _fmt_pct(value: Any) -> str:
+        try:
+            ratio = float(value)
+        except Exception:
+            ratio = 0.0
+        return f"{ratio * 100.0:.1f}%"
+
+    def _parse_metrics_args(raw: str) -> tuple[int, int, int]:
+        lookback_days = int(ANALYTICS_GROWTH_LOOKBACK_DAYS)
+        conversion_window_days = int(ANALYTICS_TRIAL_TO_MONTH_WINDOW_DAYS)
+        ad_spend_uzs = int(ANALYTICS_AD_SPEND_UZS)
+        numeric_args: List[int] = []
+        for token in str(raw or "").split()[1:]:
+            item = str(token or "").strip()
+            if not item:
+                continue
+            if "=" in item:
+                key, value = item.split("=", 1)
+                k = str(key or "").strip().lower()
+                v = str(value or "").strip()
+                if not v.lstrip("-").isdigit():
+                    continue
+                n = int(v)
+                if k in {"days", "day", "d", "lookback", "lb"}:
+                    lookback_days = max(7, min(180, n))
+                elif k in {"window", "win", "w"}:
+                    conversion_window_days = max(1, min(90, n))
+                elif k in {"ad", "spend", "ads", "budget", "ad_spend"}:
+                    ad_spend_uzs = max(0, n)
+                continue
+            if item.lstrip("-").isdigit():
+                numeric_args.append(int(item))
+        if numeric_args:
+            lookback_days = max(7, min(180, numeric_args[0]))
+        if len(numeric_args) >= 2:
+            ad_spend_uzs = max(0, numeric_args[1])
+        if len(numeric_args) >= 3:
+            conversion_window_days = max(1, min(90, numeric_args[2]))
+        return lookback_days, conversion_window_days, ad_spend_uzs
 
     def _parse_cb_ticket_target(raw_data: str) -> tuple[str, Optional[int]]:
         raw_part = str(raw_data.split(":", 1)[1] if ":" in raw_data else "").strip()
@@ -2745,6 +2839,51 @@ async def support_inbox_webhook(
             reply_to_message_id=int(msg.get("message_id") or 0) or None,
         )
         return {"ok": True, "handled": "help"}
+
+    if lower.startswith("/metrics") or lower.startswith("/kpi"):
+        lookback_days, conversion_window_days, ad_spend_uzs = _parse_metrics_args(text)
+        snapshot = await analytics_service.build_growth_snapshot(
+            db,
+            lookback_days=lookback_days,
+            conversion_window_days=conversion_window_days,
+            trial_product_code=ANALYTICS_TRIAL_PRODUCT_CODE,
+            month_product_codes=ANALYTICS_MONTH_PRODUCT_CODES,
+            ad_spend_uzs=ad_spend_uzs,
+        )
+        trial_to_month = snapshot.get("trial_to_month") or {}
+        unit = snapshot.get("unit_economics") or {}
+        metric_text = (
+            "📊 Метрики роста\n\n"
+            f"Период: {int(trial_to_month.get('lookback_days') or lookback_days)} дн\n"
+            f"Окно конверсии: {int(trial_to_month.get('conversion_window_days') or conversion_window_days)} дн\n\n"
+            "Trial → Month:\n"
+            f"• Конверсия: {_fmt_pct(trial_to_month.get('conversion_rate'))}\n"
+            f"• Пользователи trial: {_fmt_num(trial_to_month.get('trial_users'))}\n"
+            f"• Перешли в месяц: {_fmt_num(trial_to_month.get('converted_users'))}\n\n"
+            "Unit-экономика:\n"
+            f"• CAC: {_fmt_num(unit.get('cac_uzs'))} сум\n"
+            f"• Payback: {float(unit.get('payback_months') or 0.0):.2f} мес (~{float(unit.get('payback_days') or 0.0):.1f} дн)\n"
+            f"• Revenue: {_fmt_num(unit.get('revenue_uzs'))} сум\n"
+            f"• ARPPU: {_fmt_num(unit.get('arppu_uzs'))} сум\n"
+            f"• New paid: {_fmt_num(unit.get('new_paid_users'))}\n"
+            f"• Paid users: {_fmt_num(unit.get('paid_users'))}\n"
+            f"• Ad spend: {_fmt_num(unit.get('ad_spend_uzs'))} сум\n\n"
+            "Команда: /metrics [days] [ad_spend] [window]\n"
+            "Пример: /metrics 30 3000000 30"
+        )
+        await _send_bot_message_with_token(
+            token=SUPPORT_INBOX_BOT_TOKEN,
+            chat_id=chat_id,
+            text=metric_text,
+            reply_to_message_id=int(msg.get("message_id") or 0) or None,
+        )
+        return {
+            "ok": True,
+            "handled": "metrics",
+            "lookback_days": lookback_days,
+            "conversion_window_days": conversion_window_days,
+            "ad_spend_uzs": ad_spend_uzs,
+        }
 
     if lower in {"/open", "/pending", "/closed"}:
         status_map: Dict[str, List[str]] = {

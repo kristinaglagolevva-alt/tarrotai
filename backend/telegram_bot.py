@@ -203,7 +203,7 @@ PRODUCTS: List[Dict[str, Any]] = [
     {
         "code": "sub_2weeks_click",
         "menu_label": CLICK_SUB_2WEEKS_LABEL,
-        "menu_hint": "Оплата через CLICK (Узбекистан).",
+        "menu_hint": "Оплата через CLICK (приложение Click или банковская карта).",
         "title": "Безлимит на 2 недели (CLICK)",
         "description": "Подписка AI Tarot на 14 дней через CLICK",
         "amount": CLICK_SUB_2WEEKS_AMOUNT,
@@ -216,7 +216,7 @@ PRODUCTS: List[Dict[str, Any]] = [
     {
         "code": "sub_month_click",
         "menu_label": CLICK_SUB_MONTH_LABEL,
-        "menu_hint": "Оплата через CLICK (Узбекистан).",
+        "menu_hint": "Оплата через CLICK (приложение Click или банковская карта).",
         "title": "Безлимит на месяц (CLICK)",
         "description": "Подписка AI Tarot на 30 дней через CLICK",
         "amount": CLICK_SUB_MONTH_AMOUNT,
@@ -387,7 +387,7 @@ def _products_for_mode(mode: str = "menu") -> List[Dict[str, Any]]:
 
     if mode_l in {"card", "cards", "sberpay", "card_sberpay"}:
         items = [p for p in items if str(p.get("provider_mode") or "").lower() == "yookassa"]
-    elif mode_l in {"click", "uz", "uzbekistan"}:
+    elif mode_l in {"click", "uz", "uzbekistan", "click_card", "card_click", "clickcard"}:
         items = [p for p in items if str(p.get("provider_mode") or "").lower() == "click"]
 
     return sorted(items, key=lambda x: x.get("priority", 0))
@@ -589,7 +589,7 @@ def _method_keyboard(plan_key: str, country_code: str) -> InlineKeyboardMarkup:
             rows.append(
                 [
                     InlineKeyboardButton(
-                        f"🇺🇿 CLICK — {_format_amount_label(click_product)}",
+                        f"🇺🇿 CLICK / карта через CLICK — {_format_amount_label(click_product)}",
                         callback_data=f"buy:{click_product['code']}",
                     )
                 ]
@@ -645,7 +645,7 @@ def _format_methods_text(plan_key: str, country_code: str) -> str:
             methods.append(f"• По карте / SberPay — {_format_amount_label(card_product)}")
     elif safe_country == "uz":
         if click_product:
-            methods.append(f"• CLICK — {_format_amount_label(click_product)}")
+            methods.append(f"• CLICK (приложение) или карта через CLICK — {_format_amount_label(click_product)}")
         if card_product:
             methods.append(f"• Международная карта — {_format_amount_label(card_product)}")
     else:
@@ -703,9 +703,9 @@ def _format_price_list(mode: str = "menu") -> str:
             "Выберите период подписки:",
             "",
         ]
-    elif mode_l in {"click", "uz", "uzbekistan"}:
+    elif mode_l in {"click", "uz", "uzbekistan", "click_card", "card_click", "clickcard"}:
         parts = [
-            "<b>Оплата через CLICK</b>",
+            "<b>Оплата через CLICK / картой через CLICK</b>",
             "Выберите период подписки:",
             "",
         ]
@@ -1500,7 +1500,7 @@ async def _send_menu(
     if mode_l in {"menu", "buy_credits", "credits", "buy", "country_menu"}:
         text = _format_country_list()
         markup = _country_keyboard()
-    elif mode_l in {"click", "uz", "uzbekistan"}:
+    elif mode_l in {"click", "uz", "uzbekistan", "click_card", "card_click", "clickcard"}:
         text = _format_plan_list("uz")
         markup = _plans_keyboard("uz")
     elif mode_l in {"card", "cards", "sberpay", "card_sberpay", "ru", "russia"}:
@@ -1546,7 +1546,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if mode in {"menu", "buy", "buy_credits", "credits"}:
         await _send_menu(update.effective_chat.id, context, include_app_link=False, mode="menu")
         return
-    if mode in {"card", "cards", "sberpay", "card_sberpay", "click", "uz", "uzbekistan"}:
+    if mode in {"card", "cards", "sberpay", "card_sberpay", "click", "uz", "uzbekistan", "click_card", "card_click", "clickcard"}:
         await _send_menu(update.effective_chat.id, context, include_app_link=False, mode=mode)
         return
     if mode in {"support", "help_support"}:
@@ -2208,7 +2208,8 @@ async def buy_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             return
         if query.message:
             rows = [
-                [InlineKeyboardButton("🇺🇿 Оплатить через CLICK", url=payment_link)],
+                [InlineKeyboardButton("🇺🇿 Открыть CLICK", url=payment_link)],
+                [InlineKeyboardButton("💳 Оплатить картой через CLICK", url=payment_link)],
                 [InlineKeyboardButton("⬅️ Назад к способам оплаты", callback_data=f"plan:uz:{plan_key}")],
             ]
             await query.message.reply_text(
@@ -2216,7 +2217,8 @@ async def buy_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
                     f"<b>Оплата через CLICK</b>\n"
                     f"Тариф: {escape(str(product.get('title') or product_code))}\n"
                     f"Сумма: {_format_amount_label(product)}\n\n"
-                    "Нажмите кнопку ниже и завершите оплату в CLICK."
+                    "Нажмите кнопку ниже и завершите оплату в приложении CLICK "
+                    "или банковской картой на странице оплаты CLICK."
                 ),
                 reply_markup=InlineKeyboardMarkup(rows),
                 parse_mode=ParseMode.HTML,

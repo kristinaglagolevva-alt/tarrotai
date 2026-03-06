@@ -817,6 +817,7 @@ const BOT_USERNAME = 'Ttaarrroobot'
 const BOT_PAYMENT_URL = `https://t.me/${BOT_USERNAME}?start=menu`
 const BOT_CARD_URL = `https://t.me/${BOT_USERNAME}?start=card`
 const BOT_CLICK_URL = `https://t.me/${BOT_USERNAME}?start=click`
+const BOT_CLICK_CARD_URL = `https://t.me/${BOT_USERNAME}?start=click_card`
 const BOT_SUB_MANAGE_URL = `https://t.me/${BOT_USERNAME}?start=sub_manage`
 const SUPPORT_URL = `https://t.me/${BOT_USERNAME}?start=support`
 const TERMS_URL = `https://t.me/${BOT_USERNAME}?start=terms`
@@ -5651,6 +5652,19 @@ useEffect(() => {
                             }}
                           >
                             CLICK (Узбекистан)
+                          </a>
+
+                          <a
+                            href={BOT_CLICK_CARD_URL}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="profile-piece__cta profile-piece__cta--click"
+                            onClick={(e) => {
+                              e.preventDefault()
+                              openTelegramUrl(BOT_CLICK_CARD_URL)
+                            }}
+                          >
+                            Карта через CLICK (UZ)
                           </a>
                         </div>
 

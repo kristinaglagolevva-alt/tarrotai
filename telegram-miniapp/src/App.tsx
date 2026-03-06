@@ -906,17 +906,14 @@ const readStoredJwt = (): string | null => {
     if (current && current.trim()) return current.trim()
   } catch {}
 
-  // One-time migration from old localStorage location.
   try {
-    const legacy = localStorage.getItem(JWT_STORAGE_KEY)
-    if (legacy && legacy.trim()) {
+    const persisted = localStorage.getItem(JWT_STORAGE_KEY)
+    if (persisted && persisted.trim()) {
       try {
-        sessionStorage.setItem(JWT_STORAGE_KEY, legacy.trim())
+        sessionStorage.setItem(JWT_STORAGE_KEY, persisted.trim())
       } catch {}
-      localStorage.removeItem(JWT_STORAGE_KEY)
-      return legacy.trim()
+      return persisted.trim()
     }
-    localStorage.removeItem(JWT_STORAGE_KEY)
   } catch {}
   return null
 }
@@ -931,7 +928,7 @@ const writeStoredJwt = (token: string) => {
     sessionStorage.setItem(JWT_STORAGE_KEY, value)
   } catch {}
   try {
-    localStorage.removeItem(JWT_STORAGE_KEY)
+    localStorage.setItem(JWT_STORAGE_KEY, value)
   } catch {}
 }
 
@@ -942,6 +939,40 @@ const clearStoredJwt = () => {
   try {
     localStorage.removeItem(JWT_STORAGE_KEY)
   } catch {}
+}
+
+const resolveTelegramInitData = (): string => {
+  try {
+    const tgData = String((window as any)?.Telegram?.WebApp?.initData || '').trim()
+    if (tgData) return tgData
+  } catch {}
+
+  const fromParams = (raw: string) => {
+    const p = new URLSearchParams(raw)
+    const v = String(
+      p.get('tgWebAppData') ||
+      p.get('tgwebappdata') ||
+      p.get('init_data') ||
+      ''
+    ).trim()
+    if (!v) return ''
+    try {
+      return decodeURIComponent(v)
+    } catch {
+      return v
+    }
+  }
+
+  try {
+    const fromSearch = fromParams(window.location.search || '')
+    if (fromSearch) return fromSearch
+  } catch {}
+  try {
+    const hash = String(window.location.hash || '').replace(/^#/, '')
+    const fromHash = fromParams(hash)
+    if (fromHash) return fromHash
+  } catch {}
+  return ''
 }
 
 export default function App() {
@@ -1031,7 +1062,8 @@ useEffect(() => {
 
     // 2) Телеграм‑авторизация
     try {
-      if (!tg?.initData) {
+      const initData = resolveTelegramInitData()
+      if (!initData) {
         safe(() => {
           setAuthStatus('error')
           setAuthError('Откройте мини‑приложение внутри Telegram (нет initData).')
@@ -1039,7 +1071,7 @@ useEffect(() => {
         return
       }
 
-      const res = await telegramAuth()
+      const res = await telegramAuth(initData)
       let billingOut: BillingStatus | null = null
       try {
         billingOut = await getBillingStatus(res.token)

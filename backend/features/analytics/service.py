@@ -8,7 +8,15 @@ from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from models import CardOfDay, PaymentTransaction, Reading, User
+from models import (
+    CardOfDay,
+    ClickOrder,
+    PaymentTransaction,
+    Reading,
+    SbpOrder,
+    User,
+    VisionEscalationCounter,
+)
 
 
 @dataclass
@@ -282,12 +290,16 @@ async def build_growth_snapshot(
     trial_product_code: str = "sub_week_click",
     month_product_codes: Optional[Sequence[str]] = None,
     ad_spend_uzs: int = 0,
+    ad_spend_rub: int = 0,
+    ad_spend_by_currency: Optional[Dict[str, int]] = None,
+    free_limit: int = 5,
     now: Optional[datetime] = None,
 ) -> dict:
     now_utc = now or _utc_now()
     period_days = max(1, int(lookback_days))
     conversion_days = max(1, int(conversion_window_days))
     since = now_utc - timedelta(days=period_days)
+    safe_free_limit = max(1, int(free_limit))
     safe_trial_code = str(trial_product_code or "sub_week_click").strip().lower()
     safe_month_codes = [
         str(code or "").strip().lower()
@@ -296,6 +308,16 @@ async def build_growth_snapshot(
     ]
     if not safe_month_codes:
         safe_month_codes = ["sub_month_click"]
+
+    safe_ad_spend_by_currency: Dict[str, int] = {
+        "UZS": max(0, int(ad_spend_uzs or 0)),
+        "RUB": max(0, int(ad_spend_rub or 0)),
+    }
+    for raw_currency, raw_value in (ad_spend_by_currency or {}).items():
+        currency = str(raw_currency or "").strip().upper()
+        if not currency:
+            continue
+        safe_ad_spend_by_currency[currency] = max(0, int(raw_value or 0))
 
     trial_q = await db.execute(
         select(PaymentTransaction.user_id, PaymentTransaction.created_at)
@@ -349,42 +371,327 @@ async def build_growth_snapshot(
 
     revenue_q = await db.execute(
         select(
+            PaymentTransaction.currency,
             func.coalesce(func.sum(PaymentTransaction.amount), 0),
             func.count(func.distinct(PaymentTransaction.user_id)),
         ).where(
             PaymentTransaction.kind == "subscription",
             PaymentTransaction.refunded_at.is_(None),
-            PaymentTransaction.currency == "UZS",
             PaymentTransaction.created_at >= since,
-        )
+        ).group_by(PaymentTransaction.currency)
     )
-    revenue_uzs_raw, paid_users_raw = revenue_q.one()
-    revenue_uzs = int(revenue_uzs_raw or 0)
-    paid_users = int(paid_users_raw or 0)
-    arppu_uzs = round(float(revenue_uzs) / float(paid_users), 2) if paid_users > 0 else 0.0
+    revenue_by_currency: Dict[str, int] = {}
+    paid_users_by_currency: Dict[str, int] = {}
+    for currency, revenue_raw, paid_users_raw in revenue_q.all():
+        code = str(currency or "").strip().upper() or "UNK"
+        revenue_by_currency[code] = int(revenue_raw or 0)
+        paid_users_by_currency[code] = int(paid_users_raw or 0)
 
     first_paid_sq = (
         select(
             PaymentTransaction.user_id.label("user_id"),
+            PaymentTransaction.currency.label("currency"),
             func.min(PaymentTransaction.created_at).label("first_paid_at"),
         )
         .where(
             PaymentTransaction.kind == "subscription",
             PaymentTransaction.refunded_at.is_(None),
-            PaymentTransaction.currency == "UZS",
         )
-        .group_by(PaymentTransaction.user_id)
+        .group_by(PaymentTransaction.user_id, PaymentTransaction.currency)
         .subquery()
     )
     new_paid_q = await db.execute(
-        select(func.count(first_paid_sq.c.user_id)).where(first_paid_sq.c.first_paid_at >= since)
+        select(
+            first_paid_sq.c.currency,
+            func.count(first_paid_sq.c.user_id),
+        )
+        .where(first_paid_sq.c.first_paid_at >= since)
+        .group_by(first_paid_sq.c.currency)
     )
-    new_paid_users = int(new_paid_q.scalar() or 0)
+    new_paid_by_currency: Dict[str, int] = {}
+    for currency, cnt in new_paid_q.all():
+        code = str(currency or "").strip().upper() or "UNK"
+        new_paid_by_currency[code] = int(cnt or 0)
 
-    ad_spend = max(0, int(ad_spend_uzs or 0))
-    cac_uzs = round(float(ad_spend) / float(new_paid_users), 2) if new_paid_users > 0 else 0.0
-    payback_months = round(float(cac_uzs) / float(arppu_uzs), 2) if arppu_uzs > 0 else 0.0
-    payback_days = round(float(payback_months) * 30.0, 1) if payback_months > 0 else 0.0
+    ordered_currencies: List[str] = []
+    for code in ("UZS", "RUB"):
+        if (
+            code in revenue_by_currency
+            or code in new_paid_by_currency
+            or int(safe_ad_spend_by_currency.get(code) or 0) > 0
+        ):
+            ordered_currencies.append(code)
+    extra_codes = sorted(
+        {
+            *revenue_by_currency.keys(),
+            *new_paid_by_currency.keys(),
+            *safe_ad_spend_by_currency.keys(),
+        }
+        - set(ordered_currencies)
+    )
+    ordered_currencies.extend(extra_codes)
+    if not ordered_currencies:
+        ordered_currencies = ["UZS", "RUB"]
+
+    unit_economics_by_currency: List[Dict[str, float | int | str]] = []
+    for code in ordered_currencies:
+        revenue = int(revenue_by_currency.get(code, 0) or 0)
+        paid_users = int(paid_users_by_currency.get(code, 0) or 0)
+        arppu = round(float(revenue) / float(paid_users), 2) if paid_users > 0 else 0.0
+        new_paid_users = int(new_paid_by_currency.get(code, 0) or 0)
+        ad_spend = int(safe_ad_spend_by_currency.get(code, 0) or 0)
+        cac = round(float(ad_spend) / float(new_paid_users), 2) if new_paid_users > 0 else 0.0
+        payback_months = round(float(cac) / float(arppu), 2) if arppu > 0 else 0.0
+        payback_days = round(float(payback_months) * 30.0, 1) if payback_months > 0 else 0.0
+        unit_economics_by_currency.append(
+            {
+                "currency": code,
+                "period_days": period_days,
+                "revenue": revenue,
+                "paid_users": paid_users,
+                "arppu": arppu,
+                "new_paid_users": new_paid_users,
+                "ad_spend": ad_spend,
+                "cac": cac,
+                "payback_months": payback_months,
+                "payback_days": payback_days,
+            }
+        )
+
+    uzs_metrics = next((row for row in unit_economics_by_currency if row.get("currency") == "UZS"), None)
+    if not uzs_metrics:
+        uzs_metrics = {
+            "period_days": period_days,
+            "revenue": 0,
+            "paid_users": 0,
+            "arppu": 0.0,
+            "new_paid_users": 0,
+            "ad_spend": int(safe_ad_spend_by_currency.get("UZS", 0) or 0),
+            "cac": 0.0,
+            "payback_months": 0.0,
+            "payback_days": 0.0,
+        }
+
+    new_users_q = await db.execute(
+        select(User.id).where(User.created_at >= since)
+    )
+    new_user_ids = [int(uid) for (uid,) in new_users_q.all() if uid is not None]
+    new_users = len(new_user_ids)
+    activated_users = 0
+    photo_users_in_new = 0
+    reached_free_limit_users = 0
+    trial_users_in_new = 0
+    paid_users_in_new = 0
+    if new_user_ids:
+        readings_count_q = await db.execute(
+            select(
+                Reading.user_id,
+                func.count(Reading.id),
+            )
+            .where(
+                Reading.user_id.in_(new_user_ids),
+                Reading.created_at >= since,
+            )
+            .group_by(Reading.user_id)
+        )
+        readings_by_new_user: Dict[int, int] = {}
+        for uid, cnt in readings_count_q.all():
+            if uid is None:
+                continue
+            readings_by_new_user[int(uid)] = int(cnt or 0)
+        activated_users = len(readings_by_new_user)
+        reached_free_limit_users = sum(
+            1 for cnt in readings_by_new_user.values() if int(cnt) >= safe_free_limit
+        )
+
+        photo_users_q = await db.execute(
+            select(func.count(func.distinct(Reading.user_id))).where(
+                Reading.user_id.in_(new_user_ids),
+                Reading.created_at >= since,
+                Reading.spread_type == "photo_analysis",
+            )
+        )
+        photo_users_in_new = int(photo_users_q.scalar() or 0)
+
+        trial_in_new_q = await db.execute(
+            select(func.count(func.distinct(PaymentTransaction.user_id))).where(
+                PaymentTransaction.user_id.in_(new_user_ids),
+                PaymentTransaction.kind == "subscription",
+                PaymentTransaction.refunded_at.is_(None),
+                PaymentTransaction.product_code == safe_trial_code,
+                PaymentTransaction.created_at >= since,
+            )
+        )
+        trial_users_in_new = int(trial_in_new_q.scalar() or 0)
+
+        paid_in_new_q = await db.execute(
+            select(func.count(func.distinct(PaymentTransaction.user_id))).where(
+                PaymentTransaction.user_id.in_(new_user_ids),
+                PaymentTransaction.kind == "subscription",
+                PaymentTransaction.refunded_at.is_(None),
+                PaymentTransaction.created_at >= since,
+            )
+        )
+        paid_users_in_new = int(paid_in_new_q.scalar() or 0)
+
+    photo_q = await db.execute(
+        select(Reading.user_id, Reading.created_at)
+        .where(
+            Reading.spread_type == "photo_analysis",
+            Reading.created_at >= since,
+        )
+        .order_by(Reading.user_id.asc(), Reading.created_at.asc())
+    )
+    first_photo_by_user: Dict[int, datetime] = {}
+    photo_analyses_completed = 0
+    for user_id, created_at in photo_q.all():
+        if user_id is None or created_at is None:
+            continue
+        uid = int(user_id)
+        photo_analyses_completed += 1
+        prev = first_photo_by_user.get(uid)
+        if prev is None or created_at < prev:
+            first_photo_by_user[uid] = created_at
+
+    photo_users = len(first_photo_by_user)
+    photo_trial_converted = 0
+    photo_paid_converted = 0
+    if photo_users > 0:
+        photo_user_ids = sorted(first_photo_by_user.keys())
+        payments_q = await db.execute(
+            select(PaymentTransaction.user_id, PaymentTransaction.created_at, PaymentTransaction.product_code)
+            .where(
+                PaymentTransaction.user_id.in_(photo_user_ids),
+                PaymentTransaction.kind == "subscription",
+                PaymentTransaction.refunded_at.is_(None),
+            )
+            .order_by(PaymentTransaction.user_id.asc(), PaymentTransaction.created_at.asc())
+        )
+        payments_by_user: Dict[int, List[Tuple[datetime, str]]] = defaultdict(list)
+        for user_id, created_at, product_code in payments_q.all():
+            if user_id is None or created_at is None:
+                continue
+            payments_by_user[int(user_id)].append(
+                (created_at, str(product_code or "").strip().lower())
+            )
+
+        window = timedelta(days=conversion_days)
+        for uid, photo_at in first_photo_by_user.items():
+            has_trial = False
+            has_paid = False
+            for pay_at, code in payments_by_user.get(uid, []):
+                if pay_at < photo_at:
+                    continue
+                if pay_at > (photo_at + window):
+                    break
+                has_paid = True
+                if code == safe_trial_code:
+                    has_trial = True
+            if has_trial:
+                photo_trial_converted += 1
+            if has_paid:
+                photo_paid_converted += 1
+
+    paywall = await calculate_conversion_after_free(
+        db,
+        free_limit=safe_free_limit,
+        window_days=conversion_days,
+        lookback_days=max(period_days, conversion_days + 7),
+        now=now_utc,
+    )
+
+    retention_points = await calculate_retention(
+        db,
+        days=(1, 7, 30),
+        lookback_days=max(120, period_days + 31),
+        now=now_utc,
+    )
+    retention_map = {int(p.day): float(p.retention_rate) for p in retention_points}
+
+    current_30_since = now_utc - timedelta(days=30)
+    prev_30_since = now_utc - timedelta(days=60)
+    current_paid_q = await db.execute(
+        select(PaymentTransaction.user_id).where(
+            PaymentTransaction.kind == "subscription",
+            PaymentTransaction.refunded_at.is_(None),
+            PaymentTransaction.created_at >= current_30_since,
+        )
+    )
+    prev_paid_q = await db.execute(
+        select(PaymentTransaction.user_id).where(
+            PaymentTransaction.kind == "subscription",
+            PaymentTransaction.refunded_at.is_(None),
+            PaymentTransaction.created_at >= prev_30_since,
+            PaymentTransaction.created_at < current_30_since,
+        )
+    )
+    current_paid_users_set = {
+        int(uid)
+        for (uid,) in current_paid_q.all()
+        if uid is not None
+    }
+    prev_paid_users_set = {
+        int(uid)
+        for (uid,) in prev_paid_q.all()
+        if uid is not None
+    }
+    repeat_paid_users = len(current_paid_users_set.intersection(prev_paid_users_set))
+
+    total_sub_payments_q = await db.execute(
+        select(func.count(PaymentTransaction.id)).where(
+            PaymentTransaction.kind == "subscription",
+            PaymentTransaction.created_at >= since,
+        )
+    )
+    refunded_sub_payments_q = await db.execute(
+        select(func.count(PaymentTransaction.id)).where(
+            PaymentTransaction.kind == "subscription",
+            PaymentTransaction.created_at >= since,
+            PaymentTransaction.refunded_at.is_not(None),
+        )
+    )
+    total_sub_payments = int(total_sub_payments_q.scalar() or 0)
+    refunded_sub_payments = int(refunded_sub_payments_q.scalar() or 0)
+
+    click_total_q = await db.execute(
+        select(func.count(ClickOrder.id)).where(ClickOrder.created_at >= since)
+    )
+    click_failed_q = await db.execute(
+        select(func.count(ClickOrder.id)).where(
+            ClickOrder.created_at >= since,
+            ClickOrder.status.in_(["cancelled", "canceled"]),
+        )
+    )
+    click_total = int(click_total_q.scalar() or 0)
+    click_failed = int(click_failed_q.scalar() or 0)
+
+    sbp_total_q = await db.execute(
+        select(func.count(SbpOrder.id)).where(SbpOrder.created_at >= since)
+    )
+    sbp_failed_q = await db.execute(
+        select(func.count(SbpOrder.id)).where(
+            SbpOrder.created_at >= since,
+            SbpOrder.status.in_(["canceled", "cancelled"]),
+        )
+    )
+    sbp_total = int(sbp_total_q.scalar() or 0)
+    sbp_failed = int(sbp_failed_q.scalar() or 0)
+
+    vision_since_key = since.date().isoformat()
+    vision_until_key = now_utc.date().isoformat()
+    vision_q = await db.execute(
+        select(
+            func.coalesce(func.sum(VisionEscalationCounter.total_requests), 0),
+            func.coalesce(func.sum(VisionEscalationCounter.escalated_requests), 0),
+        ).where(
+            VisionEscalationCounter.counter_key == "photo_analysis",
+            VisionEscalationCounter.day_key >= vision_since_key,
+            VisionEscalationCounter.day_key <= vision_until_key,
+        )
+    )
+    vision_total_raw, vision_escalated_raw = vision_q.one()
+    vision_total = int(vision_total_raw or 0)
+    vision_escalated = int(vision_escalated_raw or 0)
 
     return {
         "generated_at": now_utc,
@@ -400,18 +707,77 @@ async def build_growth_snapshot(
         },
         "unit_economics": {
             "period_days": period_days,
-            "revenue_uzs": revenue_uzs,
-            "paid_users": paid_users,
-            "arppu_uzs": arppu_uzs,
-            "new_paid_users": new_paid_users,
-            "ad_spend_uzs": ad_spend,
-            "cac_uzs": cac_uzs,
-            "payback_months": payback_months,
-            "payback_days": payback_days,
+            "revenue_uzs": int(uzs_metrics["revenue"]),
+            "paid_users": int(uzs_metrics["paid_users"]),
+            "arppu_uzs": float(uzs_metrics["arppu"]),
+            "new_paid_users": int(uzs_metrics["new_paid_users"]),
+            "ad_spend_uzs": int(uzs_metrics["ad_spend"]),
+            "cac_uzs": float(uzs_metrics["cac"]),
+            "payback_months": float(uzs_metrics["payback_months"]),
+            "payback_days": float(uzs_metrics["payback_days"]),
+        },
+        "unit_economics_by_currency": unit_economics_by_currency,
+        "activation_funnel": {
+            "lookback_days": period_days,
+            "new_users": int(new_users),
+            "activated_users": int(activated_users),
+            "photo_users": int(photo_users_in_new),
+            "reached_free_limit_users": int(reached_free_limit_users),
+            "trial_users": int(trial_users_in_new),
+            "paid_users": int(paid_users_in_new),
+            "activation_rate": _safe_rate(activated_users, new_users),
+            "paid_rate": _safe_rate(paid_users_in_new, new_users),
+        },
+        "photo_funnel": {
+            "lookback_days": period_days,
+            "conversion_window_days": conversion_days,
+            "photo_users": int(photo_users),
+            "photo_analyses_completed": int(photo_analyses_completed),
+            "converted_to_trial_users": int(photo_trial_converted),
+            "converted_to_paid_users": int(photo_paid_converted),
+            "trial_conversion_rate": _safe_rate(photo_trial_converted, photo_users),
+            "paid_conversion_rate": _safe_rate(photo_paid_converted, photo_users),
+        },
+        "paywall_funnel": {
+            "free_limit": int(paywall.get("free_limit") or safe_free_limit),
+            "window_days": int(paywall.get("window_days") or conversion_days),
+            "users_hit_limit": int(paywall.get("users_hit_limit") or 0),
+            "users_converted": int(paywall.get("users_converted") or 0),
+            "conversion_rate": float(paywall.get("conversion_rate") or 0.0),
+        },
+        "retention_summary": {
+            "d1": float(retention_map.get(1, 0.0)),
+            "d7": float(retention_map.get(7, 0.0)),
+            "d30": float(retention_map.get(30, 0.0)),
+            "prev_paid_users_30d": int(len(prev_paid_users_set)),
+            "current_paid_users_30d": int(len(current_paid_users_set)),
+            "repeat_paid_users_30d": int(repeat_paid_users),
+            "paid_repeat_30d_rate": _safe_rate(repeat_paid_users, len(prev_paid_users_set)),
+        },
+        "payment_quality": {
+            "period_days": period_days,
+            "total_subscription_payments": int(total_sub_payments),
+            "refunded_payments": int(refunded_sub_payments),
+            "refund_rate": _safe_rate(refunded_sub_payments, total_sub_payments),
+            "click_orders_total": int(click_total),
+            "click_orders_failed": int(click_failed),
+            "click_failure_rate": _safe_rate(click_failed, click_total),
+            "sbp_orders_total": int(sbp_total),
+            "sbp_orders_failed": int(sbp_failed),
+            "sbp_failure_rate": _safe_rate(sbp_failed, sbp_total),
+        },
+        "ai_operations": {
+            "period_days": period_days,
+            "photo_analyses_completed": int(photo_analyses_completed),
+            "vision_requests_tracked": int(vision_total),
+            "vision_escalated_requests": int(vision_escalated),
+            "vision_escalation_rate": _safe_rate(vision_escalated, vision_total),
         },
         "notes": [
             "trial_to_month: доля пользователей, купивших trial и затем месячный тариф в окне conversion_window_days.",
-            "cac_uzs: рекламные расходы за период / новые платящие за период.",
-            "payback_months: cac_uzs / arppu_uzs (по UZS-подпискам за период).",
+            "unit_economics_by_currency: ARPPU/CAC/Payback считаются отдельно по каждой валюте.",
+            "activation_funnel: поведение новых пользователей за период lookback_days.",
+            "photo_funnel: конверсия пользователей фото-анализа в оплату в окне conversion_window_days.",
+            "retention_summary: D1/D7/D30 + repeat paid 30d.",
         ],
     }

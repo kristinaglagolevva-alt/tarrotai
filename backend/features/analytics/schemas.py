@@ -61,8 +61,90 @@ class UnitEconomicsOut(BaseModel):
     payback_days: float
 
 
+class CurrencyUnitEconomicsOut(BaseModel):
+    currency: str
+    period_days: int
+    revenue: int
+    paid_users: int
+    arppu: float
+    new_paid_users: int
+    ad_spend: int
+    cac: float
+    payback_months: float
+    payback_days: float
+
+
+class ActivationFunnelOut(BaseModel):
+    lookback_days: int
+    new_users: int
+    activated_users: int
+    photo_users: int
+    reached_free_limit_users: int
+    trial_users: int
+    paid_users: int
+    activation_rate: float
+    paid_rate: float
+
+
+class PhotoFunnelOut(BaseModel):
+    lookback_days: int
+    conversion_window_days: int
+    photo_users: int
+    photo_analyses_completed: int
+    converted_to_trial_users: int
+    converted_to_paid_users: int
+    trial_conversion_rate: float
+    paid_conversion_rate: float
+
+
+class PaywallFunnelOut(BaseModel):
+    free_limit: int
+    window_days: int
+    users_hit_limit: int
+    users_converted: int
+    conversion_rate: float
+
+
+class RetentionSummaryOut(BaseModel):
+    d1: float
+    d7: float
+    d30: float
+    prev_paid_users_30d: int
+    current_paid_users_30d: int
+    repeat_paid_users_30d: int
+    paid_repeat_30d_rate: float
+
+
+class PaymentQualityOut(BaseModel):
+    period_days: int
+    total_subscription_payments: int
+    refunded_payments: int
+    refund_rate: float
+    click_orders_total: int
+    click_orders_failed: int
+    click_failure_rate: float
+    sbp_orders_total: int
+    sbp_orders_failed: int
+    sbp_failure_rate: float
+
+
+class AIOperationsOut(BaseModel):
+    period_days: int
+    photo_analyses_completed: int
+    vision_requests_tracked: int
+    vision_escalated_requests: int
+    vision_escalation_rate: float
+
+
 class GrowthOut(BaseModel):
     generated_at: datetime
     trial_to_month: TrialToMonthOut
     unit_economics: UnitEconomicsOut
+    unit_economics_by_currency: list[CurrencyUnitEconomicsOut]
+    activation_funnel: ActivationFunnelOut
+    photo_funnel: PhotoFunnelOut
+    paywall_funnel: PaywallFunnelOut
+    retention_summary: RetentionSummaryOut
+    payment_quality: PaymentQualityOut
+    ai_operations: AIOperationsOut
     notes: list[str]

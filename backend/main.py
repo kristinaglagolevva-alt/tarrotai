@@ -291,6 +291,7 @@ def _parse_csv_values(raw: str, *, lower: bool = True) -> List[str]:
 ANALYTICS_GROWTH_LOOKBACK_DAYS = max(7, _safe_env_int("ANALYTICS_GROWTH_LOOKBACK_DAYS", 30))
 ANALYTICS_TRIAL_TO_MONTH_WINDOW_DAYS = max(1, _safe_env_int("ANALYTICS_TRIAL_TO_MONTH_WINDOW_DAYS", 30))
 ANALYTICS_AD_SPEND_UZS = max(0, _safe_env_int("ANALYTICS_AD_SPEND_UZS", 0))
+ANALYTICS_AD_SPEND_RUB = max(0, _safe_env_int("ANALYTICS_AD_SPEND_RUB", 0))
 ANALYTICS_MONTH_PRODUCT_CODES = _parse_csv_values(
     ANALYTICS_MONTH_PRODUCT_CODES_RAW,
     lower=True,
@@ -1857,6 +1858,315 @@ def _assert_analytics_access(current_user: User, x_analytics_token: Optional[str
         raise HTTPException(status_code=403, detail="Forbidden: admin access required")
 
 
+def _assert_analytics_token_only(
+    *,
+    x_analytics_token: Optional[str],
+    token_query: Optional[str],
+) -> None:
+    if not ANALYTICS_ADMIN_TOKEN:
+        raise HTTPException(
+            status_code=503,
+            detail="ANALYTICS_ADMIN_TOKEN is required for /analytics/dashboard",
+        )
+    got = str(token_query or x_analytics_token or "").strip()
+    if not got or not hmac.compare_digest(got, ANALYTICS_ADMIN_TOKEN):
+        raise HTTPException(status_code=403, detail="Forbidden: invalid analytics token")
+
+
+def _analytics_fmt_num(value: Any) -> str:
+    try:
+        ivalue = int(round(float(value)))
+    except Exception:
+        ivalue = 0
+    return f"{ivalue:,}".replace(",", " ")
+
+
+def _analytics_fmt_pct(value: Any) -> str:
+    try:
+        ratio = float(value)
+    except Exception:
+        ratio = 0.0
+    return f"{ratio * 100.0:.1f}%"
+
+
+def _analytics_currency_hint(code: str) -> str:
+    up = str(code or "").upper()
+    if up == "UZS":
+        return "сум"
+    if up == "RUB":
+        return "₽"
+    return up or "валюта"
+
+
+def _analytics_funnel_row_html(label: str, value: int, baseline: int) -> str:
+    safe_value = max(0, int(value or 0))
+    safe_base = max(1, int(baseline or 0))
+    width = max(0.0, min(100.0, (float(safe_value) / float(safe_base)) * 100.0))
+    return (
+        "<div class='funnel-row'>"
+        f"<div class='funnel-meta'><span>{escape(label)}</span><b>{_analytics_fmt_num(safe_value)}</b></div>"
+        f"<div class='funnel-bar'><i style='width:{width:.2f}%'></i></div>"
+        "</div>"
+    )
+
+
+def _render_analytics_dashboard_html(
+    *,
+    snapshot: Dict[str, Any],
+    lookback_days: int,
+    conversion_window_days: int,
+    ad_spend_uzs: int,
+    ad_spend_rub: int,
+    token: Optional[str],
+) -> str:
+    trial = snapshot.get("trial_to_month") or {}
+    unit = snapshot.get("unit_economics") or {}
+    by_currency = snapshot.get("unit_economics_by_currency") or []
+    activation = snapshot.get("activation_funnel") or {}
+    photo = snapshot.get("photo_funnel") or {}
+    paywall = snapshot.get("paywall_funnel") or {}
+    retention = snapshot.get("retention_summary") or {}
+    quality = snapshot.get("payment_quality") or {}
+    ai_ops = snapshot.get("ai_operations") or {}
+    generated_at = str(snapshot.get("generated_at") or datetime.now(timezone.utc).isoformat())
+
+    refresh_q: Dict[str, Any] = {
+        "lookback_days": int(lookback_days),
+        "conversion_window_days": int(conversion_window_days),
+        "ad_spend_uzs": int(ad_spend_uzs),
+        "ad_spend_rub": int(ad_spend_rub),
+    }
+    if token:
+        refresh_q["token"] = token
+    refresh_url = f"/analytics/dashboard?{urlencode(refresh_q)}"
+
+    currency_cards = ""
+    for row in by_currency:
+        code = str(row.get("currency") or "").upper() or "UNK"
+        revenue = _analytics_fmt_num(row.get("revenue"))
+        arppu = _analytics_fmt_num(row.get("arppu"))
+        cac = _analytics_fmt_num(row.get("cac"))
+        payback = float(row.get("payback_months") or 0.0)
+        currency_cards += (
+            "<article class='card'>"
+            f"<h3>{escape(code)} • {_analytics_currency_hint(code)}</h3>"
+            f"<p>Revenue: <b>{revenue}</b></p>"
+            f"<p>ARPPU: <b>{arppu}</b></p>"
+            f"<p>CAC: <b>{cac}</b></p>"
+            f"<p>Payback: <b>{payback:.2f} мес</b></p>"
+            "</article>"
+        )
+    if not currency_cards:
+        currency_cards = "<article class='card'><p>Нет платежей за выбранный период.</p></article>"
+
+    activation_base = int(activation.get("new_users") or 0)
+    activation_rows = "".join(
+        [
+            _analytics_funnel_row_html("Новые", activation_base, activation_base),
+            _analytics_funnel_row_html("Активировались", int(activation.get("activated_users") or 0), activation_base),
+            _analytics_funnel_row_html("С фото", int(activation.get("photo_users") or 0), activation_base),
+            _analytics_funnel_row_html("Дошли до лимита", int(activation.get("reached_free_limit_users") or 0), activation_base),
+            _analytics_funnel_row_html("Взяли trial", int(activation.get("trial_users") or 0), activation_base),
+            _analytics_funnel_row_html("Оплатили", int(activation.get("paid_users") or 0), activation_base),
+        ]
+    )
+
+    photo_base = int(photo.get("photo_users") or 0)
+    photo_rows = "".join(
+        [
+            _analytics_funnel_row_html("Пользователи фото", photo_base, photo_base),
+            _analytics_funnel_row_html("Trial после фото", int(photo.get("converted_to_trial_users") or 0), photo_base),
+            _analytics_funnel_row_html("Оплата после фото", int(photo.get("converted_to_paid_users") or 0), photo_base),
+        ]
+    )
+
+    paywall_base = int(paywall.get("users_hit_limit") or 0)
+    paywall_rows = "".join(
+        [
+            _analytics_funnel_row_html("Дошли до лимита", paywall_base, paywall_base),
+            _analytics_funnel_row_html("Конвертировались", int(paywall.get("users_converted") or 0), paywall_base),
+        ]
+    )
+
+    return f"""<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>AI Taro • Dashboard</title>
+  <style>
+    :root {{
+      --bg: #061331;
+      --bg2: #0b1f4f;
+      --glass: rgba(20, 38, 88, 0.62);
+      --text: #eef3ff;
+      --muted: #aebeea;
+      --line: rgba(255,255,255,0.14);
+      --accent: #66a6ff;
+      --accent2: #7a5cff;
+      --good: #3ed598;
+    }}
+    * {{ box-sizing: border-box; }}
+    body {{
+      margin: 0;
+      min-height: 100vh;
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, sans-serif;
+      background:
+        radial-gradient(900px 520px at -10% -5%, rgba(122,92,255,0.26), transparent 62%),
+        radial-gradient(820px 440px at 115% 0%, rgba(102,166,255,0.22), transparent 58%),
+        linear-gradient(165deg, var(--bg), var(--bg2));
+    }}
+    .wrap {{
+      width: min(760px, 100%);
+      margin: 0 auto;
+      padding: max(14px, env(safe-area-inset-top)) 14px calc(16px + env(safe-area-inset-bottom));
+    }}
+    .head {{
+      position: sticky;
+      top: 0;
+      z-index: 5;
+      margin: -2px -2px 10px;
+      padding: 12px;
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      background: rgba(6, 18, 48, 0.82);
+      backdrop-filter: blur(16px);
+      display: flex;
+      justify-content: space-between;
+      gap: 10px;
+      align-items: center;
+    }}
+    .head h1 {{ margin: 0 0 2px; font-size: 20px; }}
+    .muted {{ margin: 0; color: var(--muted); font-size: 12px; }}
+    .btn {{
+      border: 0;
+      border-radius: 12px;
+      padding: 10px 12px;
+      background: linear-gradient(90deg, var(--accent2), var(--accent));
+      color: #fff;
+      text-decoration: none;
+      font-weight: 700;
+      font-size: 13px;
+      white-space: nowrap;
+    }}
+    .section {{ margin-top: 12px; }}
+    .title {{ margin: 0 0 8px; font-size: 15px; color: #d4e0ff; }}
+    .grid {{
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 8px;
+    }}
+    .card {{
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 10px 11px;
+      background: var(--glass);
+      backdrop-filter: blur(14px);
+    }}
+    .card h3 {{ margin: 0 0 7px; font-size: 13px; color: #cfe0ff; }}
+    .kpi-label {{ font-size: 12px; color: var(--muted); margin-bottom: 5px; }}
+    .kpi-val {{ font-size: 22px; font-weight: 800; letter-spacing: 0.2px; }}
+    .funnel-row {{ margin-bottom: 8px; }}
+    .funnel-meta {{ display:flex; justify-content:space-between; font-size: 12px; margin-bottom: 4px; color:#d6e3ff; }}
+    .funnel-bar {{
+      width: 100%;
+      height: 7px;
+      border-radius: 999px;
+      background: rgba(255,255,255,0.12);
+      overflow: hidden;
+    }}
+    .funnel-bar i {{
+      display: block;
+      height: 100%;
+      background: linear-gradient(90deg, var(--accent), var(--accent2));
+      border-radius: inherit;
+    }}
+    .list p {{ margin: 6px 0; font-size: 13px; color: #dbe6ff; }}
+    @media (max-width: 560px) {{
+      .grid {{ grid-template-columns: 1fr; }}
+      .kpi-val {{ font-size: 20px; }}
+      .head h1 {{ font-size: 18px; }}
+    }}
+  </style>
+</head>
+<body>
+  <main class="wrap">
+    <header class="head">
+      <div>
+        <h1>AI Taro • Growth Dashboard</h1>
+        <p class="muted">Обновлено: {escape(generated_at)}</p>
+      </div>
+      <a class="btn" href="{escape(refresh_url)}">Обновить</a>
+    </header>
+
+    <section class="section">
+      <h2 class="title">Ключевые KPI</h2>
+      <div class="grid">
+        <article class="card"><div class="kpi-label">Trial → Month</div><div class="kpi-val">{_analytics_fmt_pct(trial.get("conversion_rate"))}</div></article>
+        <article class="card"><div class="kpi-label">CAC (UZS)</div><div class="kpi-val">{_analytics_fmt_num(unit.get("cac_uzs"))}</div></article>
+        <article class="card"><div class="kpi-label">Payback (UZS)</div><div class="kpi-val">{float(unit.get("payback_months") or 0.0):.2f} мес</div></article>
+        <article class="card"><div class="kpi-label">Paid rate (new users)</div><div class="kpi-val">{_analytics_fmt_pct(activation.get("paid_rate"))}</div></article>
+      </div>
+    </section>
+
+    <section class="section">
+      <h2 class="title">Монетизация по валютам</h2>
+      <div class="grid">{currency_cards}</div>
+    </section>
+
+    <section class="section">
+      <h2 class="title">Воронка активации ({int(activation.get("lookback_days") or lookback_days)} дн)</h2>
+      <article class="card">{activation_rows}</article>
+    </section>
+
+    <section class="section">
+      <h2 class="title">Воронка фото-анализа ({int(photo.get("lookback_days") or lookback_days)} дн)</h2>
+      <article class="card">{photo_rows}</article>
+    </section>
+
+    <section class="section">
+      <h2 class="title">Воронка paywall ({int(paywall.get("window_days") or conversion_window_days)} дн)</h2>
+      <article class="card">{paywall_rows}</article>
+    </section>
+
+    <section class="section">
+      <h2 class="title">Retention и качество</h2>
+      <div class="grid">
+        <article class="card list">
+          <h3>Retention</h3>
+          <p>D1: <b>{_analytics_fmt_pct(retention.get("d1"))}</b></p>
+          <p>D7: <b>{_analytics_fmt_pct(retention.get("d7"))}</b></p>
+          <p>D30: <b>{_analytics_fmt_pct(retention.get("d30"))}</b></p>
+          <p>Paid repeat 30d: <b>{_analytics_fmt_pct(retention.get("paid_repeat_30d_rate"))}</b></p>
+        </article>
+        <article class="card list">
+          <h3>Платежи</h3>
+          <p>Refund rate: <b>{_analytics_fmt_pct(quality.get("refund_rate"))}</b></p>
+          <p>Click fail rate: <b>{_analytics_fmt_pct(quality.get("click_failure_rate"))}</b></p>
+          <p>SBP fail rate: <b>{_analytics_fmt_pct(quality.get("sbp_failure_rate"))}</b></p>
+          <p>Всего подписочных платежей: <b>{_analytics_fmt_num(quality.get("total_subscription_payments"))}</b></p>
+        </article>
+        <article class="card list">
+          <h3>AI фото-операции</h3>
+          <p>Фото-анализов: <b>{_analytics_fmt_num(ai_ops.get("photo_analyses_completed"))}</b></p>
+          <p>Vision tracked: <b>{_analytics_fmt_num(ai_ops.get("vision_requests_tracked"))}</b></p>
+          <p>Vision escalation: <b>{_analytics_fmt_pct(ai_ops.get("vision_escalation_rate"))}</b></p>
+        </article>
+        <article class="card list">
+          <h3>Параметры</h3>
+          <p>Lookback: <b>{int(lookback_days)} дн</b></p>
+          <p>Conversion window: <b>{int(conversion_window_days)} дн</b></p>
+          <p>Ad spend UZS: <b>{_analytics_fmt_num(ad_spend_uzs)}</b></p>
+          <p>Ad spend RUB: <b>{_analytics_fmt_num(ad_spend_rub)}</b></p>
+        </article>
+      </div>
+    </section>
+  </main>
+</body>
+</html>"""
+
+
 @app.get("/analytics/kpi", response_model=KpiOut)
 async def analytics_kpi(
     x_analytics_token: Optional[str] = Header(default=None, alias="X-Analytics-Token"),
@@ -1877,19 +2187,63 @@ async def analytics_growth(
     lookback_days: int = Query(default=ANALYTICS_GROWTH_LOOKBACK_DAYS, ge=7, le=180),
     conversion_window_days: int = Query(default=ANALYTICS_TRIAL_TO_MONTH_WINDOW_DAYS, ge=1, le=90),
     ad_spend_uzs: Optional[int] = Query(default=None, ge=0),
+    ad_spend_rub: Optional[int] = Query(default=None, ge=0),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     _assert_analytics_access(current_user, x_analytics_token)
+    safe_ad_spend_uzs = int(ANALYTICS_AD_SPEND_UZS if ad_spend_uzs is None else ad_spend_uzs)
+    safe_ad_spend_rub = int(ANALYTICS_AD_SPEND_RUB if ad_spend_rub is None else ad_spend_rub)
     snapshot = await analytics_service.build_growth_snapshot(
         db,
         lookback_days=max(7, int(lookback_days)),
         conversion_window_days=max(1, int(conversion_window_days)),
         trial_product_code=ANALYTICS_TRIAL_PRODUCT_CODE,
         month_product_codes=ANALYTICS_MONTH_PRODUCT_CODES,
-        ad_spend_uzs=int(ANALYTICS_AD_SPEND_UZS if ad_spend_uzs is None else ad_spend_uzs),
+        ad_spend_uzs=safe_ad_spend_uzs,
+        ad_spend_rub=safe_ad_spend_rub,
+        ad_spend_by_currency={"UZS": safe_ad_spend_uzs, "RUB": safe_ad_spend_rub},
+        free_limit=FREE_READINGS_PER_MONTH,
     )
     return GrowthOut(**snapshot)
+
+
+@app.get("/analytics/dashboard", response_class=HTMLResponse)
+async def analytics_dashboard(
+    token: Optional[str] = Query(default=None),
+    x_analytics_token: Optional[str] = Header(default=None, alias="X-Analytics-Token"),
+    lookback_days: int = Query(default=ANALYTICS_GROWTH_LOOKBACK_DAYS, ge=7, le=180),
+    conversion_window_days: int = Query(default=ANALYTICS_TRIAL_TO_MONTH_WINDOW_DAYS, ge=1, le=90),
+    ad_spend_uzs: Optional[int] = Query(default=None, ge=0),
+    ad_spend_rub: Optional[int] = Query(default=None, ge=0),
+    db: AsyncSession = Depends(get_db),
+):
+    _assert_analytics_token_only(
+        x_analytics_token=x_analytics_token,
+        token_query=token,
+    )
+    safe_ad_spend_uzs = int(ANALYTICS_AD_SPEND_UZS if ad_spend_uzs is None else ad_spend_uzs)
+    safe_ad_spend_rub = int(ANALYTICS_AD_SPEND_RUB if ad_spend_rub is None else ad_spend_rub)
+    snapshot = await analytics_service.build_growth_snapshot(
+        db,
+        lookback_days=max(7, int(lookback_days)),
+        conversion_window_days=max(1, int(conversion_window_days)),
+        trial_product_code=ANALYTICS_TRIAL_PRODUCT_CODE,
+        month_product_codes=ANALYTICS_MONTH_PRODUCT_CODES,
+        ad_spend_uzs=safe_ad_spend_uzs,
+        ad_spend_rub=safe_ad_spend_rub,
+        ad_spend_by_currency={"UZS": safe_ad_spend_uzs, "RUB": safe_ad_spend_rub},
+        free_limit=FREE_READINGS_PER_MONTH,
+    )
+    html = _render_analytics_dashboard_html(
+        snapshot=snapshot,
+        lookback_days=max(7, int(lookback_days)),
+        conversion_window_days=max(1, int(conversion_window_days)),
+        ad_spend_uzs=safe_ad_spend_uzs,
+        ad_spend_rub=safe_ad_spend_rub,
+        token=token,
+    )
+    return HTMLResponse(content=html, status_code=200)
 
 
 @app.get("/billing/status", response_model=BillingStatusOut)
@@ -2186,6 +2540,7 @@ async def _configure_support_inbox_bot() -> None:
         {"command": "start", "description": "Справка по обработке тикетов"},
         {"command": "reply", "description": "Ответить пользователю: /reply <id> <текст>"},
         {"command": "metrics", "description": "Рост: trial→month, CAC, payback"},
+        {"command": "dashboard", "description": "Открыть мобильный growth dashboard"},
     ]
     help_text = (
         "✅ Support inbox подключен.\n"
@@ -2557,7 +2912,8 @@ async def support_inbox_webhook(
             "💬 Ответы поддержки\n\n"
             "• Ответьте в тикет через кнопку «Ответить»\n"
             "• /reply <telegram_id> <текст>\n"
-            "• /metrics [days] [ad_spend] — ключевые метрики роста\n"
+            "• /metrics [days] [ad_spend_uzs] [window] [ad_spend_rub]\n"
+            "• /dashboard [days] [window] — открыть мобильный dashboard\n"
             "• /open, /pending, /closed — фильтры тикетов\n"
             "• /ticket <ID> — карточка тикета\n\n"
             "Ответ будет доставлен пользователю в @Ttaarrroobot."
@@ -2577,10 +2933,11 @@ async def support_inbox_webhook(
             ratio = 0.0
         return f"{ratio * 100.0:.1f}%"
 
-    def _parse_metrics_args(raw: str) -> tuple[int, int, int]:
+    def _parse_metrics_args(raw: str) -> tuple[int, int, int, int]:
         lookback_days = int(ANALYTICS_GROWTH_LOOKBACK_DAYS)
         conversion_window_days = int(ANALYTICS_TRIAL_TO_MONTH_WINDOW_DAYS)
         ad_spend_uzs = int(ANALYTICS_AD_SPEND_UZS)
+        ad_spend_rub = int(ANALYTICS_AD_SPEND_RUB)
         numeric_args: List[int] = []
         for token in str(raw or "").split()[1:]:
             item = str(token or "").strip()
@@ -2597,8 +2954,10 @@ async def support_inbox_webhook(
                     lookback_days = max(7, min(180, n))
                 elif k in {"window", "win", "w"}:
                     conversion_window_days = max(1, min(90, n))
-                elif k in {"ad", "spend", "ads", "budget", "ad_spend"}:
+                elif k in {"ad", "spend", "ads", "budget", "ad_spend", "ad_uzs", "spend_uzs"}:
                     ad_spend_uzs = max(0, n)
+                elif k in {"ad_rub", "spend_rub", "rub"}:
+                    ad_spend_rub = max(0, n)
                 continue
             if item.lstrip("-").isdigit():
                 numeric_args.append(int(item))
@@ -2608,7 +2967,9 @@ async def support_inbox_webhook(
             ad_spend_uzs = max(0, numeric_args[1])
         if len(numeric_args) >= 3:
             conversion_window_days = max(1, min(90, numeric_args[2]))
-        return lookback_days, conversion_window_days, ad_spend_uzs
+        if len(numeric_args) >= 4:
+            ad_spend_rub = max(0, numeric_args[3])
+        return lookback_days, conversion_window_days, ad_spend_uzs, ad_spend_rub
 
     def _parse_cb_ticket_target(raw_data: str) -> tuple[str, Optional[int]]:
         raw_part = str(raw_data.split(":", 1)[1] if ":" in raw_data else "").strip()
@@ -2840,8 +3201,69 @@ async def support_inbox_webhook(
         )
         return {"ok": True, "handled": "help"}
 
+    if lower.startswith("/dashboard"):
+        lookback_days = int(ANALYTICS_GROWTH_LOOKBACK_DAYS)
+        conversion_window_days = int(ANALYTICS_TRIAL_TO_MONTH_WINDOW_DAYS)
+        numeric_args: List[int] = []
+        for token in str(text or "").split()[1:]:
+            item = str(token or "").strip()
+            if not item:
+                continue
+            if "=" in item:
+                key, value = item.split("=", 1)
+                k = str(key or "").strip().lower()
+                v = str(value or "").strip()
+                if not v.lstrip("-").isdigit():
+                    continue
+                n = int(v)
+                if k in {"days", "day", "d", "lookback", "lb"}:
+                    lookback_days = max(7, min(180, n))
+                elif k in {"window", "win", "w"}:
+                    conversion_window_days = max(1, min(90, n))
+                continue
+            if item.lstrip("-").isdigit():
+                numeric_args.append(int(item))
+        if numeric_args:
+            lookback_days = max(7, min(180, numeric_args[0]))
+        if len(numeric_args) >= 2:
+            conversion_window_days = max(1, min(90, numeric_args[1]))
+
+        if not ANALYTICS_ADMIN_TOKEN:
+            await _send_bot_message_with_token(
+                token=SUPPORT_INBOX_BOT_TOKEN,
+                chat_id=chat_id,
+                text="Для dashboard нужен ANALYTICS_ADMIN_TOKEN в .env.",
+                reply_to_message_id=int(msg.get("message_id") or 0) or None,
+            )
+            return {"ok": True, "handled": "dashboard_token_missing"}
+
+        url = (
+            "https://api.tarrotai.ru/analytics/dashboard?"
+            + urlencode(
+                {
+                    "token": ANALYTICS_ADMIN_TOKEN,
+                    "lookback_days": lookback_days,
+                    "conversion_window_days": conversion_window_days,
+                    "ad_spend_uzs": int(ANALYTICS_AD_SPEND_UZS),
+                    "ad_spend_rub": int(ANALYTICS_AD_SPEND_RUB),
+                }
+            )
+        )
+        await _send_bot_message_with_token(
+            token=SUPPORT_INBOX_BOT_TOKEN,
+            chat_id=chat_id,
+            text=f"📱 Mobile dashboard:\n{url}",
+            reply_to_message_id=int(msg.get("message_id") or 0) or None,
+        )
+        return {
+            "ok": True,
+            "handled": "dashboard_link",
+            "lookback_days": lookback_days,
+            "conversion_window_days": conversion_window_days,
+        }
+
     if lower.startswith("/metrics") or lower.startswith("/kpi"):
-        lookback_days, conversion_window_days, ad_spend_uzs = _parse_metrics_args(text)
+        lookback_days, conversion_window_days, ad_spend_uzs, ad_spend_rub = _parse_metrics_args(text)
         snapshot = await analytics_service.build_growth_snapshot(
             db,
             lookback_days=lookback_days,
@@ -2849,9 +3271,27 @@ async def support_inbox_webhook(
             trial_product_code=ANALYTICS_TRIAL_PRODUCT_CODE,
             month_product_codes=ANALYTICS_MONTH_PRODUCT_CODES,
             ad_spend_uzs=ad_spend_uzs,
+            ad_spend_rub=ad_spend_rub,
+            ad_spend_by_currency={"UZS": ad_spend_uzs, "RUB": ad_spend_rub},
+            free_limit=FREE_READINGS_PER_MONTH,
         )
         trial_to_month = snapshot.get("trial_to_month") or {}
         unit = snapshot.get("unit_economics") or {}
+        activation = snapshot.get("activation_funnel") or {}
+        photo = snapshot.get("photo_funnel") or {}
+        paywall = snapshot.get("paywall_funnel") or {}
+        retention = snapshot.get("retention_summary") or {}
+        quality = snapshot.get("payment_quality") or {}
+        ai_ops = snapshot.get("ai_operations") or {}
+        by_currency = snapshot.get("unit_economics_by_currency") or []
+        currency_lines = []
+        for row in by_currency[:4]:
+            code = str(row.get("currency") or "UNK").upper()
+            currency_lines.append(
+                f"• {code}: rev {_fmt_num(row.get('revenue'))}, ARPPU {_fmt_num(row.get('arppu'))}, "
+                f"CAC {_fmt_num(row.get('cac'))}, payback {float(row.get('payback_months') or 0.0):.2f} мес"
+            )
+        by_currency_text = "\n".join(currency_lines) if currency_lines else "• Нет данных"
         metric_text = (
             "📊 Метрики роста\n\n"
             f"Период: {int(trial_to_month.get('lookback_days') or lookback_days)} дн\n"
@@ -2860,7 +3300,7 @@ async def support_inbox_webhook(
             f"• Конверсия: {_fmt_pct(trial_to_month.get('conversion_rate'))}\n"
             f"• Пользователи trial: {_fmt_num(trial_to_month.get('trial_users'))}\n"
             f"• Перешли в месяц: {_fmt_num(trial_to_month.get('converted_users'))}\n\n"
-            "Unit-экономика:\n"
+            "Unit-экономика (UZS):\n"
             f"• CAC: {_fmt_num(unit.get('cac_uzs'))} сум\n"
             f"• Payback: {float(unit.get('payback_months') or 0.0):.2f} мес (~{float(unit.get('payback_days') or 0.0):.1f} дн)\n"
             f"• Revenue: {_fmt_num(unit.get('revenue_uzs'))} сум\n"
@@ -2868,8 +3308,25 @@ async def support_inbox_webhook(
             f"• New paid: {_fmt_num(unit.get('new_paid_users'))}\n"
             f"• Paid users: {_fmt_num(unit.get('paid_users'))}\n"
             f"• Ad spend: {_fmt_num(unit.get('ad_spend_uzs'))} сум\n\n"
-            "Команда: /metrics [days] [ad_spend] [window]\n"
-            "Пример: /metrics 30 3000000 30"
+            "По валютам:\n"
+            f"{by_currency_text}\n\n"
+            "Активация:\n"
+            f"• New users: {_fmt_num(activation.get('new_users'))}\n"
+            f"• Activation rate: {_fmt_pct(activation.get('activation_rate'))}\n"
+            f"• Paid rate: {_fmt_pct(activation.get('paid_rate'))}\n\n"
+            "Фото-воронка:\n"
+            f"• Photo users: {_fmt_num(photo.get('photo_users'))}\n"
+            f"• Trial conv: {_fmt_pct(photo.get('trial_conversion_rate'))}\n"
+            f"• Paid conv: {_fmt_pct(photo.get('paid_conversion_rate'))}\n\n"
+            "Paywall / Retention / Quality:\n"
+            f"• Paywall conv: {_fmt_pct(paywall.get('conversion_rate'))}\n"
+            f"• D1/D7/D30: {_fmt_pct(retention.get('d1'))} / {_fmt_pct(retention.get('d7'))} / {_fmt_pct(retention.get('d30'))}\n"
+            f"• Paid repeat 30d: {_fmt_pct(retention.get('paid_repeat_30d_rate'))}\n"
+            f"• Refund rate: {_fmt_pct(quality.get('refund_rate'))}\n"
+            f"• Click/SBP fail: {_fmt_pct(quality.get('click_failure_rate'))} / {_fmt_pct(quality.get('sbp_failure_rate'))}\n"
+            f"• Vision escalation: {_fmt_pct(ai_ops.get('vision_escalation_rate'))}\n\n"
+            "Команда: /metrics [days] [ad_spend_uzs] [window] [ad_spend_rub]\n"
+            "Пример: /metrics 30 3000000 30 120000"
         )
         await _send_bot_message_with_token(
             token=SUPPORT_INBOX_BOT_TOKEN,
@@ -2883,6 +3340,7 @@ async def support_inbox_webhook(
             "lookback_days": lookback_days,
             "conversion_window_days": conversion_window_days,
             "ad_spend_uzs": ad_spend_uzs,
+            "ad_spend_rub": ad_spend_rub,
         }
 
     if lower in {"/open", "/pending", "/closed"}:

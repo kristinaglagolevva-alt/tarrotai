@@ -46,20 +46,24 @@ async def _load_activity_days(
     db: AsyncSession,
     *,
     since: datetime,
+    exclude_user_ids: Optional[Sequence[int]] = None,
 ) -> Dict[int, set]:
     by_user: Dict[int, set] = defaultdict(set)
+    excluded = {int(x) for x in (exclude_user_ids or []) if int(x) > 0}
 
-    readings_q = await db.execute(
-        select(Reading.user_id, Reading.created_at).where(Reading.created_at >= since)
-    )
+    readings_stmt = select(Reading.user_id, Reading.created_at).where(Reading.created_at >= since)
+    if excluded:
+        readings_stmt = readings_stmt.where(~Reading.user_id.in_(sorted(excluded)))
+    readings_q = await db.execute(readings_stmt)
     for user_id, created_at in readings_q.all():
         if user_id is None or created_at is None:
             continue
         by_user[int(user_id)].add(created_at.date())
 
-    card_day_q = await db.execute(
-        select(CardOfDay.user_id, CardOfDay.created_at).where(CardOfDay.created_at >= since)
-    )
+    card_day_stmt = select(CardOfDay.user_id, CardOfDay.created_at).where(CardOfDay.created_at >= since)
+    if excluded:
+        card_day_stmt = card_day_stmt.where(~CardOfDay.user_id.in_(sorted(excluded)))
+    card_day_q = await db.execute(card_day_stmt)
     for user_id, created_at in card_day_q.all():
         if user_id is None or created_at is None:
             continue
@@ -73,23 +77,30 @@ async def calculate_retention(
     *,
     days: Sequence[int] = (1, 7, 30),
     lookback_days: int = 120,
+    exclude_user_ids: Optional[Sequence[int]] = None,
     now: Optional[datetime] = None,
 ) -> List[RetentionCalc]:
     now_utc = now or _utc_now()
     today = now_utc.date()
     max_day = max(days) if days else 30
     since = now_utc - timedelta(days=max(lookback_days, max_day + 2))
+    excluded = {int(x) for x in (exclude_user_ids or []) if int(x) > 0}
 
-    users_q = await db.execute(
-        select(User.id, User.created_at).where(User.created_at >= since)
-    )
+    users_stmt = select(User.id, User.created_at).where(User.created_at >= since)
+    if excluded:
+        users_stmt = users_stmt.where(~User.id.in_(sorted(excluded)))
+    users_q = await db.execute(users_stmt)
     user_created: Dict[int, datetime] = {
         int(user_id): created_at
         for user_id, created_at in users_q.all()
         if user_id is not None and created_at is not None
     }
 
-    activity_by_user = await _load_activity_days(db, since=since)
+    activity_by_user = await _load_activity_days(
+        db,
+        since=since,
+        exclude_user_ids=sorted(excluded),
+    )
 
     out: List[RetentionCalc] = []
     for day in days:
@@ -135,16 +146,21 @@ async def calculate_conversion_after_free(
     free_limit: int,
     window_days: int = 30,
     lookback_days: int = 120,
+    exclude_user_ids: Optional[Sequence[int]] = None,
     now: Optional[datetime] = None,
 ) -> Dict[str, float | int]:
     now_utc = now or _utc_now()
     since = now_utc - timedelta(days=max(lookback_days, window_days + 7))
+    excluded = {int(x) for x in (exclude_user_ids or []) if int(x) > 0}
 
-    readings_q = await db.execute(
+    readings_stmt = (
         select(Reading.user_id, Reading.created_at)
         .where(Reading.created_at >= since)
         .order_by(Reading.user_id.asc(), Reading.created_at.asc())
     )
+    if excluded:
+        readings_stmt = readings_stmt.where(~Reading.user_id.in_(sorted(excluded)))
+    readings_q = await db.execute(readings_stmt)
     counters: Dict[Tuple[int, int, int], int] = {}
     first_hit_by_user: Dict[int, datetime] = {}
 
@@ -171,7 +187,7 @@ async def calculate_conversion_after_free(
         }
 
     user_ids = sorted(first_hit_by_user.keys())
-    payments_q = await db.execute(
+    payments_stmt = (
         select(PaymentTransaction.user_id, PaymentTransaction.created_at)
         .where(
             PaymentTransaction.user_id.in_(user_ids),
@@ -181,6 +197,9 @@ async def calculate_conversion_after_free(
         )
         .order_by(PaymentTransaction.user_id.asc(), PaymentTransaction.created_at.asc())
     )
+    if excluded:
+        payments_stmt = payments_stmt.where(~PaymentTransaction.user_id.in_(sorted(excluded)))
+    payments_q = await db.execute(payments_stmt)
 
     payments_by_user: Dict[int, List[datetime]] = defaultdict(list)
     for user_id, created_at in payments_q.all():
@@ -293,6 +312,7 @@ async def build_growth_snapshot(
     ad_spend_rub: int = 0,
     ad_spend_by_currency: Optional[Dict[str, int]] = None,
     free_limit: int = 5,
+    exclude_user_ids: Optional[Sequence[int]] = None,
     now: Optional[datetime] = None,
 ) -> dict:
     now_utc = now or _utc_now()
@@ -300,6 +320,7 @@ async def build_growth_snapshot(
     conversion_days = max(1, int(conversion_window_days))
     since = now_utc - timedelta(days=period_days)
     safe_free_limit = max(1, int(free_limit))
+    excluded_user_ids = sorted({int(x) for x in (exclude_user_ids or []) if int(x) > 0})
     safe_trial_code = str(trial_product_code or "sub_week_click").strip().lower()
     safe_month_codes = [
         str(code or "").strip().lower()
@@ -320,12 +341,16 @@ async def build_growth_snapshot(
         safe_ad_spend_by_currency[currency] = max(0, int(raw_value or 0))
 
     trial_q = await db.execute(
-        select(PaymentTransaction.user_id, PaymentTransaction.created_at)
-        .where(
+        select(PaymentTransaction.user_id, PaymentTransaction.created_at).where(
             PaymentTransaction.kind == "subscription",
             PaymentTransaction.refunded_at.is_(None),
             PaymentTransaction.product_code == safe_trial_code,
             PaymentTransaction.created_at >= since,
+            *(
+                [~PaymentTransaction.user_id.in_(excluded_user_ids)]
+                if excluded_user_ids
+                else []
+            ),
         )
         .order_by(PaymentTransaction.user_id.asc(), PaymentTransaction.created_at.asc())
     )
@@ -351,6 +376,11 @@ async def build_growth_snapshot(
                 PaymentTransaction.kind == "subscription",
                 PaymentTransaction.refunded_at.is_(None),
                 PaymentTransaction.product_code.in_(safe_month_codes),
+                *(
+                    [~PaymentTransaction.user_id.in_(excluded_user_ids)]
+                    if excluded_user_ids
+                    else []
+                ),
             )
             .order_by(PaymentTransaction.user_id.asc(), PaymentTransaction.created_at.asc())
         )
@@ -378,6 +408,11 @@ async def build_growth_snapshot(
             PaymentTransaction.kind == "subscription",
             PaymentTransaction.refunded_at.is_(None),
             PaymentTransaction.created_at >= since,
+            *(
+                [~PaymentTransaction.user_id.in_(excluded_user_ids)]
+                if excluded_user_ids
+                else []
+            ),
         ).group_by(PaymentTransaction.currency)
     )
     revenue_by_currency: Dict[str, int] = {}
@@ -396,6 +431,11 @@ async def build_growth_snapshot(
         .where(
             PaymentTransaction.kind == "subscription",
             PaymentTransaction.refunded_at.is_(None),
+            *(
+                [~PaymentTransaction.user_id.in_(excluded_user_ids)]
+                if excluded_user_ids
+                else []
+            ),
         )
         .group_by(PaymentTransaction.user_id, PaymentTransaction.currency)
         .subquery()
@@ -473,7 +513,10 @@ async def build_growth_snapshot(
         }
 
     new_users_q = await db.execute(
-        select(User.id).where(User.created_at >= since)
+        select(User.id).where(
+            User.created_at >= since,
+            *([~User.id.in_(excluded_user_ids)] if excluded_user_ids else []),
+        )
     )
     new_user_ids = [int(uid) for (uid,) in new_users_q.all() if uid is not None]
     new_users = len(new_user_ids)
@@ -491,6 +534,7 @@ async def build_growth_snapshot(
             .where(
                 Reading.user_id.in_(new_user_ids),
                 Reading.created_at >= since,
+                *([~Reading.user_id.in_(excluded_user_ids)] if excluded_user_ids else []),
             )
             .group_by(Reading.user_id)
         )
@@ -509,6 +553,7 @@ async def build_growth_snapshot(
                 Reading.user_id.in_(new_user_ids),
                 Reading.created_at >= since,
                 Reading.spread_type == "photo_analysis",
+                *([~Reading.user_id.in_(excluded_user_ids)] if excluded_user_ids else []),
             )
         )
         photo_users_in_new = int(photo_users_q.scalar() or 0)
@@ -520,6 +565,11 @@ async def build_growth_snapshot(
                 PaymentTransaction.refunded_at.is_(None),
                 PaymentTransaction.product_code == safe_trial_code,
                 PaymentTransaction.created_at >= since,
+                *(
+                    [~PaymentTransaction.user_id.in_(excluded_user_ids)]
+                    if excluded_user_ids
+                    else []
+                ),
             )
         )
         trial_users_in_new = int(trial_in_new_q.scalar() or 0)
@@ -530,6 +580,11 @@ async def build_growth_snapshot(
                 PaymentTransaction.kind == "subscription",
                 PaymentTransaction.refunded_at.is_(None),
                 PaymentTransaction.created_at >= since,
+                *(
+                    [~PaymentTransaction.user_id.in_(excluded_user_ids)]
+                    if excluded_user_ids
+                    else []
+                ),
             )
         )
         paid_users_in_new = int(paid_in_new_q.scalar() or 0)
@@ -539,6 +594,7 @@ async def build_growth_snapshot(
         .where(
             Reading.spread_type == "photo_analysis",
             Reading.created_at >= since,
+            *([~Reading.user_id.in_(excluded_user_ids)] if excluded_user_ids else []),
         )
         .order_by(Reading.user_id.asc(), Reading.created_at.asc())
     )
@@ -564,6 +620,11 @@ async def build_growth_snapshot(
                 PaymentTransaction.user_id.in_(photo_user_ids),
                 PaymentTransaction.kind == "subscription",
                 PaymentTransaction.refunded_at.is_(None),
+                *(
+                    [~PaymentTransaction.user_id.in_(excluded_user_ids)]
+                    if excluded_user_ids
+                    else []
+                ),
             )
             .order_by(PaymentTransaction.user_id.asc(), PaymentTransaction.created_at.asc())
         )
@@ -597,6 +658,7 @@ async def build_growth_snapshot(
         free_limit=safe_free_limit,
         window_days=conversion_days,
         lookback_days=max(period_days, conversion_days + 7),
+        exclude_user_ids=excluded_user_ids,
         now=now_utc,
     )
 
@@ -604,6 +666,7 @@ async def build_growth_snapshot(
         db,
         days=(1, 7, 30),
         lookback_days=max(120, period_days + 31),
+        exclude_user_ids=excluded_user_ids,
         now=now_utc,
     )
     retention_map = {int(p.day): float(p.retention_rate) for p in retention_points}
@@ -615,6 +678,11 @@ async def build_growth_snapshot(
             PaymentTransaction.kind == "subscription",
             PaymentTransaction.refunded_at.is_(None),
             PaymentTransaction.created_at >= current_30_since,
+            *(
+                [~PaymentTransaction.user_id.in_(excluded_user_ids)]
+                if excluded_user_ids
+                else []
+            ),
         )
     )
     prev_paid_q = await db.execute(
@@ -623,6 +691,11 @@ async def build_growth_snapshot(
             PaymentTransaction.refunded_at.is_(None),
             PaymentTransaction.created_at >= prev_30_since,
             PaymentTransaction.created_at < current_30_since,
+            *(
+                [~PaymentTransaction.user_id.in_(excluded_user_ids)]
+                if excluded_user_ids
+                else []
+            ),
         )
     )
     current_paid_users_set = {
@@ -641,6 +714,11 @@ async def build_growth_snapshot(
         select(func.count(PaymentTransaction.id)).where(
             PaymentTransaction.kind == "subscription",
             PaymentTransaction.created_at >= since,
+            *(
+                [~PaymentTransaction.user_id.in_(excluded_user_ids)]
+                if excluded_user_ids
+                else []
+            ),
         )
     )
     refunded_sub_payments_q = await db.execute(
@@ -648,30 +726,43 @@ async def build_growth_snapshot(
             PaymentTransaction.kind == "subscription",
             PaymentTransaction.created_at >= since,
             PaymentTransaction.refunded_at.is_not(None),
+            *(
+                [~PaymentTransaction.user_id.in_(excluded_user_ids)]
+                if excluded_user_ids
+                else []
+            ),
         )
     )
     total_sub_payments = int(total_sub_payments_q.scalar() or 0)
     refunded_sub_payments = int(refunded_sub_payments_q.scalar() or 0)
 
     click_total_q = await db.execute(
-        select(func.count(ClickOrder.id)).where(ClickOrder.created_at >= since)
+        select(func.count(ClickOrder.id)).where(
+            ClickOrder.created_at >= since,
+            *([~ClickOrder.user_id.in_(excluded_user_ids)] if excluded_user_ids else []),
+        )
     )
     click_failed_q = await db.execute(
         select(func.count(ClickOrder.id)).where(
             ClickOrder.created_at >= since,
             ClickOrder.status.in_(["cancelled", "canceled"]),
+            *([~ClickOrder.user_id.in_(excluded_user_ids)] if excluded_user_ids else []),
         )
     )
     click_total = int(click_total_q.scalar() or 0)
     click_failed = int(click_failed_q.scalar() or 0)
 
     sbp_total_q = await db.execute(
-        select(func.count(SbpOrder.id)).where(SbpOrder.created_at >= since)
+        select(func.count(SbpOrder.id)).where(
+            SbpOrder.created_at >= since,
+            *([~SbpOrder.user_id.in_(excluded_user_ids)] if excluded_user_ids else []),
+        )
     )
     sbp_failed_q = await db.execute(
         select(func.count(SbpOrder.id)).where(
             SbpOrder.created_at >= since,
             SbpOrder.status.in_(["canceled", "cancelled"]),
+            *([~SbpOrder.user_id.in_(excluded_user_ids)] if excluded_user_ids else []),
         )
     )
     sbp_total = int(sbp_total_q.scalar() or 0)
@@ -779,5 +870,6 @@ async def build_growth_snapshot(
             "activation_funnel: поведение новых пользователей за период lookback_days.",
             "photo_funnel: конверсия пользователей фото-анализа в оплату в окне conversion_window_days.",
             "retention_summary: D1/D7/D30 + repeat paid 30d.",
+            f"excluded_user_ids_count: {len(excluded_user_ids)}",
         ],
     }

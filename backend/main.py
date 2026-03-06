@@ -242,6 +242,7 @@ ANALYTICS_MONTH_PRODUCT_CODES_RAW = (
     os.getenv("ANALYTICS_MONTH_PRODUCT_CODES")
     or "sub_month_click"
 ).strip()
+ANALYTICS_EXCLUDE_TELEGRAM_IDS_RAW = (os.getenv("ANALYTICS_EXCLUDE_TELEGRAM_IDS") or "").strip()
 VISION_ESCALATION_COUNTER_KEY = "photo_analysis"
 VISION_ESCALATION_TZ_NAME = (os.getenv("OPENAI_VISION_ESCALATION_TZ") or "Asia/Tashkent").strip() or "Asia/Tashkent"
 
@@ -288,10 +289,21 @@ def _parse_csv_values(raw: str, *, lower: bool = True) -> List[str]:
     return values
 
 
+def _parse_csv_ints(raw: str) -> List[int]:
+    out: List[int] = []
+    for item in _parse_csv_values(raw, lower=False):
+        s = str(item or "").strip()
+        if not s.lstrip("-").isdigit():
+            continue
+        out.append(int(s))
+    return out
+
+
 ANALYTICS_GROWTH_LOOKBACK_DAYS = max(7, _safe_env_int("ANALYTICS_GROWTH_LOOKBACK_DAYS", 30))
 ANALYTICS_TRIAL_TO_MONTH_WINDOW_DAYS = max(1, _safe_env_int("ANALYTICS_TRIAL_TO_MONTH_WINDOW_DAYS", 30))
 ANALYTICS_AD_SPEND_UZS = max(0, _safe_env_int("ANALYTICS_AD_SPEND_UZS", 0))
 ANALYTICS_AD_SPEND_RUB = max(0, _safe_env_int("ANALYTICS_AD_SPEND_RUB", 0))
+ANALYTICS_EXCLUDE_TELEGRAM_IDS = _parse_csv_ints(ANALYTICS_EXCLUDE_TELEGRAM_IDS_RAW)
 ANALYTICS_MONTH_PRODUCT_CODES = _parse_csv_values(
     ANALYTICS_MONTH_PRODUCT_CODES_RAW,
     lower=True,
@@ -2005,6 +2017,26 @@ def _assert_analytics_access(current_user: User, x_analytics_token: Optional[str
         raise HTTPException(status_code=403, detail="Forbidden: admin access required")
 
 
+async def _resolve_analytics_excluded_user_ids(db: AsyncSession) -> List[int]:
+    tg_ids = {
+        int(x)
+        for x in [*ANALYTICS_EXCLUDE_TELEGRAM_IDS, *SUPPORT_ADMIN_IDS]
+        if int(x) > 0
+    }
+    if not tg_ids:
+        return []
+    q = await db.execute(
+        select(User.id).where(User.telegram_id.in_(sorted(tg_ids)))
+    )
+    return sorted(
+        {
+            int(uid)
+            for (uid,) in q.all()
+            if uid is not None and int(uid) > 0
+        }
+    )
+
+
 def _assert_analytics_token_only(
     *,
     x_analytics_token: Optional[str],
@@ -2341,6 +2373,7 @@ async def analytics_growth(
     _assert_analytics_access(current_user, x_analytics_token)
     safe_ad_spend_uzs = int(ANALYTICS_AD_SPEND_UZS if ad_spend_uzs is None else ad_spend_uzs)
     safe_ad_spend_rub = int(ANALYTICS_AD_SPEND_RUB if ad_spend_rub is None else ad_spend_rub)
+    excluded_user_ids = await _resolve_analytics_excluded_user_ids(db)
     snapshot = await analytics_service.build_growth_snapshot(
         db,
         lookback_days=max(7, int(lookback_days)),
@@ -2351,6 +2384,7 @@ async def analytics_growth(
         ad_spend_rub=safe_ad_spend_rub,
         ad_spend_by_currency={"UZS": safe_ad_spend_uzs, "RUB": safe_ad_spend_rub},
         free_limit=FREE_READINGS_PER_MONTH,
+        exclude_user_ids=excluded_user_ids,
     )
     return GrowthOut(**snapshot)
 
@@ -2371,6 +2405,7 @@ async def analytics_dashboard(
     )
     safe_ad_spend_uzs = int(ANALYTICS_AD_SPEND_UZS if ad_spend_uzs is None else ad_spend_uzs)
     safe_ad_spend_rub = int(ANALYTICS_AD_SPEND_RUB if ad_spend_rub is None else ad_spend_rub)
+    excluded_user_ids = await _resolve_analytics_excluded_user_ids(db)
     snapshot = await analytics_service.build_growth_snapshot(
         db,
         lookback_days=max(7, int(lookback_days)),
@@ -2381,6 +2416,7 @@ async def analytics_dashboard(
         ad_spend_rub=safe_ad_spend_rub,
         ad_spend_by_currency={"UZS": safe_ad_spend_uzs, "RUB": safe_ad_spend_rub},
         free_limit=FREE_READINGS_PER_MONTH,
+        exclude_user_ids=excluded_user_ids,
     )
     html = _render_analytics_dashboard_html(
         snapshot=snapshot,
@@ -3411,6 +3447,7 @@ async def support_inbox_webhook(
 
     if lower.startswith("/metrics") or lower.startswith("/kpi"):
         lookback_days, conversion_window_days, ad_spend_uzs, ad_spend_rub = _parse_metrics_args(text)
+        excluded_user_ids = await _resolve_analytics_excluded_user_ids(db)
         snapshot = await analytics_service.build_growth_snapshot(
             db,
             lookback_days=lookback_days,
@@ -3421,6 +3458,7 @@ async def support_inbox_webhook(
             ad_spend_rub=ad_spend_rub,
             ad_spend_by_currency={"UZS": ad_spend_uzs, "RUB": ad_spend_rub},
             free_limit=FREE_READINGS_PER_MONTH,
+            exclude_user_ids=excluded_user_ids,
         )
         trial_to_month = snapshot.get("trial_to_month") or {}
         unit = snapshot.get("unit_economics") or {}
@@ -3430,6 +3468,16 @@ async def support_inbox_webhook(
         retention = snapshot.get("retention_summary") or {}
         quality = snapshot.get("payment_quality") or {}
         ai_ops = snapshot.get("ai_operations") or {}
+        notes = snapshot.get("notes") or []
+        excluded_users_count = 0
+        for note in notes:
+            s = str(note or "").strip()
+            if not s.startswith("excluded_user_ids_count:"):
+                continue
+            try:
+                excluded_users_count = int(s.split(":", 1)[1].strip())
+            except Exception:
+                excluded_users_count = 0
         by_currency = snapshot.get("unit_economics_by_currency") or []
         currency_lines = []
         for row in by_currency[:4]:
@@ -3472,6 +3520,7 @@ async def support_inbox_webhook(
             f"• Refund rate: {_fmt_pct(quality.get('refund_rate'))}\n"
             f"• Click/SBP fail: {_fmt_pct(quality.get('click_failure_rate'))} / {_fmt_pct(quality.get('sbp_failure_rate'))}\n"
             f"• Vision escalation: {_fmt_pct(ai_ops.get('vision_escalation_rate'))}\n\n"
+            f"Исключено тестовых пользователей: {_fmt_num(excluded_users_count)}\n\n"
             "Команда: /metrics [days] [ad_spend_uzs] [window] [ad_spend_rub]\n"
             "Пример: /metrics 30 3000000 30 120000"
         )

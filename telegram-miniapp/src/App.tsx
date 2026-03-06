@@ -3240,12 +3240,6 @@ useEffect(() => {
 
   const beginThreeShuffle = async (questionOverride?: string) => {
     const effectiveQuestion = String(questionOverride ?? threeQuestion).trim()
-    if (!effectiveQuestion) {
-      try {
-        hapticPulse(0.28)
-      } catch {}
-      return
-    }
     if (threeQuestion !== effectiveQuestion) setThreeQuestion(effectiveQuestion)
 
     if (needsMotionPermission) await requestMotion()
@@ -3528,12 +3522,6 @@ useEffect(() => {
       ppfDragReturnTRef.current = null
     }
     const effectiveQuestion = String(questionOverride ?? ppfQuestion).trim()
-    if (!effectiveQuestion) {
-      try {
-        hapticPulse(0.28)
-      } catch {}
-      return
-    }
     if (effectiveQuestion !== ppfQuestion) setPpfQuestion(effectiveQuestion)
 
     ppfLastAccelRef.current = null
@@ -6463,7 +6451,11 @@ useEffect(() => {
                               <p style={{ opacity: 0.85, marginTop: 10, marginBottom: 0 }}>
                                 <b>Вопрос:</b> {threeQuestion}
                               </p>
-                            ) : null}
+                            ) : (
+                              <p style={{ opacity: 0.72, marginTop: 10, marginBottom: 0 }}>
+                                Вопрос не задан. Показана общая интерпретация по картам.
+                              </p>
+                            )}
 
                             <p style={{ opacity: 0.82, marginTop: 10, marginBottom: 0 }}>
                               <b>Тип:</b>{' '}
@@ -6734,6 +6726,11 @@ useEffect(() => {
                             {!!ppfQuestion && (
                               <p style={{ opacity: 0.86, marginTop: 10 }}>
                                 <b>Вопрос:</b> {ppfQuestion}
+                              </p>
+                            )}
+                            {!ppfQuestion && (
+                              <p style={{ opacity: 0.72, marginTop: 10, marginBottom: 0 }}>
+                                Вопрос не задан. Показана общая интерпретация по картам.
                               </p>
                             )}
 

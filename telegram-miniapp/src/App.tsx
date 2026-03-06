@@ -2915,10 +2915,8 @@ useEffect(() => {
   const [photoFollowupAnswer, setPhotoFollowupAnswer] = useState('')
   const [photoFollowupUsed, setPhotoFollowupUsed] = useState(false)
   const [photoFollowupError, setPhotoFollowupError] = useState('')
-  const [showPhotoActionSheet, setShowPhotoActionSheet] = useState(false)
 
   const galleryInputRef = useRef<HTMLInputElement | null>(null)
-  const cameraInputRef = useRef<HTMLInputElement | null>(null)
   const photoReqSeqRef = useRef(0)
 
   useEffect(() => {
@@ -2963,7 +2961,6 @@ useEffect(() => {
     setPhotoFollowupAnswer('')
     setPhotoFollowupUsed(false)
     setPhotoFollowupError('')
-    setShowPhotoActionSheet(false)
   }
 
   const openPhotoAnalysis = () => {
@@ -3078,27 +3075,18 @@ useEffect(() => {
   }
 
   const assessPhotoDetection = (cards: PhotoCardItem[]) => {
+    if (!cards.length) {
+      return { ok: false as const, reason: 'Карты не распознаны. Попробуйте сделать фото сверху при хорошем свете.' }
+    }
+
     const known = cards.filter((card) => {
       const name = String(card.card_name || card.title || '').trim()
       if (!name) return false
       return !/^unknown$/i.test(name)
     })
-    if (!known.length) {
-      return { ok: false as const, reason: 'Карты не распознаны. Попробуйте сделать фото сверху при хорошем свете.' }
-    }
+    const usable = known.length ? known : cards
 
-    const confValues = known
-      .map((card) => Number(card.confidence))
-      .filter((v) => Number.isFinite(v))
-    if (confValues.length >= 2) {
-      const avg = confValues.reduce((a, b) => a + b, 0) / confValues.length
-      const top = Math.max(...confValues)
-      if (avg < 0.24 && top < 0.35) {
-        return { ok: false as const, reason: 'Не удалось уверенно распознать карты. Выберите другое фото.' }
-      }
-    }
-
-    return { ok: true as const, cards: known }
+    return { ok: true as const, cards: usable }
   }
 
   const buildPhotoFallbackText = (cards: PhotoCardItem[], questionText: string) => {
@@ -3352,24 +3340,12 @@ useEffect(() => {
     if (e?.target) e.target.value = ''
     if (!file) return
     setPhotoFile(file)
-    setShowPhotoActionSheet(false)
     void runPhotoDetection(file)
   }
 
   const openPhotoActionSheet = () => {
     if (photoBusy) return
-    setShowPhotoActionSheet(true)
-  }
-
-  const pickPhotoSource = (source: 'camera' | 'gallery') => {
-    setShowPhotoActionSheet(false)
-    window.setTimeout(() => {
-      if (source === 'camera') {
-        cameraInputRef.current?.click()
-      } else {
-        galleryInputRef.current?.click()
-      }
-    }, 0)
+    galleryInputRef.current?.click()
   }
 
   const photoCardsLabel = photoDetectedCards
@@ -6193,14 +6169,6 @@ useEffect(() => {
                 accept="image/*"
                 onChange={onPhotoInputChange}
               />
-              <input
-                ref={cameraInputRef}
-                className="photo-input"
-                type="file"
-                accept="image/*"
-                capture="environment"
-                onChange={onPhotoInputChange}
-              />
 
               {(photoStep === 'start' || photoStep === 'error') && (
                 <section className="photo-glass-card photo-glass-card--centered">
@@ -6229,9 +6197,18 @@ useEffect(() => {
                         <circle cx="12" cy="13.1" r="3.2" fill="none" stroke="currentColor" strokeWidth="1.8" />
                       </svg>
                     </span>
-                    <span className="photo-upload-block__title">{photoStep === 'error' ? 'Сделать фото снова' : 'Сделать фото'}</span>
-                    <span className="photo-upload-block__sub">или выбрать из галереи</span>
+                    <span className="photo-upload-block__body">
+                      <span className="photo-upload-block__title">{photoStep === 'error' ? 'Сделать фото снова' : 'Сделать фото'}</span>
+                      <span className="photo-upload-block__sub">или выбрать из галереи</span>
+                    </span>
+                    <span className="photo-upload-block__chevron" aria-hidden="true">›</span>
                   </button>
+
+                  <div className="photo-tip-row" aria-hidden="true">
+                    <span className="photo-tip-pill">Сверху</span>
+                    <span className="photo-tip-pill">Без бликов</span>
+                    <span className="photo-tip-pill">Весь расклад</span>
+                  </div>
 
                   {photoStep === 'error' && photoFile && (
                     <button type="button" className="photo-ghost-btn" onClick={retryPhotoDetection} disabled={photoBusy}>
@@ -6379,23 +6356,6 @@ useEffect(() => {
                 </section>
               )}
             </div>
-
-            {showPhotoActionSheet && (
-              <div className="photo-sheet-overlay" onClick={() => setShowPhotoActionSheet(false)}>
-                <div className="photo-sheet-card" onClick={(e) => e.stopPropagation()}>
-                  <div className="photo-sheet-title">Выберите действие</div>
-                  <button type="button" className="photo-sheet-btn" onClick={() => pickPhotoSource('camera')}>
-                    Сделать фото
-                  </button>
-                  <button type="button" className="photo-sheet-btn" onClick={() => pickPhotoSource('gallery')}>
-                    Выбрать из галереи
-                  </button>
-                  <button type="button" className="photo-sheet-btn photo-sheet-btn--cancel" onClick={() => setShowPhotoActionSheet(false)}>
-                    Отмена
-                  </button>
-                </div>
-              </div>
-            )}
           </>
         )}
 

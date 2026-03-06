@@ -976,7 +976,7 @@ async def _ensure_runtime_schema(conn) -> None:
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS subscription_until TIMESTAMPTZ NULL;",
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS paid_readings_balance INTEGER NOT NULL DEFAULT 0;",
         "ALTER TABLE card_of_day ADD COLUMN IF NOT EXISTS is_reversed BOOLEAN NOT NULL DEFAULT FALSE;",
-        "UPDATE card_of_day SET is_reversed = TRUE WHERE is_reversed = FALSE AND (LOWER(COALESCE(description, '')) LIKE '%перевер%' OR LOWER(COALESCE(description, '')) LIKE '%обратн%' OR LOWER(COALESCE(description, '')) LIKE '%reversed%' OR LOWER(COALESCE(description, '')) LIKE '%reverse%');",
+        "UPDATE card_of_day SET is_reversed = TRUE WHERE is_reversed = FALSE AND (LOWER(COALESCE(description, '')) LIKE '%перевер%' OR LOWER(COALESCE(description, '')) LIKE '%перевёр%' OR LOWER(COALESCE(description, '')) LIKE '%обратн%' OR LOWER(COALESCE(description, '')) LIKE '%reversed%' OR LOWER(COALESCE(description, '')) LIKE '%reverse%');",
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS memory_opt_in BOOLEAN NOT NULL DEFAULT TRUE;",
         "ALTER TABLE users ALTER COLUMN memory_opt_in SET DEFAULT TRUE;",
         "UPDATE users SET memory_opt_in = TRUE WHERE memory_opt_in IS NULL;",

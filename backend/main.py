@@ -212,6 +212,15 @@ CLICK_BOT_LINK_SECRET = (
     or ""
 ).strip()
 CLICK_BOT_LINK_TTL_SEC = max(60, int(os.getenv("CLICK_BOT_LINK_TTL_SEC", "900")))
+CLICK_INTRO_PLAN_CODE = (os.getenv("CLICK_INTRO_PLAN_CODE") or "sub_week").strip().lower()
+CLICK_INTRO_FIRST_PURCHASE_ONLY = str(
+    os.getenv("CLICK_INTRO_FIRST_PURCHASE_ONLY", "1")
+).strip().lower() not in {"0", "false", "no"}
+CLICK_PLAN_WEEK_AMOUNT_RAW = (
+    os.getenv("CLICK_API_SUB_WEEK_AMOUNT")
+    or os.getenv("CLICK_SUB_WEEK_AMOUNT")
+    or "12000"
+).strip()
 CLICK_PLAN_2WEEKS_AMOUNT_RAW = (
     os.getenv("CLICK_API_SUB_2WEEKS_AMOUNT")
     or os.getenv("CLICK_SUB_2WEEKS_AMOUNT")
@@ -267,16 +276,17 @@ def _parse_int_or_default(raw: str, default: int = 0) -> int:
 CLICK_SERVICE_ID = max(0, _parse_int_or_default(CLICK_SERVICE_ID_RAW, 0))
 CLICK_MERCHANT_ID = max(0, _parse_int_or_default(CLICK_MERCHANT_ID_RAW, 0))
 CLICK_MERCHANT_USER_ID = max(0, _parse_int_or_default(CLICK_MERCHANT_USER_ID_RAW, 0))
+CLICK_PLAN_WEEK_AMOUNT = max(0, _parse_int_or_default(CLICK_PLAN_WEEK_AMOUNT_RAW, 12000))
 CLICK_PLAN_2WEEKS_AMOUNT = _apply_markup_minor(
     max(0, _parse_int_or_default(CLICK_PLAN_2WEEKS_AMOUNT_RAW, 0)),
     PRICING_MARKUP_PERCENT,
-    step=1,
+    step=100,
     allow_zero=True,
 )
 CLICK_PLAN_MONTH_AMOUNT = _apply_markup_minor(
     max(0, _parse_int_or_default(CLICK_PLAN_MONTH_AMOUNT_RAW, 0)),
     PRICING_MARKUP_PERCENT,
-    step=1,
+    step=100,
     allow_zero=True,
 )
 _click_year_raw = max(0, _parse_int_or_default(CLICK_PLAN_YEAR_AMOUNT_RAW, 0))
@@ -293,6 +303,14 @@ else:
     CLICK_PLAN_YEAR_AMOUNT = 0
 
 CLICK_PLANS: Dict[str, Dict[str, Any]] = {
+    "sub_week": {
+        "code": "sub_week",
+        "title": "Пробная неделя (CLICK)",
+        "description": "Пробный доступ AI Tarot на 7 дней через CLICK",
+        "days": 7,
+        "amount": CLICK_PLAN_WEEK_AMOUNT,
+        "currency": CLICK_CURRENCY,
+    },
     "sub_2weeks": {
         "code": "sub_2weeks",
         "title": "Безлимит на 2 недели (CLICK)",
@@ -708,6 +726,24 @@ def _get_click_plan(plan_code: str) -> Dict[str, Any]:
             detail={"code": "CLICK_PLAN_DISABLED", "message": f"Тариф Click '{code}' пока не настроен."},
         )
     return plan
+
+
+async def _click_intro_plan_already_used(db: AsyncSession, *, user_id: int) -> bool:
+    if not CLICK_INTRO_FIRST_PURCHASE_ONLY:
+        return False
+    if not CLICK_INTRO_PLAN_CODE:
+        return False
+    target = f"{CLICK_INTRO_PLAN_CODE}_click"
+    q = await db.execute(
+        select(PaymentTransaction.id)
+        .where(
+            PaymentTransaction.user_id == int(user_id),
+            PaymentTransaction.kind == "subscription",
+            PaymentTransaction.product_code == target,
+        )
+        .limit(1)
+    )
+    return q.scalar_one_or_none() is not None
 
 
 def _click_sign_raw(
@@ -1504,7 +1540,7 @@ class SbpStatusOut(BaseModel):
 
 
 class ClickCreateIn(BaseModel):
-    plan_code: Literal["sub_2weeks", "sub_month", "sub_year"] = "sub_2weeks"
+    plan_code: Literal["sub_week", "sub_2weeks", "sub_month", "sub_year"] = "sub_week"
 
 
 class ClickCreateOut(BaseModel):
@@ -3561,6 +3597,15 @@ async def billing_click_create(
             },
         )
     plan = _get_click_plan(payload.plan_code)
+    if str(plan.get("code") or "").strip().lower() == CLICK_INTRO_PLAN_CODE:
+        if await _click_intro_plan_already_used(db, user_id=int(current_user.id)):
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "CLICK_INTRO_ALREADY_USED",
+                    "message": "Пробная неделя доступна только для первой покупки.",
+                },
+            )
     order_id = f"click_{current_user.id}_{secrets.token_hex(8)}"
     payment_url = _click_build_payment_url(order_id=order_id, amount=int(plan["amount"]))
 
@@ -3588,7 +3633,7 @@ async def billing_click_create(
 @app.get("/billing/click/bot-link")
 async def billing_click_bot_link(
     tg_user_id: int = Query(..., ge=1),
-    plan_code: Literal["sub_2weeks", "sub_month", "sub_year"] = Query(...),
+    plan_code: Literal["sub_week", "sub_2weeks", "sub_month", "sub_year"] = Query(...),
     exp: int = Query(..., ge=1),
     sig: str = Query(..., min_length=16, max_length=128),
     db: AsyncSession = Depends(get_db),
@@ -3614,6 +3659,15 @@ async def billing_click_bot_link(
         user = User(telegram_id=int(tg_user_id), paid_readings_balance=0)
         db.add(user)
         await db.flush()
+    if str(plan.get("code") or "").strip().lower() == CLICK_INTRO_PLAN_CODE:
+        if await _click_intro_plan_already_used(db, user_id=int(user.id)):
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "CLICK_INTRO_ALREADY_USED",
+                    "message": "Пробная неделя доступна только для первой покупки.",
+                },
+            )
 
     order_id = f"click_tg_{user.id}_{secrets.token_hex(8)}"
     payment_url = _click_build_payment_url(order_id=order_id, amount=int(plan["amount"]))

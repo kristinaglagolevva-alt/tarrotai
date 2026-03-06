@@ -133,11 +133,22 @@ CLICK_SERVICE_ID = _env_int("CLICK_SERVICE_ID", 0)
 CLICK_MERCHANT_ID = _env_int("CLICK_MERCHANT_ID", 0)
 PRICING_MARKUP_PERCENT = _env_float("PRICING_MARKUP_PERCENT", 25.0)
 YEARLY_DISCOUNT_PERCENT = _env_float("YEARLY_DISCOUNT_PERCENT", 35.0)
+CLICK_INTRO_PLAN_KEY = (os.environ.get("CLICK_INTRO_PLAN_CODE") or "sub_week").strip().lower()
+CLICK_INTRO_FIRST_PURCHASE_ONLY = str(
+    os.environ.get("CLICK_INTRO_FIRST_PURCHASE_ONLY", "1")
+).strip().lower() not in {"0", "false", "no"}
 RUB_SUB_2WEEKS_AMOUNT_BASE = max(100, _env_int("RUB_SUB_2WEEKS_AMOUNT_BASE", 99 * 100))
 RUB_SUB_MONTH_AMOUNT_BASE = max(100, _env_int("RUB_SUB_MONTH_AMOUNT_BASE", 179 * 100))
 USD_SUB_2WEEKS_CENTS_BASE = max(1, _env_int("USD_SUB_2WEEKS_CENTS_BASE", 99))
 USD_SUB_MONTH_CENTS_BASE = max(1, _env_int("USD_SUB_MONTH_CENTS_BASE", 179))
 CLICK_CURRENCY = (os.environ.get("CLICK_CURRENCY") or "UZS").strip().upper()
+CLICK_SUB_WEEK_AMOUNT = max(
+    0,
+    _env_int(
+        "CLICK_API_SUB_WEEK_AMOUNT",
+        _env_int("CLICK_SUB_WEEK_AMOUNT", 12000),
+    ),
+)
 CLICK_SUB_2WEEKS_AMOUNT_BASE = max(0, _env_int("CLICK_SUB_2WEEKS_AMOUNT", 0))
 CLICK_SUB_MONTH_AMOUNT_BASE = max(0, _env_int("CLICK_SUB_MONTH_AMOUNT", 0))
 CLICK_SUB_YEAR_AMOUNT_OVERRIDE = max(
@@ -180,13 +191,13 @@ USD_SUB_YEAR_CENTS = _apply_markup_minor(
 CLICK_SUB_2WEEKS_AMOUNT = _apply_markup_minor(
     CLICK_SUB_2WEEKS_AMOUNT_BASE,
     PRICING_MARKUP_PERCENT,
-    step=1,
+    step=100,
     allow_zero=True,
 )
 CLICK_SUB_MONTH_AMOUNT = _apply_markup_minor(
     CLICK_SUB_MONTH_AMOUNT_BASE,
     PRICING_MARKUP_PERCENT,
-    step=1,
+    step=100,
     allow_zero=True,
 )
 if CLICK_SUB_YEAR_AMOUNT_OVERRIDE > 0:
@@ -203,6 +214,7 @@ else:
 CLICK_SUB_2WEEKS_LABEL = (os.environ.get("CLICK_SUB_2WEEKS_LABEL") or "🇺🇿 CLICK — 2 недели").strip()
 CLICK_SUB_MONTH_LABEL = (os.environ.get("CLICK_SUB_MONTH_LABEL") or "🇺🇿 CLICK — месяц").strip()
 CLICK_SUB_YEAR_LABEL = (os.environ.get("CLICK_SUB_YEAR_LABEL") or "🇺🇿 CLICK — год").strip()
+CLICK_SUB_WEEK_LABEL = (os.environ.get("CLICK_SUB_WEEK_LABEL") or "🔥 CLICK — пробная неделя").strip()
 BOT_PUBLIC_USERNAME = (os.environ.get("TELEGRAM_BOT_USERNAME") or "Ttaarrroobot").strip().lstrip("@")
 _SUPPORT_CHAT_RAW = (os.environ.get("SUPPORT_INBOX_CHAT_ID") or "").strip()
 SUPPORT_INBOX_CHAT_ID = int(_SUPPORT_CHAT_RAW) if _SUPPORT_CHAT_RAW.lstrip("-").isdigit() else None
@@ -320,6 +332,19 @@ PRODUCTS: List[Dict[str, Any]] = [
         "provider_mode": "yookassa_usd",
     },
     {
+        "code": "sub_week_click",
+        "menu_label": CLICK_SUB_WEEK_LABEL,
+        "menu_hint": "Промо-тариф: 7 дней за 12 000 UZS (только для первой покупки).",
+        "title": "Пробная неделя (CLICK)",
+        "description": "Пробный доступ AI Tarot на 7 дней через CLICK",
+        "amount": CLICK_SUB_WEEK_AMOUNT,
+        "kind": "subscription",
+        "days": 7,
+        "priority": 205,
+        "currency": CLICK_CURRENCY,
+        "provider_mode": "click",
+    },
+    {
         "code": "sub_2weeks_click",
         "menu_label": CLICK_SUB_2WEEKS_LABEL,
         "menu_hint": "Оплата через CLICK (приложение Click или банковская карта).",
@@ -360,8 +385,9 @@ PRODUCTS: List[Dict[str, Any]] = [
     },
 ]
 
-PLAN_ORDER = ["sub_2weeks", "sub_month", "sub_year"]
+PLAN_ORDER = ["sub_week", "sub_2weeks", "sub_month", "sub_year"]
 PLAN_TITLES = {
+    "sub_week": "Неделя",
     "sub_2weeks": "2 недели",
     "sub_month": "Месяц",
     "sub_year": "Год",
@@ -646,10 +672,10 @@ def _plan_summary_label(plan_key: str, country_code: str) -> str:
     card_product = _card_product_for_country(plan_key, safe_country)
     click_product = _product_for_plan_and_provider(plan_key, "click")
 
-    if card_product:
-        return f"{title} — {_format_amount_label(card_product)}"
     if safe_country == "uz" and click_product:
         return f"{title} — {_format_amount_label(click_product)}"
+    if card_product:
+        return f"{title} — {_format_amount_label(card_product)}"
     if click_product:
         return f"{title} — {_format_amount_label(click_product)}"
     return title
@@ -788,6 +814,8 @@ def _format_methods_text(plan_key: str, country_code: str) -> str:
     elif safe_country == "uz":
         if click_product:
             methods.append(f"• CLICK (приложение) или карта через CLICK — {_format_amount_label(click_product)}")
+            if plan_key == CLICK_INTRO_PLAN_KEY and CLICK_INTRO_FIRST_PURCHASE_ONLY:
+                methods.append("• Пробная неделя доступна только для первой покупки")
         if card_product:
             methods.append(f"• Международная карта — {_format_amount_label(card_product)}")
     else:
@@ -1481,6 +1509,41 @@ def _database_dsn_for_asyncpg() -> str:
     if raw.startswith("postgresql+asyncpg://"):
         return "postgresql://" + raw[len("postgresql+asyncpg://"):]
     return raw
+
+
+async def _click_intro_plan_already_used_by_tg_user(tg_user_id: int) -> bool:
+    if not CLICK_INTRO_FIRST_PURCHASE_ONLY:
+        return False
+    if not CLICK_INTRO_PLAN_KEY or int(tg_user_id or 0) <= 0:
+        return False
+    conn: Optional[asyncpg.Connection] = None
+    try:
+        dsn = _database_dsn_for_asyncpg()
+        conn = await asyncpg.connect(dsn=dsn)
+        target_product_code = f"{CLICK_INTRO_PLAN_KEY}_click"
+        row = await conn.fetchval(
+            """
+            SELECT pt.id
+            FROM payment_transactions pt
+            JOIN users u ON u.id = pt.user_id
+            WHERE u.telegram_id = $1
+              AND pt.kind = 'subscription'
+              AND pt.product_code = $2
+            LIMIT 1
+            """,
+            int(tg_user_id),
+            target_product_code,
+        )
+        return row is not None
+    except Exception as exc:
+        logger.warning("Failed to check CLICK intro usage for tg_user=%s: %s", tg_user_id, repr(exc))
+        return False
+    finally:
+        if conn is not None:
+            try:
+                await conn.close()
+            except Exception:
+                pass
 
 
 async def _activate_purchase_for_user(
@@ -2326,6 +2389,19 @@ async def buy_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
     currency = str(product.get("currency") or "RUB").upper()
     provider_mode = str(product.get("provider_mode") or ("yookassa_ru" if currency == "RUB" else "yookassa_usd")).lower()
+    plan_key = _plan_key_from_code(product_code)
+    tg_user_id = int(getattr(query.from_user, "id", 0) or 0)
+
+    if provider_mode == "click" and plan_key == CLICK_INTRO_PLAN_KEY and CLICK_INTRO_FIRST_PURCHASE_ONLY:
+        already_used_intro = await _click_intro_plan_already_used_by_tg_user(tg_user_id)
+        if already_used_intro:
+            if query.message:
+                await query.message.reply_text(
+                    "Пробная неделя уже была использована на этом аккаунте. "
+                    "Выберите 2 недели, месяц или год."
+                )
+            return
+
     if _is_card_provider_mode(provider_mode) and not PROVIDER_TOKEN:
         if query.message:
             await query.message.reply_text(
@@ -2334,8 +2410,6 @@ async def buy_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         logger.error("TELEGRAM_PROVIDER_TOKEN is not set for card provider product=%s mode=%s", product_code, provider_mode)
         return
     if provider_mode == "click" and not CLICK_PROVIDER_TOKEN:
-        tg_user_id = int(getattr(query.from_user, "id", 0) or 0)
-        plan_key = _plan_key_from_code(product_code)
         payment_link = _build_click_payment_link(tg_user_id=tg_user_id, plan_key=plan_key) if tg_user_id > 0 else None
         if not payment_link:
             if query.message:

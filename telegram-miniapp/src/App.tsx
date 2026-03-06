@@ -811,7 +811,7 @@ type BillingStatus = {
   can_create_reading?: boolean
 }
 
-type SbpPlanCode = 'sub_2weeks' | 'sub_month'
+type SbpPlanCode = 'sub_2weeks' | 'sub_month' | 'sub_year'
 
 const BOT_USERNAME = 'Ttaarrroobot'
 const BOT_PAYMENT_URL = `https://t.me/${BOT_USERNAME}?start=menu`
@@ -5614,7 +5614,7 @@ useEffect(() => {
                               void startSbpPayment('sub_2weeks')
                             }}
                           >
-                            {sbpBusyPlan === 'sub_2weeks' ? 'Создаю…' : 'СБП • 2 недели • 99 ₽'}
+                            {sbpBusyPlan === 'sub_2weeks' ? 'Создаю…' : 'СБП • 2 недели • 124 ₽'}
                           </button>
 
                           <button
@@ -5625,7 +5625,18 @@ useEffect(() => {
                               void startSbpPayment('sub_month')
                             }}
                           >
-                            {sbpBusyPlan === 'sub_month' ? 'Создаю…' : 'СБП • месяц • 179 ₽'}
+                            {sbpBusyPlan === 'sub_month' ? 'Создаю…' : 'СБП • месяц • 224 ₽'}
+                          </button>
+
+                          <button
+                            type="button"
+                            className="profile-piece__cta profile-piece__cta--sbp"
+                            disabled={sbpBusyPlan === 'sub_year'}
+                            onClick={() => {
+                              void startSbpPayment('sub_year')
+                            }}
+                          >
+                            {sbpBusyPlan === 'sub_year' ? 'Создаю…' : 'СБП • год • 1 747 ₽'}
                           </button>
 
                           <a

@@ -61,6 +61,35 @@ def _env_int(name: str, default: int = 0) -> int:
     return int(default)
 
 
+def _env_float(name: str, default: float = 0.0) -> float:
+    raw = str(os.environ.get(name) or "").strip()
+    if not raw:
+        return float(default)
+    try:
+        return float(raw)
+    except Exception:
+        return float(default)
+
+
+def _apply_markup_minor(
+    amount: int,
+    percent: float,
+    *,
+    step: int = 1,
+    allow_zero: bool = False,
+) -> int:
+    base = max(0, int(amount))
+    if base <= 0:
+        return 0 if allow_zero else max(1, int(step))
+    multiplier = 1.0 + (float(percent) / 100.0)
+    marked = base * multiplier
+    safe_step = max(1, int(step))
+    rounded = int(round(marked / safe_step) * safe_step)
+    if rounded <= 0:
+        return 0 if allow_zero else safe_step
+    return rounded
+
+
 BOT_TOKEN = (os.environ.get("TELEGRAM_BOT_TOKEN") or "").strip()
 PROVIDER_TOKEN = (
     os.environ.get("TELEGRAM_PROVIDER_TOKEN")
@@ -102,11 +131,66 @@ ENABLE_YOOKASSA_PAYMENTS = str(os.environ.get("ENABLE_YOOKASSA_PAYMENTS", "1")).
 ENABLE_CLICK_PAYMENTS = str(os.environ.get("ENABLE_CLICK_PAYMENTS", "0")).strip().lower() not in {"0", "false", "no"}
 CLICK_SERVICE_ID = _env_int("CLICK_SERVICE_ID", 0)
 CLICK_MERCHANT_ID = _env_int("CLICK_MERCHANT_ID", 0)
+PRICING_MARKUP_PERCENT = _env_float("PRICING_MARKUP_PERCENT", 25.0)
+YEARLY_DISCOUNT_PERCENT = _env_float("YEARLY_DISCOUNT_PERCENT", 35.0)
+RUB_SUB_2WEEKS_AMOUNT_BASE = max(100, _env_int("RUB_SUB_2WEEKS_AMOUNT_BASE", 99 * 100))
+RUB_SUB_MONTH_AMOUNT_BASE = max(100, _env_int("RUB_SUB_MONTH_AMOUNT_BASE", 179 * 100))
+USD_SUB_2WEEKS_CENTS_BASE = max(1, _env_int("USD_SUB_2WEEKS_CENTS_BASE", 99))
+USD_SUB_MONTH_CENTS_BASE = max(1, _env_int("USD_SUB_MONTH_CENTS_BASE", 179))
 CLICK_CURRENCY = (os.environ.get("CLICK_CURRENCY") or "UZS").strip().upper()
-CLICK_SUB_2WEEKS_AMOUNT = max(0, int(os.environ.get("CLICK_SUB_2WEEKS_AMOUNT", "0")))
-CLICK_SUB_MONTH_AMOUNT = max(0, int(os.environ.get("CLICK_SUB_MONTH_AMOUNT", "0")))
+CLICK_SUB_2WEEKS_AMOUNT_BASE = max(0, _env_int("CLICK_SUB_2WEEKS_AMOUNT", 0))
+CLICK_SUB_MONTH_AMOUNT_BASE = max(0, _env_int("CLICK_SUB_MONTH_AMOUNT", 0))
+RUB_SUB_2WEEKS_AMOUNT = _apply_markup_minor(
+    RUB_SUB_2WEEKS_AMOUNT_BASE,
+    PRICING_MARKUP_PERCENT,
+    step=100,
+)
+RUB_SUB_MONTH_AMOUNT = _apply_markup_minor(
+    RUB_SUB_MONTH_AMOUNT_BASE,
+    PRICING_MARKUP_PERCENT,
+    step=100,
+)
+USD_SUB_2WEEKS_CENTS = _apply_markup_minor(
+    USD_SUB_2WEEKS_CENTS_BASE,
+    PRICING_MARKUP_PERCENT,
+    step=1,
+)
+USD_SUB_MONTH_CENTS = _apply_markup_minor(
+    USD_SUB_MONTH_CENTS_BASE,
+    PRICING_MARKUP_PERCENT,
+    step=1,
+)
+RUB_SUB_YEAR_AMOUNT = _apply_markup_minor(
+    RUB_SUB_MONTH_AMOUNT * 12,
+    -YEARLY_DISCOUNT_PERCENT,
+    step=100,
+)
+USD_SUB_YEAR_CENTS = _apply_markup_minor(
+    USD_SUB_MONTH_CENTS * 12,
+    -YEARLY_DISCOUNT_PERCENT,
+    step=1,
+)
+CLICK_SUB_2WEEKS_AMOUNT = _apply_markup_minor(
+    CLICK_SUB_2WEEKS_AMOUNT_BASE,
+    PRICING_MARKUP_PERCENT,
+    step=1,
+    allow_zero=True,
+)
+CLICK_SUB_MONTH_AMOUNT = _apply_markup_minor(
+    CLICK_SUB_MONTH_AMOUNT_BASE,
+    PRICING_MARKUP_PERCENT,
+    step=1,
+    allow_zero=True,
+)
+CLICK_SUB_YEAR_AMOUNT = _apply_markup_minor(
+    CLICK_SUB_MONTH_AMOUNT * 12,
+    -YEARLY_DISCOUNT_PERCENT,
+    step=100,
+    allow_zero=True,
+) if CLICK_SUB_MONTH_AMOUNT > 0 else 0
 CLICK_SUB_2WEEKS_LABEL = (os.environ.get("CLICK_SUB_2WEEKS_LABEL") or "🇺🇿 CLICK — 2 недели").strip()
 CLICK_SUB_MONTH_LABEL = (os.environ.get("CLICK_SUB_MONTH_LABEL") or "🇺🇿 CLICK — месяц").strip()
+CLICK_SUB_YEAR_LABEL = (os.environ.get("CLICK_SUB_YEAR_LABEL") or "🇺🇿 CLICK — год").strip()
 BOT_PUBLIC_USERNAME = (os.environ.get("TELEGRAM_BOT_USERNAME") or "Ttaarrroobot").strip().lstrip("@")
 _SUPPORT_CHAT_RAW = (os.environ.get("SUPPORT_INBOX_CHAT_ID") or "").strip()
 SUPPORT_INBOX_CHAT_ID = int(_SUPPORT_CHAT_RAW) if _SUPPORT_CHAT_RAW.lstrip("-").isdigit() else None
@@ -143,33 +227,85 @@ BOT_DESCRIPTION = (
 ).strip()
 
 # ----- Тарифы -----
-# amount — в копейках (RUB * 100)
+# amount — в минорных единицах (копейки/центы/сумы)
 PRODUCTS: List[Dict[str, Any]] = [
     {
-        "code": "sub_2weeks",
-        "menu_label": "💳 По карте или SberPay — 2 недели — 99 ₽",
+        "code": "sub_2weeks_ru",
+        "menu_label": f"💳 По карте или SberPay — 2 недели — {RUB_SUB_2WEEKS_AMOUNT // 100} ₽",
         "menu_hint": "14 дней без ограничений через стандартную оплату Telegram (карта/SberPay).",
         "title": "Безлимит на 2 недели",
         "description": "Подписка AI Tarot на 14 дней",
-        "amount": 99 * 100,
+        "amount": RUB_SUB_2WEEKS_AMOUNT,
         "kind": "subscription",
         "days": 14,
         "priority": 10,
         "currency": "RUB",
-        "provider_mode": "yookassa",
+        "provider_mode": "yookassa_ru",
     },
     {
-        "code": "sub_month",
-        "menu_label": "💳 По карте или SberPay — месяц — 179 ₽",
+        "code": "sub_month_ru",
+        "menu_label": f"💳 По карте или SberPay — месяц — {RUB_SUB_MONTH_AMOUNT // 100} ₽",
         "menu_hint": "30 дней полного доступа через стандартную оплату Telegram (карта/SberPay).",
         "title": "Безлимит на месяц",
         "description": "Подписка AI Tarot на 30 дней",
-        "amount": 179 * 100,
+        "amount": RUB_SUB_MONTH_AMOUNT,
         "kind": "subscription",
         "days": 30,
         "priority": 20,
         "currency": "RUB",
-        "provider_mode": "yookassa",
+        "provider_mode": "yookassa_ru",
+    },
+    {
+        "code": "sub_year_ru",
+        "menu_label": f"💳 По карте или SberPay — год — {RUB_SUB_YEAR_AMOUNT // 100} ₽",
+        "menu_hint": "365 дней полного доступа со скидкой к ежемесячной цене.",
+        "title": "Безлимит на год",
+        "description": "Подписка AI Tarot на 365 дней",
+        "amount": RUB_SUB_YEAR_AMOUNT,
+        "kind": "subscription",
+        "days": 365,
+        "priority": 25,
+        "currency": "RUB",
+        "provider_mode": "yookassa_ru",
+    },
+    {
+        "code": "sub_2weeks_usd",
+        "menu_label": f"💳 Международная карта — 2 недели — ${USD_SUB_2WEEKS_CENTS / 100:.2f}",
+        "menu_hint": "14 дней без ограничений для всех стран, кроме России.",
+        "title": "Безлимит на 2 недели",
+        "description": "Подписка AI Tarot на 14 дней",
+        "amount": USD_SUB_2WEEKS_CENTS,
+        "kind": "subscription",
+        "days": 14,
+        "priority": 30,
+        "currency": "USD",
+        "provider_mode": "yookassa_usd",
+    },
+    {
+        "code": "sub_year_usd",
+        "menu_label": f"💳 Международная карта — год — ${USD_SUB_YEAR_CENTS / 100:.2f}",
+        "menu_hint": "365 дней полного доступа со скидкой к ежемесячной цене.",
+        "title": "Безлимит на год",
+        "description": "Подписка AI Tarot на 365 дней",
+        "amount": USD_SUB_YEAR_CENTS,
+        "kind": "subscription",
+        "days": 365,
+        "priority": 45,
+        "currency": "USD",
+        "provider_mode": "yookassa_usd",
+    },
+    {
+        "code": "sub_month_usd",
+        "menu_label": f"💳 Международная карта — месяц — ${USD_SUB_MONTH_CENTS / 100:.2f}",
+        "menu_hint": "30 дней полного доступа для всех стран, кроме России.",
+        "title": "Безлимит на месяц",
+        "description": "Подписка AI Tarot на 30 дней",
+        "amount": USD_SUB_MONTH_CENTS,
+        "kind": "subscription",
+        "days": 30,
+        "priority": 40,
+        "currency": "USD",
+        "provider_mode": "yookassa_usd",
     },
     {
         "code": "sub_2weeks_click",
@@ -197,12 +333,26 @@ PRODUCTS: List[Dict[str, Any]] = [
         "currency": CLICK_CURRENCY,
         "provider_mode": "click",
     },
+    {
+        "code": "sub_year_click",
+        "menu_label": CLICK_SUB_YEAR_LABEL,
+        "menu_hint": "Оплата через CLICK (приложение Click или банковская карта).",
+        "title": "Безлимит на год (CLICK)",
+        "description": "Подписка AI Tarot на 365 дней через CLICK",
+        "amount": CLICK_SUB_YEAR_AMOUNT,
+        "kind": "subscription",
+        "days": 365,
+        "priority": 230,
+        "currency": CLICK_CURRENCY,
+        "provider_mode": "click",
+    },
 ]
 
-PLAN_ORDER = ["sub_2weeks", "sub_month"]
+PLAN_ORDER = ["sub_2weeks", "sub_month", "sub_year"]
 PLAN_TITLES = {
     "sub_2weeks": "2 недели",
     "sub_month": "Месяц",
+    "sub_year": "Год",
 }
 COUNTRY_CHOICES: List[Dict[str, str]] = [
     {"code": "ru", "label": "🇷🇺 Россия"},
@@ -249,12 +399,17 @@ def _get_product(code: str) -> Optional[Dict[str, Any]]:
     return None
 
 
-def _kopecks_to_rub_value(amount_kopecks: int) -> str:
-    return f"{max(0, int(amount_kopecks)) / 100:.2f}"
+def _minor_units_to_value(amount_minor: int, currency: str) -> str:
+    safe_currency = str(currency or "RUB").upper()
+    safe_amount = max(0, int(amount_minor or 0))
+    if safe_currency == "UZS":
+        return str(safe_amount)
+    return f"{safe_amount / 100:.2f}"
 
 
 def _build_provider_data_for_receipt(product: Dict[str, Any]) -> str:
-    amount_kopecks = int(product.get("amount") or 0)
+    amount_minor = int(product.get("amount") or 0)
+    currency = str(product.get("currency") or "RUB").upper()
     title = str(product.get("title") or product.get("code") or "AI Tarot").strip() or "AI Tarot"
     title = title[:128]
 
@@ -262,8 +417,8 @@ def _build_provider_data_for_receipt(product: Dict[str, Any]) -> str:
         "description": title,
         "quantity": "1.00",
         "amount": {
-            "value": _kopecks_to_rub_value(amount_kopecks),
-            "currency": "RUB",
+            "value": _minor_units_to_value(amount_minor, currency),
+            "currency": currency,
         },
         "vat_code": int(YOOKASSA_VAT_CODE),
     }
@@ -349,13 +504,13 @@ def _products_for_mode(mode: str = "menu") -> List[Dict[str, Any]]:
     )
     click_available = bool(ENABLE_CLICK_PAYMENTS and (CLICK_PROVIDER_TOKEN or click_link_available))
     if not ENABLE_YOOKASSA_PAYMENTS:
-        items = [p for p in items if str(p.get("provider_mode") or "").lower() != "yookassa"]
+        items = [p for p in items if not _is_card_provider_mode(str(p.get("provider_mode") or "").lower())]
     if not click_available:
         items = [p for p in items if str(p.get("provider_mode") or "").lower() != "click"]
     items = [p for p in items if int(p.get("amount") or 0) > 0]
 
     if mode_l in {"card", "cards", "sberpay", "card_sberpay"}:
-        items = [p for p in items if str(p.get("provider_mode") or "").lower() == "yookassa"]
+        items = [p for p in items if _is_card_provider_mode(str(p.get("provider_mode") or "").lower())]
     elif mode_l in {"click", "uz", "uzbekistan", "click_card", "card_click", "clickcard"}:
         items = [p for p in items if str(p.get("provider_mode") or "").lower() == "click"]
 
@@ -366,6 +521,10 @@ def _plan_key_from_code(code: str) -> str:
     raw = str(code or "").strip().lower()
     if raw.endswith("_click"):
         return raw[:-6]
+    if raw.endswith("_usd"):
+        return raw[:-4]
+    if raw.endswith("_ru"):
+        return raw[:-3]
     return raw
 
 
@@ -379,7 +538,37 @@ def _format_amount_label(product: Dict[str, Any]) -> str:
         return f"{rub:.2f} ₽".replace(".", ",")
     if currency == "UZS":
         return f"{amount:,}".replace(",", " ") + " UZS"
+    if currency == "USD":
+        usd = amount / 100
+        return f"${usd:.2f}"
     return f"{amount} {currency}"
+
+
+_CARD_PROVIDER_MODES = {"yookassa", "yookassa_ru", "yookassa_usd"}
+
+
+def _is_card_provider_mode(provider_mode: str) -> bool:
+    return str(provider_mode or "").strip().lower() in _CARD_PROVIDER_MODES
+
+
+def _card_provider_mode_for_country(country_code: str) -> str:
+    safe_country = _normalize_country_code(country_code)
+    return "yookassa_ru" if safe_country == "ru" else "yookassa_usd"
+
+
+def _card_product_for_country(plan_key: str, country_code: str) -> Optional[Dict[str, Any]]:
+    safe_country = _normalize_country_code(country_code)
+    primary_mode = _card_provider_mode_for_country(safe_country)
+    candidate_modes = [primary_mode, "yookassa"]
+    if safe_country == "ru":
+        candidate_modes.append("yookassa_usd")
+    else:
+        candidate_modes.append("yookassa_ru")
+    for mode in candidate_modes:
+        product = _product_for_plan_and_provider(plan_key, mode)
+        if product:
+            return product
+    return None
 
 
 def _product_for_plan_and_provider(plan_key: str, provider_mode: str) -> Optional[Dict[str, Any]]:
@@ -414,11 +603,6 @@ def _country_label(country_code: str) -> str:
 def _available_plan_keys_for_country(country_code: str) -> List[str]:
     safe_country = _normalize_country_code(country_code)
     visible = _products_for_mode("menu")
-    card_keys = {
-        _plan_key_from_code(p.get("code") or "")
-        for p in visible
-        if str(p.get("provider_mode") or "").lower() == "yookassa"
-    }
     click_keys = {
         _plan_key_from_code(p.get("code") or "")
         for p in visible
@@ -430,14 +614,15 @@ def _available_plan_keys_for_country(country_code: str) -> List[str]:
     for key in PLAN_ORDER:
         if key not in visible_keys:
             continue
+        has_card = _card_product_for_country(key, safe_country) is not None
         if safe_country == "uz":
-            if key in click_keys or key in card_keys:
+            if key in click_keys or has_card:
                 result.append(key)
         elif safe_country == "ru":
-            if key in card_keys:
+            if has_card:
                 result.append(key)
         else:
-            if key in card_keys:
+            if has_card:
                 result.append(key)
     return result
 
@@ -446,13 +631,13 @@ def _plan_summary_label(plan_key: str, country_code: str) -> str:
     title = PLAN_TITLES.get(plan_key, plan_key)
     safe_country = _normalize_country_code(country_code)
 
-    card_product = _product_for_plan_and_provider(plan_key, "yookassa")
+    card_product = _card_product_for_country(plan_key, safe_country)
     click_product = _product_for_plan_and_provider(plan_key, "click")
 
-    if safe_country == "uz" and click_product:
-        return f"{title} — {_format_amount_label(click_product)}"
     if card_product:
         return f"{title} — {_format_amount_label(card_product)}"
+    if safe_country == "uz" and click_product:
+        return f"{title} — {_format_amount_label(click_product)}"
     if click_product:
         return f"{title} — {_format_amount_label(click_product)}"
     return title
@@ -510,7 +695,7 @@ def _method_keyboard(plan_key: str, country_code: str) -> InlineKeyboardMarkup:
     safe_country = _normalize_country_code(country_code)
     rows: List[List[InlineKeyboardButton]] = []
 
-    card_product = _product_for_plan_and_provider(plan_key, "yookassa")
+    card_product = _card_product_for_country(plan_key, safe_country)
     click_product = _product_for_plan_and_provider(plan_key, "click")
 
     if safe_country == "ru":
@@ -564,7 +749,7 @@ def _method_keyboard(plan_key: str, country_code: str) -> InlineKeyboardMarkup:
             rows.append(
                 [
                     InlineKeyboardButton(
-                        f"💳 Карта МИР / ЮMoney — {_format_amount_label(card_product)}",
+                        f"💳 Международная карта — {_format_amount_label(card_product)}",
                         callback_data=f"buy:{card_product['code']}",
                     )
                 ]
@@ -579,7 +764,7 @@ def _format_methods_text(plan_key: str, country_code: str) -> str:
     title = PLAN_TITLES.get(plan_key, plan_key)
     methods: List[str] = []
 
-    card_product = _product_for_plan_and_provider(plan_key, "yookassa")
+    card_product = _card_product_for_country(plan_key, safe_country)
     click_product = _product_for_plan_and_provider(plan_key, "click")
 
     if safe_country == "ru":
@@ -595,8 +780,7 @@ def _format_methods_text(plan_key: str, country_code: str) -> str:
             methods.append(f"• Международная карта — {_format_amount_label(card_product)}")
     else:
         if card_product:
-            methods.append(f"• Карта МИР / ЮMoney — {_format_amount_label(card_product)}")
-            methods.append("• Извините, Visa/Mastercard пока не поддерживаются. Доступны МИР и ЮMoney")
+            methods.append(f"• Международная карта — {_format_amount_label(card_product)}")
 
     if not methods:
         methods.append("• Способы оплаты временно недоступны")
@@ -2020,7 +2204,7 @@ async def sbp_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
     country_code, plan_key = _parse_country_plan_callback(query.data, "sbp")
     country_code = _normalize_country_code(country_code)
-    card_product = _product_for_plan_and_provider(plan_key, "yookassa")
+    card_product = _card_product_for_country(plan_key, country_code)
     if not card_product:
         if query.message:
             await query.message.reply_text("СБП для этого плана временно недоступен.")
@@ -2065,7 +2249,7 @@ async def sbp_auto_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
     country_code, plan_key = _parse_country_plan_callback(query.data, "sbp_auto")
     country_code = _normalize_country_code(country_code)
-    card_product = _product_for_plan_and_provider(plan_key, "yookassa")
+    card_product = _card_product_for_country(plan_key, country_code)
     if not card_product:
         if query.message:
             await query.message.reply_text("СБП автоплатёж для этого плана временно недоступен.")
@@ -2129,13 +2313,13 @@ async def buy_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         return
 
     currency = str(product.get("currency") or "RUB").upper()
-    provider_mode = str(product.get("provider_mode") or "yookassa").lower()
-    if provider_mode == "yookassa" and not PROVIDER_TOKEN:
+    provider_mode = str(product.get("provider_mode") or ("yookassa_ru" if currency == "RUB" else "yookassa_usd")).lower()
+    if _is_card_provider_mode(provider_mode) and not PROVIDER_TOKEN:
         if query.message:
             await query.message.reply_text(
                 "Оплата картой временно недоступна. Выберите другой способ оплаты."
             )
-        logger.error("TELEGRAM_PROVIDER_TOKEN is not set for yookassa product=%s", product_code)
+        logger.error("TELEGRAM_PROVIDER_TOKEN is not set for card provider product=%s mode=%s", product_code, provider_mode)
         return
     if provider_mode == "click" and not CLICK_PROVIDER_TOKEN:
         tg_user_id = int(getattr(query.from_user, "id", 0) or 0)
@@ -2196,7 +2380,7 @@ async def buy_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         "prices": prices,
     }
 
-    if provider_mode == "yookassa":
+    if _is_card_provider_mode(provider_mode):
         invoice_kwargs["provider_token"] = PROVIDER_TOKEN
         if YOOKASSA_REQUIRE_RECEIPT:
             invoice_kwargs["provider_data"] = _build_provider_data_for_receipt(product)

@@ -77,13 +77,65 @@ _autopay_last_run_ts = 0.0
 
 FREE_READINGS_PER_MONTH = int(os.getenv("FREE_READINGS_PER_MONTH", "5"))
 
+
+def _pricing_env_float(name: str, default: float) -> float:
+    raw = str(os.getenv(name) or "").strip()
+    if not raw:
+        return float(default)
+    try:
+        return float(raw)
+    except Exception:
+        return float(default)
+
+
+def _pricing_env_int(name: str, default: int) -> int:
+    raw = str(os.getenv(name) or "").strip()
+    if not raw:
+        return int(default)
+    try:
+        return int(raw)
+    except Exception:
+        return int(default)
+
+
+def _apply_markup_minor(
+    amount: int,
+    percent: float,
+    *,
+    step: int = 1,
+    allow_zero: bool = False,
+) -> int:
+    base = max(0, int(amount))
+    if base <= 0:
+        return 0 if allow_zero else max(1, int(step))
+    multiplier = 1.0 + (float(percent) / 100.0)
+    marked = base * multiplier
+    safe_step = max(1, int(step))
+    rounded = int(round(marked / safe_step) * safe_step)
+    if rounded <= 0:
+        return 0 if allow_zero else safe_step
+    return rounded
+
+
+PRICING_MARKUP_PERCENT = _pricing_env_float("PRICING_MARKUP_PERCENT", 25.0)
+YEARLY_DISCOUNT_PERCENT = _pricing_env_float("YEARLY_DISCOUNT_PERCENT", 35.0)
+SBP_SUB_2WEEKS_AMOUNT_BASE = max(100, _pricing_env_int("RUB_SUB_2WEEKS_AMOUNT_BASE", 99 * 100))
+SBP_SUB_MONTH_AMOUNT_BASE = max(100, _pricing_env_int("RUB_SUB_MONTH_AMOUNT_BASE", 179 * 100))
+SBP_SUB_2WEEKS_AMOUNT = _apply_markup_minor(SBP_SUB_2WEEKS_AMOUNT_BASE, PRICING_MARKUP_PERCENT, step=100)
+SBP_SUB_MONTH_AMOUNT = _apply_markup_minor(SBP_SUB_MONTH_AMOUNT_BASE, PRICING_MARKUP_PERCENT, step=100)
+SBP_SUB_YEAR_AMOUNT = _apply_markup_minor(
+    SBP_SUB_MONTH_AMOUNT * 12,
+    -YEARLY_DISCOUNT_PERCENT,
+    step=100,
+)
+
 SBP_PLANS: Dict[str, Dict[str, Any]] = {
     "sub_2weeks": {
         "code": "sub_2weeks",
         "title": "Безлимит на 2 недели",
         "description": "Подписка AI Tarot на 14 дней",
         "days": 14,
-        "amount": 99 * 100,
+        "amount": SBP_SUB_2WEEKS_AMOUNT,
         "currency": "RUB",
     },
     "sub_month": {
@@ -91,7 +143,15 @@ SBP_PLANS: Dict[str, Dict[str, Any]] = {
         "title": "Безлимит на месяц",
         "description": "Подписка AI Tarot на 30 дней",
         "days": 30,
-        "amount": 179 * 100,
+        "amount": SBP_SUB_MONTH_AMOUNT,
+        "currency": "RUB",
+    },
+    "sub_year": {
+        "code": "sub_year",
+        "title": "Безлимит на год",
+        "description": "Подписка AI Tarot на 365 дней",
+        "days": 365,
+        "amount": SBP_SUB_YEAR_AMOUNT,
         "currency": "RUB",
     },
 }
@@ -162,6 +222,11 @@ CLICK_PLAN_MONTH_AMOUNT_RAW = (
     or os.getenv("CLICK_SUB_MONTH_AMOUNT")
     or "0"
 ).strip()
+CLICK_PLAN_YEAR_AMOUNT_RAW = (
+    os.getenv("CLICK_API_SUB_YEAR_AMOUNT")
+    or os.getenv("CLICK_SUB_YEAR_AMOUNT")
+    or ""
+).strip()
 ANALYTICS_ADMIN_TOKEN = (os.getenv("ANALYTICS_ADMIN_TOKEN") or "").strip()
 VISION_ESCALATION_COUNTER_KEY = "photo_analysis"
 VISION_ESCALATION_TZ_NAME = (os.getenv("OPENAI_VISION_ESCALATION_TZ") or "Asia/Tashkent").strip() or "Asia/Tashkent"
@@ -202,6 +267,35 @@ def _parse_int_or_default(raw: str, default: int = 0) -> int:
 CLICK_SERVICE_ID = max(0, _parse_int_or_default(CLICK_SERVICE_ID_RAW, 0))
 CLICK_MERCHANT_ID = max(0, _parse_int_or_default(CLICK_MERCHANT_ID_RAW, 0))
 CLICK_MERCHANT_USER_ID = max(0, _parse_int_or_default(CLICK_MERCHANT_USER_ID_RAW, 0))
+CLICK_PLAN_2WEEKS_AMOUNT = _apply_markup_minor(
+    max(0, _parse_int_or_default(CLICK_PLAN_2WEEKS_AMOUNT_RAW, 0)),
+    PRICING_MARKUP_PERCENT,
+    step=1,
+    allow_zero=True,
+)
+CLICK_PLAN_MONTH_AMOUNT = _apply_markup_minor(
+    max(0, _parse_int_or_default(CLICK_PLAN_MONTH_AMOUNT_RAW, 0)),
+    PRICING_MARKUP_PERCENT,
+    step=1,
+    allow_zero=True,
+)
+_click_year_raw = max(0, _parse_int_or_default(CLICK_PLAN_YEAR_AMOUNT_RAW, 0))
+if _click_year_raw > 0:
+    CLICK_PLAN_YEAR_AMOUNT = _apply_markup_minor(
+        _click_year_raw,
+        PRICING_MARKUP_PERCENT,
+        step=100,
+        allow_zero=True,
+    )
+elif CLICK_PLAN_MONTH_AMOUNT > 0:
+    CLICK_PLAN_YEAR_AMOUNT = _apply_markup_minor(
+        CLICK_PLAN_MONTH_AMOUNT * 12,
+        -YEARLY_DISCOUNT_PERCENT,
+        step=100,
+        allow_zero=True,
+    )
+else:
+    CLICK_PLAN_YEAR_AMOUNT = 0
 
 CLICK_PLANS: Dict[str, Dict[str, Any]] = {
     "sub_2weeks": {
@@ -209,7 +303,7 @@ CLICK_PLANS: Dict[str, Dict[str, Any]] = {
         "title": "Безлимит на 2 недели (CLICK)",
         "description": "Подписка AI Tarot на 14 дней через CLICK",
         "days": 14,
-        "amount": max(0, _parse_int_or_default(CLICK_PLAN_2WEEKS_AMOUNT_RAW, 0)),
+        "amount": CLICK_PLAN_2WEEKS_AMOUNT,
         "currency": CLICK_CURRENCY,
     },
     "sub_month": {
@@ -217,7 +311,15 @@ CLICK_PLANS: Dict[str, Dict[str, Any]] = {
         "title": "Безлимит на месяц (CLICK)",
         "description": "Подписка AI Tarot на 30 дней через CLICK",
         "days": 30,
-        "amount": max(0, _parse_int_or_default(CLICK_PLAN_MONTH_AMOUNT_RAW, 0)),
+        "amount": CLICK_PLAN_MONTH_AMOUNT,
+        "currency": CLICK_CURRENCY,
+    },
+    "sub_year": {
+        "code": "sub_year",
+        "title": "Безлимит на год (CLICK)",
+        "description": "Подписка AI Tarot на 365 дней через CLICK",
+        "days": 365,
+        "amount": CLICK_PLAN_YEAR_AMOUNT,
         "currency": CLICK_CURRENCY,
     },
 }
@@ -1381,7 +1483,7 @@ class BillingStatusOut(BaseModel):
 
 
 class SbpCreateIn(BaseModel):
-    plan_code: Literal["sub_2weeks", "sub_month"] = "sub_2weeks"
+    plan_code: Literal["sub_2weeks", "sub_month", "sub_year"] = "sub_2weeks"
 
 
 class SbpCreateOut(BaseModel):
@@ -1407,7 +1509,7 @@ class SbpStatusOut(BaseModel):
 
 
 class ClickCreateIn(BaseModel):
-    plan_code: Literal["sub_2weeks", "sub_month"] = "sub_2weeks"
+    plan_code: Literal["sub_2weeks", "sub_month", "sub_year"] = "sub_2weeks"
 
 
 class ClickCreateOut(BaseModel):
@@ -2917,7 +3019,7 @@ async def billing_sbp_create(
 @app.get("/billing/sbp/bot-link")
 async def billing_sbp_bot_link(
     tg_user_id: int = Query(..., ge=1),
-    plan_code: Literal["sub_2weeks", "sub_month"] = Query(...),
+    plan_code: Literal["sub_2weeks", "sub_month", "sub_year"] = Query(...),
     exp: int = Query(..., ge=1),
     sig: str = Query(..., min_length=16, max_length=128),
     db: AsyncSession = Depends(get_db),
@@ -3491,7 +3593,7 @@ async def billing_click_create(
 @app.get("/billing/click/bot-link")
 async def billing_click_bot_link(
     tg_user_id: int = Query(..., ge=1),
-    plan_code: Literal["sub_2weeks", "sub_month"] = Query(...),
+    plan_code: Literal["sub_2weeks", "sub_month", "sub_year"] = Query(...),
     exp: int = Query(..., ge=1),
     sig: str = Query(..., min_length=16, max_length=128),
     db: AsyncSession = Depends(get_db),

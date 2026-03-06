@@ -136,7 +136,7 @@ export async function getBillingStatus(token: string): Promise<BillingStatusDto>
   })
 }
 
-export type SbpPlanCode = 'sub_2weeks' | 'sub_month'
+export type SbpPlanCode = 'sub_2weeks' | 'sub_month' | 'sub_year'
 
 export type SbpCreateOutDto = {
   order_id: string

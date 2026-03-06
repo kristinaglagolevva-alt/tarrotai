@@ -2070,6 +2070,43 @@ useEffect(() => {
   const navDir: 'left' | 'right' | 'none' = navActiveIndex === navPrevIndex ? 'none' : navActiveIndex > navPrevIndex ? 'right' : 'left'
   const showKeyboardToolbar = askInputFocused && !(view === 'home' && navTab === 'main')
 
+  useEffect(() => {
+    if (!askInputFocused) return
+    if (!(view === 'home' && navTab === 'main')) return
+
+    const ensureVisible = (behavior: ScrollBehavior) => {
+      const scroller = contentRef.current
+      const askWrap = askWrapRef.current
+      if (!scroller || !askWrap) return
+
+      const scrollerRect = scroller.getBoundingClientRect()
+      const askRect = askWrap.getBoundingClientRect()
+      const footerRect = homePrimaryFooterRef.current?.getBoundingClientRect()
+      const footerHeight = footerRect?.height ?? 84
+      const topSafe = scrollerRect.top + 72
+      const bottomSafe = scrollerRect.bottom - footerHeight - 12
+
+      let delta = 0
+      if (askRect.bottom > bottomSafe) {
+        delta = askRect.bottom - bottomSafe
+      } else if (askRect.top < topSafe) {
+        delta = askRect.top - topSafe
+      }
+
+      if (Math.abs(delta) > 2) {
+        scroller.scrollBy({ top: delta, behavior })
+      }
+    }
+
+    ensureVisible('auto')
+    const t1 = window.setTimeout(() => ensureVisible('smooth'), 80)
+    const t2 = window.setTimeout(() => ensureVisible('smooth'), 260)
+    return () => {
+      window.clearTimeout(t1)
+      window.clearTimeout(t2)
+    }
+  }, [askInputFocused, keyboardInset, navTab, view])
+
   const onPickNav = (next: NavTab) => {
     if (next === navTab) return
 
@@ -2556,11 +2593,13 @@ useEffect(() => {
   const subtitleRef = useRef<HTMLParagraphElement | null>(null)
 
   const appRef = useRef<HTMLDivElement | null>(null)
+  const contentRef = useRef<HTMLDivElement | null>(null)
   const starsCanvasRef = useRef<HTMLCanvasElement | null>(null)
   const cometsCanvasRef = useRef<HTMLCanvasElement | null>(null)
   const askWrapRef = useRef<HTMLDivElement | null>(null)
   const spreadListRef = useRef<HTMLDivElement | null>(null)
   const btnRef = useRef<HTMLButtonElement | null>(null)
+  const homePrimaryFooterRef = useRef<HTMLDivElement | null>(null)
   const spreadActiveRef = useRef<HTMLDivElement | null>(null)
 
   const isResult = view === 'card_day_prep' && cardRevealed
@@ -5056,6 +5095,11 @@ useEffect(() => {
   const currentLegalDoc = activeLegalDoc ? LEGAL_DOCS[activeLegalDoc] : null
   const canStartReading = !!spread
   const showHomePrimaryCta = view === 'home' && navTab === 'main'
+  const homeKeyboardAwarePadding = showHomePrimaryCta
+    ? {
+        paddingBottom: `calc(${92 + Math.max(0, keyboardInset)}px + env(safe-area-inset-bottom, 0px))`,
+      }
+    : undefined
 
   return (
     <div className="app" ref={appRef}>
@@ -5172,7 +5216,11 @@ useEffect(() => {
   </div>
 )}
 
-      <div className={`content ${showHomePrimaryCta ? 'content--with-home-cta' : ''}`}>
+      <div
+        ref={contentRef}
+        className={`content ${showHomePrimaryCta ? 'content--with-home-cta' : ''}`}
+        style={homeKeyboardAwarePadding}
+      >
         {view === 'home' && (
           <>
             <div className={`home-head ${navTab !== 'main' ? 'is-subtab' : ''}`}>
@@ -6900,6 +6948,7 @@ useEffect(() => {
 
       {showHomePrimaryCta && (
         <div
+          ref={homePrimaryFooterRef}
           className="home-primary-footer"
           style={{ bottom: `${Math.max(0, keyboardInset)}px` }}
         >

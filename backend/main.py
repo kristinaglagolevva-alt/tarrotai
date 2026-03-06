@@ -975,6 +975,8 @@ async def _ensure_runtime_schema(conn) -> None:
     statements = [
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS subscription_until TIMESTAMPTZ NULL;",
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS paid_readings_balance INTEGER NOT NULL DEFAULT 0;",
+        "ALTER TABLE card_of_day ADD COLUMN IF NOT EXISTS is_reversed BOOLEAN NOT NULL DEFAULT FALSE;",
+        "UPDATE card_of_day SET is_reversed = TRUE WHERE is_reversed = FALSE AND (LOWER(COALESCE(description, '')) LIKE '%перевер%' OR LOWER(COALESCE(description, '')) LIKE '%обратн%' OR LOWER(COALESCE(description, '')) LIKE '%reversed%' OR LOWER(COALESCE(description, '')) LIKE '%reverse%');",
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS memory_opt_in BOOLEAN NOT NULL DEFAULT TRUE;",
         "ALTER TABLE users ALTER COLUMN memory_opt_in SET DEFAULT TRUE;",
         "UPDATE users SET memory_opt_in = TRUE WHERE memory_opt_in IS NULL;",
@@ -1275,7 +1277,7 @@ async def _ensure_card_day_memory_event(
     reversed_flag = (
         bool(is_reversed_hint)
         if is_reversed_hint is not None
-        else memory_service.infer_reversed_from_text(str(row.description or ""))
+        else bool(getattr(row, "is_reversed", False))
     )
     try:
         cards_payload = memory_service.build_card_of_day_cards_payload(
@@ -1443,6 +1445,7 @@ class CardOfDayOut(BaseModel):
     question: str
     card_index: int
     card_name: str
+    is_reversed: bool = False
     description: str
 
 
@@ -3973,7 +3976,7 @@ async def create_or_get_card_of_day(
             db,
             user=current_user,
             row=existing,
-            is_reversed_hint=memory_service.infer_reversed_from_text(str(existing.description or "")),
+            is_reversed_hint=bool(getattr(existing, "is_reversed", False)),
         )
         return {
             "day_key": existing.day_key,
@@ -3981,6 +3984,7 @@ async def create_or_get_card_of_day(
             "question": existing.question,
             "card_index": existing.card_index,
             "card_name": existing.card_name,
+            "is_reversed": bool(getattr(existing, "is_reversed", False)),
             "description": existing.description,
         }
 
@@ -4015,6 +4019,7 @@ async def create_or_get_card_of_day(
         question=payload.question,
         card_index=card_index,
         card_name=card["name"],
+        is_reversed=bool(is_reversed),
         description=description,
     )
     db.add(row)
@@ -4033,6 +4038,7 @@ async def create_or_get_card_of_day(
         "question": row.question,
         "card_index": row.card_index,
         "card_name": row.card_name,
+        "is_reversed": bool(getattr(row, "is_reversed", False)),
         "description": row.description,
     }
 
@@ -4057,7 +4063,7 @@ async def get_card_of_day_today(
         db,
         user=current_user,
         row=existing,
-        is_reversed_hint=memory_service.infer_reversed_from_text(str(existing.description or "")),
+        is_reversed_hint=bool(getattr(existing, "is_reversed", False)),
     )
 
     return {
@@ -4066,6 +4072,7 @@ async def get_card_of_day_today(
         "question": existing.question,
         "card_index": existing.card_index,
         "card_name": existing.card_name,
+        "is_reversed": bool(getattr(existing, "is_reversed", False)),
         "description": existing.description,
     }
 
@@ -4090,6 +4097,7 @@ async def get_card_of_day_history(
             "question": r.question,
             "card_index": r.card_index,
             "card_name": r.card_name,
+            "is_reversed": bool(getattr(r, "is_reversed", False)),
             "description": r.description,
             "created_at": r.created_at,
         }
@@ -4496,7 +4504,7 @@ async def get_unified_history(
                 cards=memory_service.build_card_of_day_cards_payload(
                     card_index=int(r.card_index or 0),
                     card_name=str(r.card_name or ""),
-                    is_reversed=memory_service.infer_reversed_from_text(str(r.description or "")),
+                    is_reversed=bool(getattr(r, "is_reversed", False)),
                 ),
             )
         items.append(
@@ -4509,6 +4517,7 @@ async def get_unified_history(
                     "question": r.question,
                     "card_index": r.card_index,
                     "card_name": r.card_name,
+                    "is_reversed": bool(getattr(r, "is_reversed", False)),
                     "description": r.description,
                     "theme_capsule": cod_capsule or None,
                 },

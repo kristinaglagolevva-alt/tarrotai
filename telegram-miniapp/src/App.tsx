@@ -2695,8 +2695,11 @@ useEffect(() => {
       const idx = Math.max(0, Math.min(Number(dto?.card_index ?? 0), FRONT_CARD_URLS.length - 1))
       const url = FRONT_CARD_URLS[idx] || backCardImg
       const cardName = String(dto?.card_name || '')
+      const desc = String(dto?.description || '')
       const isReversed =
-        typeof dto?.is_reversed === 'boolean' ? Boolean(dto.is_reversed) : /\(перев[её]рнут/i.test(cardName)
+        typeof dto?.is_reversed === 'boolean'
+          ? Boolean(dto.is_reversed)
+          : /\(перев[её]рнут/i.test(cardName) || /перев[её]рнут|обратн|reversed|reverse/i.test(desc)
       const dayKey = String(dto?.day_key || getVilniusDayKey())
       resolvedDayKey = dayKey
 
@@ -2788,7 +2791,11 @@ useEffect(() => {
     setSelectedFrontUrl(img)
     setDailyDesc(it.description || '')
     setDailyCardName(it.card_name || '')
-    setDailyIsReversed(Boolean(it.is_reversed) || /\(перев[её]рнут/i.test(String(it.card_name || '')))
+    setDailyIsReversed(
+      Boolean(it.is_reversed) ||
+        /\(перев[её]рнут/i.test(String(it.card_name || '')) ||
+        /перев[её]рнут|обратн|reversed|reverse/i.test(String(it.description || '')),
+    )
     setDailyDayKey(it.day_key || '')
     setDailyQuestion(String(it.question || ''))
 

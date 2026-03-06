@@ -106,6 +106,7 @@ class CardOfDay(Base):
 
     card_index: Mapped[int] = mapped_column(Integer)
     card_name: Mapped[str] = mapped_column(String(128), default="")
+    is_reversed: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
     description: Mapped[str] = mapped_column(String(4096), default="")
 
     created_at: Mapped[DateTime] = mapped_column(

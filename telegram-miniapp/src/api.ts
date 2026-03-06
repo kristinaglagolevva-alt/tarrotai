@@ -322,6 +322,7 @@ export type UnifiedHistoryCardOfDayPayload = {
   question: string
   card_index: number
   card_name: string
+  is_reversed?: boolean
   description: string
   theme_capsule?: string
 }

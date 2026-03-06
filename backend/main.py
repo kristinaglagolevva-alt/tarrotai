@@ -14,7 +14,7 @@ import uuid
 from datetime import date, datetime, timedelta, timezone
 from html import escape
 from typing import Optional, List, Literal, Dict, Any
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlsplit, parse_qsl
 try:
     from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 except Exception:  # Python 3.8 fallback
@@ -794,7 +794,13 @@ def _click_sign_raw(
     return hashlib.md5(payload.encode("utf-8")).hexdigest()
 
 
-def _click_build_payment_url(*, order_id: str, amount: int, return_url: Optional[str] = None) -> str:
+def _click_build_payment_url(
+    *,
+    order_id: str,
+    amount: int,
+    return_url: Optional[str] = None,
+    card_type: Optional[str] = None,
+) -> str:
     params: Dict[str, str] = {
         "service_id": str(CLICK_SERVICE_ID),
         "merchant_id": str(CLICK_MERCHANT_ID),
@@ -806,7 +812,141 @@ def _click_build_payment_url(*, order_id: str, amount: int, return_url: Optional
     target_return = str(return_url or CLICK_RETURN_URL or "").strip()
     if target_return:
         params["return_url"] = _append_query_param(target_return, "click_order_id", str(order_id))
+    safe_card_type = str(card_type or "").strip().lower()
+    if safe_card_type in {"uzcard", "humo"}:
+        params["card_type"] = safe_card_type
     return f"{CLICK_PAYMENT_BASE_URL}?{urlencode(params)}"
+
+
+def _click_amount_decimal(amount: int) -> str:
+    return f"{max(0, int(amount)):0.2f}"
+
+
+def _click_normalize_card_type(raw: Optional[str]) -> str:
+    value = str(raw or "").strip().lower()
+    if value in {"uzcard", "humo"}:
+        return value
+    return ""
+
+
+def _render_click_card_checkout_html(
+    *,
+    order_id: str,
+    amount: int,
+    return_url: str,
+    fallback_url: str,
+    default_card_type: str = "",
+) -> str:
+    req: Dict[str, str] = {
+        "service_id": str(CLICK_SERVICE_ID),
+        "merchant_id": str(CLICK_MERCHANT_ID),
+        "amount": _click_amount_decimal(int(amount)),
+        "transaction_param": str(order_id),
+    }
+    if CLICK_MERCHANT_USER_ID > 0:
+        req["merchant_user_id"] = str(CLICK_MERCHANT_USER_ID)
+    safe_return = str(return_url or "").strip()
+    if safe_return:
+        req["return_url"] = safe_return
+    safe_default_card_type = _click_normalize_card_type(default_card_type)
+    if safe_default_card_type:
+        req["card_type"] = safe_default_card_type
+
+    req_json = json.dumps(req, ensure_ascii=False)
+    fallback_json = json.dumps(str(fallback_url or "").strip(), ensure_ascii=False)
+    return f"""<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Оплата картой через CLICK</title>
+  <style>
+    body {{
+      margin: 0;
+      font-family: -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
+      background: linear-gradient(180deg, #081635 0%, #102556 100%);
+      color: #e8eeff;
+    }}
+    .wrap {{
+      max-width: 560px;
+      margin: 0 auto;
+      padding: max(16px, env(safe-area-inset-top)) 16px calc(18px + env(safe-area-inset-bottom));
+    }}
+    .card {{
+      border: 1px solid rgba(255,255,255,0.18);
+      border-radius: 16px;
+      background: rgba(18, 40, 92, 0.62);
+      padding: 16px;
+      backdrop-filter: blur(12px);
+    }}
+    h1 {{ margin: 0 0 8px; font-size: 20px; }}
+    p {{ margin: 0 0 10px; line-height: 1.45; color: #dbe4ff; }}
+    .btn {{
+      display: block;
+      width: 100%;
+      border: 0;
+      border-radius: 12px;
+      padding: 12px 14px;
+      margin-top: 10px;
+      font-weight: 700;
+      font-size: 16px;
+      cursor: pointer;
+      color: #fff;
+      background: linear-gradient(90deg, #325edb, #5b7bff);
+    }}
+    .btn.alt {{ background: rgba(255,255,255,0.14); }}
+    .hint {{ font-size: 13px; opacity: 0.9; margin-top: 12px; }}
+  </style>
+  <script src="https://my.click.uz/pay/checkout.js"></script>
+</head>
+<body>
+  <main class="wrap">
+    <section class="card">
+      <h1>Оплата картой через CLICK</h1>
+      <p>Открываем форму оплаты картой без перехода в приложение.</p>
+      <button class="btn" id="pay-any">Оплатить картой</button>
+      <button class="btn alt" id="pay-uzcard">Оплатить Uzcard</button>
+      <button class="btn alt" id="pay-humo">Оплатить Humo</button>
+      <button class="btn alt" id="open-click">Открыть стандартную страницу CLICK</button>
+      <p class="hint">Если форма не открылась автоматически, нажмите кнопку выше.</p>
+    </section>
+  </main>
+  <script>
+    (function() {{
+      const requestBase = {req_json};
+      const fallbackUrl = {fallback_json};
+      function openCard(cardType) {{
+        const payload = Object.assign({{}}, requestBase);
+        if (cardType) {{
+          payload.card_type = cardType;
+        }} else if (payload.card_type) {{
+          delete payload.card_type;
+        }}
+        try {{
+          if (typeof window.createPaymentRequest === "function") {{
+            window.createPaymentRequest(payload, function() {{}});
+            return;
+          }}
+        }} catch (e) {{}}
+        if (fallbackUrl) {{
+          window.location.href = fallbackUrl;
+        }}
+      }}
+      document.getElementById("pay-any")?.addEventListener("click", function() {{ openCard(""); }});
+      document.getElementById("pay-uzcard")?.addEventListener("click", function() {{ openCard("uzcard"); }});
+      document.getElementById("pay-humo")?.addEventListener("click", function() {{ openCard("humo"); }});
+      document.getElementById("open-click")?.addEventListener("click", function() {{
+        if (fallbackUrl) {{
+          window.location.href = fallbackUrl;
+        }}
+      }});
+      window.addEventListener("load", function() {{
+        setTimeout(function() {{ openCard(""); }}, 120);
+      }});
+    }})();
+  </script>
+</body>
+</html>"""
 
 
 def _click_amount_matches(*, request_amount: str, expected_amount: int) -> bool:
@@ -878,6 +1018,13 @@ def _append_query_param(url: str, key: str, value: str) -> str:
     base = str(url or "").strip()
     if not base:
         return ""
+    try:
+        parsed = urlsplit(base)
+        existing_keys = {str(k or "").strip() for k, _ in parse_qsl(parsed.query, keep_blank_values=True)}
+        if str(key or "").strip() in existing_keys:
+            return base
+    except Exception:
+        pass
     sep = "&" if "?" in base else "?"
     return f"{base}{sep}{key}={value}"
 
@@ -4233,6 +4380,8 @@ async def billing_click_bot_link(
     plan_code: Literal["sub_week", "sub_2weeks", "sub_month", "sub_year"] = Query(...),
     exp: int = Query(..., ge=1),
     sig: str = Query(..., min_length=16, max_length=128),
+    checkout_mode: Literal["app", "card"] = Query(default="app"),
+    card_type: Optional[str] = Query(default=None),
     db: AsyncSession = Depends(get_db),
 ):
     if not _click_api_configured():
@@ -4267,7 +4416,18 @@ async def billing_click_bot_link(
             )
 
     order_id = f"click_tg_{user.id}_{secrets.token_hex(8)}"
-    payment_url = _click_build_payment_url(order_id=order_id, amount=int(plan["amount"]))
+    safe_card_type = _click_normalize_card_type(card_type)
+    target_return_url = _append_query_param(
+        str(CLICK_RETURN_URL or "").strip(),
+        "click_order_id",
+        str(order_id),
+    )
+    payment_url = _click_build_payment_url(
+        order_id=order_id,
+        amount=int(plan["amount"]),
+        return_url=target_return_url,
+        card_type=(safe_card_type if checkout_mode == "card" else None),
+    )
     row = ClickOrder(
         user_id=int(user.id),
         order_id=order_id,
@@ -4278,6 +4438,16 @@ async def billing_click_bot_link(
     )
     db.add(row)
     await db.commit()
+
+    if str(checkout_mode or "").strip().lower() == "card":
+        html = _render_click_card_checkout_html(
+            order_id=order_id,
+            amount=int(plan["amount"]),
+            return_url=target_return_url,
+            fallback_url=payment_url,
+            default_card_type=safe_card_type,
+        )
+        return HTMLResponse(content=html, status_code=200)
 
     return RedirectResponse(url=payment_url, status_code=302)
 

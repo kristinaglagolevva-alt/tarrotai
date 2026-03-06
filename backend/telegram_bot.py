@@ -513,7 +513,13 @@ def _build_sbp_autopay_link(*, tg_user_id: int, plan_key: str) -> Optional[str]:
     return f"{API_PUBLIC_BASE}/billing/sbp/autopay/bot-link?{query}"
 
 
-def _build_click_payment_link(*, tg_user_id: int, plan_key: str) -> Optional[str]:
+def _build_click_payment_link(
+    *,
+    tg_user_id: int,
+    plan_key: str,
+    checkout_mode: str = "app",
+    card_type: Optional[str] = None,
+) -> Optional[str]:
     if not API_PUBLIC_BASE or not CLICK_BOT_LINK_SECRET:
         return None
     exp = int(time.time()) + int(CLICK_BOT_LINK_TTL_SEC)
@@ -529,6 +535,12 @@ def _build_click_payment_link(*, tg_user_id: int, plan_key: str) -> Optional[str
             "plan_code": str(plan_key).strip().lower(),
             "exp": exp,
             "sig": sig,
+            "checkout_mode": ("card" if str(checkout_mode or "").strip().lower() == "card" else "app"),
+            **(
+                {"card_type": str(card_type).strip().lower()}
+                if str(card_type or "").strip().lower() in {"uzcard", "humo"}
+                else {}
+            ),
         }
     )
     return f"{API_PUBLIC_BASE}/billing/click/bot-link?{query}"
@@ -2410,8 +2422,25 @@ async def buy_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         logger.error("TELEGRAM_PROVIDER_TOKEN is not set for card provider product=%s mode=%s", product_code, provider_mode)
         return
     if provider_mode == "click" and not CLICK_PROVIDER_TOKEN:
-        payment_link = _build_click_payment_link(tg_user_id=tg_user_id, plan_key=plan_key) if tg_user_id > 0 else None
-        if not payment_link:
+        payment_link_app = (
+            _build_click_payment_link(
+                tg_user_id=tg_user_id,
+                plan_key=plan_key,
+                checkout_mode="app",
+            )
+            if tg_user_id > 0
+            else None
+        )
+        payment_link_card = (
+            _build_click_payment_link(
+                tg_user_id=tg_user_id,
+                plan_key=plan_key,
+                checkout_mode="card",
+            )
+            if tg_user_id > 0
+            else None
+        )
+        if not payment_link_app:
             if query.message:
                 await query.message.reply_text(
                     "Оплата через CLICK временно недоступна. Выберите другой способ оплаты."
@@ -2420,8 +2449,13 @@ async def buy_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             return
         if query.message:
             rows = [
-                [InlineKeyboardButton("🇺🇿 Открыть CLICK", url=payment_link)],
-                [InlineKeyboardButton("💳 Оплатить картой через CLICK", url=payment_link)],
+                [InlineKeyboardButton("🇺🇿 Открыть CLICK", url=payment_link_app)],
+                [
+                    InlineKeyboardButton(
+                        "💳 Оплатить картой через CLICK",
+                        url=(payment_link_card or payment_link_app),
+                    )
+                ],
                 [InlineKeyboardButton("⬅️ Назад к способам оплаты", callback_data=f"plan:uz:{plan_key}")],
             ]
             await query.message.reply_text(
@@ -2430,7 +2464,7 @@ async def buy_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
                     f"Тариф: {escape(str(product.get('title') or product_code))}\n"
                     f"Сумма: {_format_amount_label(product)}\n\n"
                     "Нажмите кнопку ниже и завершите оплату в приложении CLICK "
-                    "или банковской картой на странице оплаты CLICK."
+                    "или сразу откройте форму оплаты картой."
                 ),
                 reply_markup=InlineKeyboardMarkup(rows),
                 parse_mode=ParseMode.HTML,

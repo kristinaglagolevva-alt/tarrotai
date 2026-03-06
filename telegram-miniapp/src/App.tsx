@@ -2892,15 +2892,34 @@ useEffect(() => {
   // [PHOTO ANALYSIS] — AI анализ фото расклада (галерея/камера -> бекенд -> LLM)
   // ---------------------------------------------------------------------------------------------
 
+  type PhotoFlowStep = 'start' | 'analyzing' | 'detected' | 'error' | 'result'
+  type PhotoCardItem = {
+    position: string
+    title: string
+    card_index: number | null
+    card_name: string
+    is_reversed: boolean
+    meaning: string
+    confidence: number | null
+  }
+
   const [photoFile, setPhotoFile] = useState<File | null>(null)
   const [photoPreviewUrl, setPhotoPreviewUrl] = useState<string>('')
-  const [photoStatus, setPhotoStatus] = useState<'idle' | 'uploading' | 'done' | 'error'>('idle')
+  const [photoStep, setPhotoStep] = useState<PhotoFlowStep>('start')
+  const [photoBusy, setPhotoBusy] = useState(false)
   const [photoError, setPhotoError] = useState<string>('')
-  const [photoResult, setPhotoResult] = useState<{ description: string; cards?: any[] } | null>(null)
+  const [photoDetectedCards, setPhotoDetectedCards] = useState<PhotoCardItem[]>([])
+  const [photoMainQuestion, setPhotoMainQuestion] = useState('')
+  const [photoInterpretation, setPhotoInterpretation] = useState('')
+  const [photoFollowupQuestion, setPhotoFollowupQuestion] = useState('')
+  const [photoFollowupAnswer, setPhotoFollowupAnswer] = useState('')
+  const [photoFollowupUsed, setPhotoFollowupUsed] = useState(false)
+  const [photoFollowupError, setPhotoFollowupError] = useState('')
+  const [showPhotoActionSheet, setShowPhotoActionSheet] = useState(false)
 
   const galleryInputRef = useRef<HTMLInputElement | null>(null)
   const cameraInputRef = useRef<HTMLInputElement | null>(null)
-  const photoResultRef = useRef<HTMLDivElement | null>(null)
+  const photoReqSeqRef = useRef(0)
 
   useEffect(() => {
     // cleanup old URL
@@ -2932,35 +2951,24 @@ useEffect(() => {
     }
   }, [photoFile])
 
-  useEffect(() => {
-    if (view !== 'photo_analysis') return
-    if (photoStatus !== 'done' || !photoResult) return
-    const t = window.setTimeout(() => {
-      try {
-        photoResultRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
-      } catch {}
-    }, 120)
-    return () => window.clearTimeout(t)
-  }, [photoStatus, photoResult, view])
-
-  const openPhotoAnalysis = () => {
+  const resetPhotoFlow = () => {
     setPhotoFile(null)
-    setPhotoResult(null)
-    setPhotoStatus('idle')
+    setPhotoStep('start')
+    setPhotoBusy(false)
     setPhotoError('')
-    setView('photo_analysis')
+    setPhotoDetectedCards([])
+    setPhotoMainQuestion('')
+    setPhotoInterpretation('')
+    setPhotoFollowupQuestion('')
+    setPhotoFollowupAnswer('')
+    setPhotoFollowupUsed(false)
+    setPhotoFollowupError('')
+    setShowPhotoActionSheet(false)
   }
 
-  const onPhotoInputChange = (e: any) => {
-    const file = (e?.target?.files?.[0] as File | undefined) || null
-    // allow picking the same file again
-    if (e?.target) e.target.value = ''
-
-    if (!file) return
-    setPhotoError('')
-    setPhotoStatus('idle')
-    setPhotoResult(null)
-    setPhotoFile(file)
+  const openPhotoAnalysis = () => {
+    resetPhotoFlow()
+    setView('photo_analysis')
   }
 
   const loadImageFromFile = (file: File) =>
@@ -3050,27 +3058,152 @@ useEffect(() => {
     return msg
   }
 
-  const runPhotoAnalysis = async () => {
-    if (photoStatus === 'uploading') return
+  const normalizePhotoCards = (raw: any): PhotoCardItem[] => {
+    if (!Array.isArray(raw)) return []
+    return raw.slice(0, 10).map((card: any, idx: number) => {
+      const cardIndex = Number(card?.card_index)
+      const confRaw = Number(card?.confidence)
+      const fallbackTitle = String(card?.title || card?.position || `Карта ${idx + 1}`).trim()
+      const fallbackName = String(card?.card_name || card?.title || card?.position || '').trim()
+      return {
+        position: String(card?.position || '').trim(),
+        title: fallbackTitle,
+        card_index: Number.isFinite(cardIndex) ? clamp(Math.round(cardIndex), 0, 77) : null,
+        card_name: fallbackName,
+        is_reversed: Boolean(card?.is_reversed),
+        meaning: String(card?.meaning || '').trim(),
+        confidence: Number.isFinite(confRaw) ? confRaw : null,
+      }
+    })
+  }
 
+  const assessPhotoDetection = (cards: PhotoCardItem[]) => {
+    const known = cards.filter((card) => {
+      const name = String(card.card_name || card.title || '').trim()
+      if (!name) return false
+      return !/^unknown$/i.test(name)
+    })
+    if (!known.length) {
+      return { ok: false as const, reason: 'Карты не распознаны. Попробуйте сделать фото сверху при хорошем свете.' }
+    }
+
+    const confValues = known
+      .map((card) => Number(card.confidence))
+      .filter((v) => Number.isFinite(v))
+    if (confValues.length >= 2) {
+      const avg = confValues.reduce((a, b) => a + b, 0) / confValues.length
+      const top = Math.max(...confValues)
+      if (avg < 0.24 && top < 0.35) {
+        return { ok: false as const, reason: 'Не удалось уверенно распознать карты. Выберите другое фото.' }
+      }
+    }
+
+    return { ok: true as const, cards: known }
+  }
+
+  const buildPhotoFallbackText = (cards: PhotoCardItem[], questionText: string) => {
+    const cardsLine = cards
+      .slice(0, 4)
+      .map((card) => String(card.card_name || card.title || card.position || 'Карта').trim())
+      .filter(Boolean)
+      .join(', ')
+    const main = String(questionText || '').trim()
+      ? `По вашему вопросу сочетание карт (${cardsLine || 'этот расклад'}) показывает необходимость выбрать более устойчивую линию действий.`
+      : `По сочетанию карт (${cardsLine || 'этот расклад'}) видно, что вы в моменте пересмотра приоритетов и внутренней настройки.`
+    return [
+      '## Общий вектор',
+      main,
+      '',
+      '## Рекомендации',
+      '- Отделите факты от тревожных сценариев и не принимайте решения в спешке.',
+      '- Выберите один конкретный шаг, который реально сделать сегодня.',
+      '- На ближайшие 24 часа держите спокойный и последовательный темп.',
+    ].join('\n')
+  }
+
+  const buildPhotoFanLayout = (count: number, compact = false) => {
+    const safeCount = Math.max(1, Math.min(count, 10))
+    const center = (safeCount - 1) / 2
+    const baseSpread = compact ? 24 : 30
+    const baseLift = compact ? 10 : 16
+    const shift = compact ? 30 : 38
+    return Array.from({ length: safeCount }).map((_, idx) => {
+      const rel = center === 0 ? 0 : (idx - center) / center
+      return {
+        rotate: rel * baseSpread,
+        y: Math.abs(rel) * baseLift,
+        x: rel * shift * Math.min(1.45, 0.9 + safeCount * 0.06),
+        depth: 100 - Math.round(Math.abs(rel) * 45) + idx,
+      }
+    })
+  }
+
+  const renderPhotoCardsFan = (cards: PhotoCardItem[], compact = false) => {
+    const source = (cards || []).slice(0, 10)
+    if (!source.length) return null
+    const layout = buildPhotoFanLayout(source.length, compact)
+    const sizeClass = source.length >= 8 ? 'is-dense' : source.length >= 5 ? 'is-mid' : 'is-wide'
+    return (
+      <div className={`photo-cards-fan ${compact ? 'is-compact' : ''} ${sizeClass}`.trim()} aria-label="Распознанные карты">
+        {source.map((card, idx) => {
+          const name = String(card.card_name || card.title || card.position || `Карта ${idx + 1}`).trim()
+          const cardIndex = Number(card.card_index)
+          const imageSrc =
+            Number.isFinite(cardIndex) && cardIndex >= 0 && cardIndex < FRONT_CARD_URLS.length
+              ? FRONT_CARD_URLS[cardIndex]
+              : ''
+          const tr = layout[idx]
+          return (
+            <div
+              key={`photo-card-${idx}-${name}`}
+              className="photo-fan-card"
+              style={{
+                transform: `translateX(${tr.x}px) translateY(${tr.y}px) rotate(${tr.rotate}deg)`,
+                zIndex: tr.depth,
+              }}
+            >
+              {imageSrc ? (
+                <img className={card.is_reversed ? 'is-reversed' : ''} src={imageSrc} alt={name} />
+              ) : (
+                <div className="photo-fan-card__fallback">
+                  <span>{name}</span>
+                </div>
+              )}
+            </div>
+          )
+        })}
+      </div>
+    )
+  }
+
+  const runPhotoDetection = async (incomingFile?: File | null) => {
+    if (photoBusy) return
     if (!token) {
-      setPhotoStatus('error')
+      setPhotoStep('error')
       setPhotoError('Нужен вход через Telegram, чтобы отправить фото на анализ.')
       return
     }
 
-    if (!photoFile) {
-      setPhotoStatus('error')
+    const sourceFile = incomingFile || photoFile
+    if (!sourceFile) {
+      setPhotoStep('error')
       setPhotoError('Выберите фото расклада (из галереи или сделайте снимок).')
       return
     }
 
-    setPhotoStatus('uploading')
+    setPhotoBusy(true)
+    setPhotoStep('analyzing')
     setPhotoError('')
-    setPhotoResult(null)
+    setPhotoDetectedCards([])
+    setPhotoInterpretation('')
+    setPhotoFollowupQuestion('')
+    setPhotoFollowupAnswer('')
+    setPhotoFollowupUsed(false)
+    setPhotoFollowupError('')
 
+    const reqId = photoReqSeqRef.current + 1
+    photoReqSeqRef.current = reqId
     try {
-      const sourceFile = photoFile
       const preparedFile = await optimizePhotoForUpload(sourceFile, false)
 
       let out: any = null
@@ -3080,7 +3213,7 @@ useEffect(() => {
         try {
           out = await analyzeSpreadPhoto(token, fileForAttempt, {
             topic,
-            question: (question || '').trim(),
+            question: '',
           })
           break
         } catch (err: any) {
@@ -3093,25 +3226,170 @@ useEffect(() => {
       }
       if (!out && lastErr) throw lastErr
 
-      setPhotoResult({
-        description: (out as any)?.description || '',
-        cards: (out as any)?.cards || [],
-      })
-      setPhotoStatus('done')
+      if (photoReqSeqRef.current !== reqId) return
+      const normalizedCards = normalizePhotoCards((out as any)?.cards)
+      const detection = assessPhotoDetection(normalizedCards)
+      if (!detection.ok) {
+        setPhotoError(detection.reason)
+        setPhotoStep('error')
+        return
+      }
+      setPhotoDetectedCards(detection.cards || [])
+      setPhotoStep('detected')
       void refreshBilling(token)
     } catch (err: any) {
+      if (photoReqSeqRef.current !== reqId) return
       const raw = String(err?.message || '')
       if (isReadingLimitExceeded(raw)) {
-        setPhotoStatus('idle')
+        setPhotoStep('start')
         setPhotoError('')
         setShowAccessPaywall(true)
         void refreshBilling(token)
         return
       }
-      setPhotoStatus('error')
+      setPhotoStep('error')
       setPhotoError(mapPhotoError(raw))
       void refreshBilling(token)
+    } finally {
+      if (photoReqSeqRef.current === reqId) setPhotoBusy(false)
     }
+  }
+
+  const runPhotoInterpretation = async () => {
+    if (photoBusy) return
+    if (!token || !photoFile) return
+    if (photoStep !== 'detected') return
+
+    setPhotoBusy(true)
+    setPhotoError('')
+    setPhotoFollowupError('')
+
+    const reqId = photoReqSeqRef.current + 1
+    photoReqSeqRef.current = reqId
+    try {
+      const preparedFile = await optimizePhotoForUpload(photoFile, false)
+      const out = await analyzeSpreadPhoto(token, preparedFile, {
+        topic,
+        question: String(photoMainQuestion || '').trim(),
+      })
+      if (photoReqSeqRef.current !== reqId) return
+
+      const normalizedCards = normalizePhotoCards((out as any)?.cards)
+      const detection = assessPhotoDetection(normalizedCards)
+      if (detection.ok && detection.cards?.length) {
+        setPhotoDetectedCards(detection.cards)
+      }
+
+      const desc = String((out as any)?.description || '').trim()
+      setPhotoInterpretation(
+        desc || buildPhotoFallbackText(detection.ok ? (detection.cards || photoDetectedCards) : photoDetectedCards, photoMainQuestion)
+      )
+      setPhotoStep('result')
+      setPhotoFollowupQuestion('')
+      setPhotoFollowupAnswer('')
+      setPhotoFollowupUsed(false)
+      setPhotoFollowupError('')
+      void refreshBilling(token)
+    } catch (err: any) {
+      if (photoReqSeqRef.current !== reqId) return
+      setPhotoError(mapPhotoError(String(err?.message || err || '')))
+    } finally {
+      if (photoReqSeqRef.current === reqId) setPhotoBusy(false)
+    }
+  }
+
+  const runPhotoFollowup = async () => {
+    if (photoBusy || photoFollowupUsed) return
+    if (!token || !photoFile || photoStep !== 'result') return
+
+    const followText = String(photoFollowupQuestion || '').trim()
+    if (!followText) {
+      setPhotoFollowupError('Введите уточняющий вопрос.')
+      return
+    }
+
+    setPhotoBusy(true)
+    setPhotoFollowupError('')
+
+    const reqId = photoReqSeqRef.current + 1
+    photoReqSeqRef.current = reqId
+    try {
+      const preparedFile = await optimizePhotoForUpload(photoFile, false)
+      const mainQ = String(photoMainQuestion || '').trim()
+      const mergedQuestion = mainQ ? `${mainQ}\n\nУточнение: ${followText}` : followText
+      const cardsContext = photoDetectedCards
+        .slice(0, 6)
+        .map((card) => String(card.card_name || card.title || card.position || 'Карта').trim())
+        .filter(Boolean)
+        .join(', ')
+      const out = await analyzeSpreadPhoto(token, preparedFile, {
+        topic,
+        question: mergedQuestion,
+        extra_context: [
+          'Это уточняющий вопрос по уже интерпретированному раскладу.',
+          cardsContext ? `Распознанные карты: ${cardsContext}.` : '',
+          photoInterpretation ? `Первичный ответ: ${photoInterpretation.slice(0, 1100)}` : '',
+        ]
+          .filter(Boolean)
+          .join('\n'),
+      })
+      if (photoReqSeqRef.current !== reqId) return
+      const desc = String((out as any)?.description || '').trim()
+      setPhotoFollowupAnswer(desc || buildPhotoFallbackText(photoDetectedCards, followText))
+      setPhotoFollowupUsed(true)
+      setPhotoFollowupQuestion('')
+      void refreshBilling(token)
+    } catch (err: any) {
+      if (photoReqSeqRef.current !== reqId) return
+      setPhotoFollowupError(mapPhotoError(String(err?.message || err || '')))
+    } finally {
+      if (photoReqSeqRef.current === reqId) setPhotoBusy(false)
+    }
+  }
+
+  const onPhotoInputChange = (e: any) => {
+    const file = (e?.target?.files?.[0] as File | undefined) || null
+    if (e?.target) e.target.value = ''
+    if (!file) return
+    setPhotoFile(file)
+    setShowPhotoActionSheet(false)
+    void runPhotoDetection(file)
+  }
+
+  const openPhotoActionSheet = () => {
+    if (photoBusy) return
+    setShowPhotoActionSheet(true)
+  }
+
+  const pickPhotoSource = (source: 'camera' | 'gallery') => {
+    setShowPhotoActionSheet(false)
+    window.setTimeout(() => {
+      if (source === 'camera') {
+        cameraInputRef.current?.click()
+      } else {
+        galleryInputRef.current?.click()
+      }
+    }, 0)
+  }
+
+  const photoCardsLabel = photoDetectedCards
+    .slice(0, 10)
+    .map((card, idx) => String(card.card_name || card.title || card.position || `Карта ${idx + 1}`).trim())
+    .filter(Boolean)
+    .join(' • ')
+
+  const startNewPhotoReading = () => {
+    resetPhotoFlow()
+    setPhotoStep('start')
+  }
+
+  const retryPhotoDetection = () => {
+    setPhotoError('')
+    if (photoFile) {
+      void runPhotoDetection(photoFile)
+      return
+    }
+    openPhotoActionSheet()
   }
 
   // ---------------------------------------------------------------------------------------------
@@ -5905,10 +6183,9 @@ useEffect(() => {
         {view === 'photo_analysis' && (
           <>
             <h1>AI Taro</h1>
-            <p>AI анализ фото расклада</p>
+            <p>AI анализ расклада по фото</p>
 
-            <div className="photo-page">
-              {/* скрытые инпуты */}
+            <div className={`photo-flow photo-flow--${photoStep}`}>
               <input
                 ref={galleryInputRef}
                 className="photo-input"
@@ -5925,205 +6202,200 @@ useEffect(() => {
                 onChange={onPhotoInputChange}
               />
 
-              {!photoPreviewUrl ? (
-                <div className="photo-guide" aria-label="Советы для съёмки">
-                  <div className="photo-guide__title">Советы для точного анализа</div>
-                  <ul className="photo-guide__list">
-                    <li>Снимайте расклад сверху и целиком.</li>
-                    <li>Используйте ровный свет без бликов и теней.</li>
-                    <li>Оставьте небольшой отступ вокруг карт в кадре.</li>
-                  </ul>
-                </div>
-              ) : null}
+              {(photoStep === 'start' || photoStep === 'error') && (
+                <section className="photo-glass-card photo-glass-card--centered">
+                  <h2 className="photo-flow-title">{photoStep === 'error' ? 'Карты не распознаны' : 'Анализ расклада по фото'}</h2>
+                  <p className="photo-flow-text">
+                    {photoStep === 'error'
+                      ? 'Попробуйте сфотографировать расклад снова или выбрать другое фото.'
+                      : 'Разложите карты и снимите расклад сверху при хорошем свете.'}
+                  </p>
 
-              <div
-                className={`photo-placeholder photo-placeholder--picker ${photoPreviewUrl ? 'has-preview' : ''}`}
-                aria-label={photoPreviewUrl ? 'Предпросмотр фото' : 'Выберите или сделайте фото расклада'}
-              >
-                {photoPreviewUrl ? (
-                  <img className="photo-placeholder__preview" src={photoPreviewUrl} alt="Фото расклада" />
-                ) : (
-                  <>
-                    <span className="photo-placeholder__icon" aria-hidden="true">
-                      <img src={cameraIcon} alt="" />
-                    </span>
-                    <div className="photo-placeholder__text">Выберите или сделайте фото расклада</div>
-                    <div className="photo-placeholder__sub">
-                      После выбора фото этот экран останется в привычном вам виде.
-                    </div>
-                  </>
-                )}
-              </div>
-
-              <div className="photo-actions photo-actions--tiles">
-                <button
-                  type="button"
-                  className="photo-upload-tile photo-upload-tile--gallery"
-                  onClick={() => galleryInputRef.current?.click()}
-                  disabled={photoStatus === 'uploading'}
-                >
-                  <span className="photo-upload-tile__icon" aria-hidden="true">
-                    <svg viewBox="0 0 24 24">
-                      <rect x="3.5" y="5.5" width="17" height="13" rx="2.2" fill="none" stroke="currentColor" strokeWidth="1.8" />
-                      <circle cx="9" cy="10" r="1.3" fill="currentColor" />
-                      <path d="M6.6 16.5l4.4-4 2.4 2 3-2.8 1.7 1.7" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-                    </svg>
-                  </span>
-                  <span className="photo-upload-tile__text">Выбрать из галереи</span>
-                </button>
-
-                <button
-                  type="button"
-                  className="photo-upload-tile photo-upload-tile--camera"
-                  onClick={() => cameraInputRef.current?.click()}
-                  disabled={photoStatus === 'uploading'}
-                >
-                  <span className="photo-upload-tile__icon" aria-hidden="true">
-                    <svg viewBox="0 0 24 24">
-                      <path
-                        d="M4.6 8.5h2.2l1.2-2h8l1.2 2h2.2a1.8 1.8 0 0 1 1.8 1.8v7.4a1.8 1.8 0 0 1-1.8 1.8H4.6a1.8 1.8 0 0 1-1.8-1.8v-7.4a1.8 1.8 0 0 1 1.8-1.8Z"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="1.8"
-                        strokeLinejoin="round"
-                      />
-                      <circle cx="12" cy="13.1" r="3.2" fill="none" stroke="currentColor" strokeWidth="1.8" />
-                    </svg>
-                  </span>
-                  <span className="photo-upload-tile__text">Сделать фото</span>
-                </button>
-              </div>
-
-
-              {/* вопрос */}
-              <div className="photo-question">
-                <div className="photo-question__title">Ваш вопрос</div>
-                <div className={`ask-wrap ${isRecording ? 'is-attn' : ''}`}>
-                  <div className="ask-glass">
-                    <textarea
-                      className="ask-input"
-                      value={question}
-                      onChange={(e) => setQuestion(e.target.value)}
-                      placeholder="Вопрос (необязательно). Например: «Что мне важно понять в отношениях?»"
-                      enterKeyHint="search"
-                      rows={3}
-                    />
-                    <button
-                      type="button"
-                      className={`ask-mic ${isRecording ? 'recording' : ''}`}
-                      onClick={toggleRecording}
-                      aria-label={isRecording ? 'Остановить запись' : 'Начать запись'}
-                      title={isRecording ? 'Остановить запись' : 'Записать голосом'}
-                    >
-                      <img className="ask-mic__icon" src={micIcon} alt="" aria-hidden="true" />
-                    </button>
-                  </div>
-                  <div className={`ask-hint ${isRecording ? 'is-visible' : ''}`}>Идёт запись… нажмите ещё раз, чтобы остановить</div>
-                </div>
-              </div>
-
-              {/* темы (используем тот же переключатель) */}
-              <div
-                className={`seg seg--topics ${isBumping ? 'is-bump' : ''}`}
-                data-bump={bump}
-                style={{
-                  ['--seg-cols' as any]: TOPICS.length,
-                  ['--i' as any]: activeIndex,
-                  ['--from' as any]: prevIndex,
-                }}
-                role="tablist"
-                aria-label="Выбор темы"
-              >
-                <svg className="seg__svg" aria-hidden="true">
-                  <filter id="seg-goo-photo">
-                    <feGaussianBlur in="SourceGraphic" stdDeviation="8" result="blur" />
-                    <feColorMatrix
-                      in="blur"
-                      mode="matrix"
-                      values="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 18 -7"
-                      result="goo"
-                    />
-                    <feComposite in="SourceGraphic" in2="goo" operator="atop" />
-                  </filter>
-                </svg>
-
-                <div className="seg__pill" aria-hidden="true" />
-
-                {TOPICS.map((t) => (
                   <button
-                    key={t.id}
                     type="button"
-                    className={`seg__btn ${topic === t.id ? 'is-active' : ''}`}
-                    onClick={() => onPickTopic(t.id)}
-                    role="tab"
-                    aria-selected={topic === t.id}
+                    className={`photo-upload-block ${photoBusy ? 'is-busy' : ''}`}
+                    onClick={openPhotoActionSheet}
+                    disabled={photoBusy}
                   >
-                    {t.label}
+                    <span className="photo-upload-block__icon" aria-hidden="true">
+                      <svg viewBox="0 0 24 24">
+                        <path
+                          d="M4.6 8.5h2.2l1.2-2h8l1.2 2h2.2a1.8 1.8 0 0 1 1.8 1.8v7.4a1.8 1.8 0 0 1-1.8 1.8H4.6a1.8 1.8 0 0 1-1.8-1.8v-7.4a1.8 1.8 0 0 1 1.8-1.8Z"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="1.8"
+                          strokeLinejoin="round"
+                        />
+                        <circle cx="12" cy="13.1" r="3.2" fill="none" stroke="currentColor" strokeWidth="1.8" />
+                      </svg>
+                    </span>
+                    <span className="photo-upload-block__title">{photoStep === 'error' ? 'Сделать фото снова' : 'Сделать фото'}</span>
+                    <span className="photo-upload-block__sub">или выбрать из галереи</span>
                   </button>
-                ))}
-              </div>
 
-              <div className="photo-cta">
-                <button
-                  type="button"
-                  className={`glass-cta ${photoStatus === 'uploading' ? 'is-loading' : ''}`}
-                  onClick={runPhotoAnalysis}
-                  disabled={photoStatus === 'uploading'}
-                >
-                  <span className="glass-cta__inner">
-                    <span className="glass-cta__rim" aria-hidden="true" />
-                    <span className="glass-cta__text">{photoStatus === 'uploading' ? 'Анализируем фото…' : 'Начать AI-анализ фото'}</span>
-                    <span className="glass-cta__spark" aria-hidden="true" />
-                  </span>
-                </button>
+                  {photoStep === 'error' && photoFile && (
+                    <button type="button" className="photo-ghost-btn" onClick={retryPhotoDetection} disabled={photoBusy}>
+                      Повторить с этим фото
+                    </button>
+                  )}
 
-              </div>
-
-              {photoError ? <div className="photo-error">{photoError}</div> : null}
-
-              {photoResult && (
-                <div ref={photoResultRef} className="photo-result">
-                  <div className="result-card">
-                    <div className="result-card__title">Результат AI анализа</div>
-                    <div className="result-card__name">Фото расклада</div>
-
-                    <div className="result-card__scroll">
-                      {renderSafetyNotice(question)}
-
-                      {photoResult.description
-                        ? <MarkdownText text={photoResult.description || ''} />
-                        : (
-                          <p style={{ marginTop: 0, marginBottom: 0, opacity: 0.8 }}>
-                            Ответ пустой. Проверьте бэкенд/LLM и попробуйте ещё раз.
-                          </p>
-                        )}
-
-                      {Array.isArray(photoResult.cards) && photoResult.cards.length > 0 ? (
-                        <div style={{ marginTop: 16 }}>
-                          <p style={{ marginTop: 0, marginBottom: 10, opacity: 0.85 }}>
-                            <b>Распознанные карты:</b>
-                          </p>
-
-                          {photoResult.cards.map((c: any, idx: number) => (
-                            <div key={idx} style={{ marginTop: idx === 0 ? 0 : 12 }}>
-                              <p style={{ marginTop: 0, marginBottom: 6 }}>
-                                <b>
-                                  {c.position ? `${c.position}: ` : ''}
-                                  {c.card_name || c.title || 'Карта'}
-                                  {c.is_reversed ? ' (перевёрнутая)' : ''}
-                                </b>
-                              </p>
-
-                              <MarkdownText text={String(c.meaning || '') || ''} />
-                            </div>
-                          ))}
-                        </div>
-                      ) : null}
+                  {photoPreviewUrl && (
+                    <div className="photo-preview-frame photo-preview-frame--soft">
+                      <img src={photoPreviewUrl} alt="Фото расклада" />
                     </div>
+                  )}
+
+                  {photoError ? <div className="photo-stage-error">{photoError}</div> : null}
+                </section>
+              )}
+
+              {photoStep === 'analyzing' && (
+                <section className="photo-glass-card">
+                  <h2 className="photo-flow-title">Анализируем расклад</h2>
+                  <div className="photo-preview-frame photo-preview-frame--scanning">
+                    {photoPreviewUrl ? (
+                      <img src={photoPreviewUrl} alt="Фото расклада" />
+                    ) : (
+                      <div className="photo-preview-frame__empty">Подготовка фото…</div>
+                    )}
                   </div>
-                </div>
+                  <div className="photo-stage-status">Распознаем карты…</div>
+                </section>
+              )}
+
+              {photoStep === 'detected' && (
+                <section className="photo-glass-card">
+                  <h2 className="photo-flow-title">Карты найдены</h2>
+                  <div className="photo-cards-stage">
+                    {renderPhotoCardsFan(photoDetectedCards, false)}
+                  </div>
+                  {photoCardsLabel ? <div className="photo-cards-label">{photoCardsLabel}</div> : null}
+
+                  <div className="photo-field">
+                    <label className="photo-field__label" htmlFor="photo-main-question">Ваш вопрос</label>
+                    <textarea
+                      id="photo-main-question"
+                      className="photo-field__input"
+                      value={photoMainQuestion}
+                      onChange={(e) => setPhotoMainQuestion(e.target.value)}
+                      placeholder="Что мне важно понять?"
+                      rows={3}
+                      enterKeyHint="send"
+                    />
+                  </div>
+
+                  <button
+                    type="button"
+                    className={`glass-cta photo-main-cta ${photoBusy ? 'is-loading' : ''}`}
+                    onClick={runPhotoInterpretation}
+                    disabled={photoBusy}
+                  >
+                    <span className="glass-cta__inner">
+                      <span className="glass-cta__rim" aria-hidden="true" />
+                      <span className="glass-cta__text">{photoBusy ? 'Готовим ответ…' : 'Получить ответ'}</span>
+                      <span className="glass-cta__spark" aria-hidden="true" />
+                    </span>
+                  </button>
+
+                  <button type="button" className="photo-ghost-btn" onClick={openPhotoActionSheet} disabled={photoBusy}>
+                    Выбрать другое фото
+                  </button>
+                  {photoError ? <div className="photo-stage-error">{photoError}</div> : null}
+                </section>
+              )}
+
+              {photoStep === 'result' && (
+                <section className="photo-glass-card photo-glass-card--result">
+                  <h2 className="photo-flow-title">Ваш расклад</h2>
+                  <div className="photo-cards-stage is-compact">
+                    {renderPhotoCardsFan(photoDetectedCards, true)}
+                  </div>
+
+                  <div className="photo-reading-card">
+                    <div className="photo-reading-card__title">Интерпретация</div>
+                    {renderSafetyNotice(photoMainQuestion)}
+                    {photoInterpretation ? (
+                      <MarkdownText text={photoInterpretation} />
+                    ) : (
+                      <p style={{ margin: 0, opacity: 0.8 }}>Не удалось получить интерпретацию. Попробуйте ещё раз.</p>
+                    )}
+                  </div>
+
+                  <div className="photo-followup-card">
+                    <div className="photo-reading-card__title">Уточнить по раскладу</div>
+
+                    {!photoFollowupUsed && (
+                      <>
+                        <textarea
+                          className="photo-field__input photo-field__input--sm"
+                          value={photoFollowupQuestion}
+                          onChange={(e) => setPhotoFollowupQuestion(e.target.value)}
+                          placeholder="Например: что это значит для отношений?"
+                          rows={2}
+                          enterKeyHint="send"
+                        />
+                        <button
+                          type="button"
+                          className={`glass-cta photo-main-cta photo-main-cta--small ${photoBusy ? 'is-loading' : ''}`}
+                          onClick={runPhotoFollowup}
+                          disabled={photoBusy || !String(photoFollowupQuestion || '').trim()}
+                        >
+                          <span className="glass-cta__inner">
+                            <span className="glass-cta__rim" aria-hidden="true" />
+                            <span className="glass-cta__text">{photoBusy ? 'Готовим ответ…' : 'Задать вопрос'}</span>
+                            <span className="glass-cta__spark" aria-hidden="true" />
+                          </span>
+                        </button>
+                      </>
+                    )}
+
+                    {photoFollowupError ? <div className="photo-stage-error">{photoFollowupError}</div> : null}
+
+                    {photoFollowupAnswer && (
+                      <div className="photo-followup-answer">
+                        <MarkdownText text={photoFollowupAnswer} />
+                      </div>
+                    )}
+
+                    {photoFollowupUsed && (
+                      <div className="photo-followup-note">
+                        Дополнительный вопрос уже использован. Чтобы получить новый разбор, начните новый расклад.
+                      </div>
+                    )}
+                  </div>
+
+                  <button
+                    type="button"
+                    className="glass-cta photo-main-cta"
+                    onClick={startNewPhotoReading}
+                    disabled={photoBusy}
+                  >
+                    <span className="glass-cta__inner">
+                      <span className="glass-cta__rim" aria-hidden="true" />
+                      <span className="glass-cta__text">Новый расклад</span>
+                      <span className="glass-cta__spark" aria-hidden="true" />
+                    </span>
+                  </button>
+                </section>
               )}
             </div>
+
+            {showPhotoActionSheet && (
+              <div className="photo-sheet-overlay" onClick={() => setShowPhotoActionSheet(false)}>
+                <div className="photo-sheet-card" onClick={(e) => e.stopPropagation()}>
+                  <div className="photo-sheet-title">Выберите действие</div>
+                  <button type="button" className="photo-sheet-btn" onClick={() => pickPhotoSource('camera')}>
+                    Сделать фото
+                  </button>
+                  <button type="button" className="photo-sheet-btn" onClick={() => pickPhotoSource('gallery')}>
+                    Выбрать из галереи
+                  </button>
+                  <button type="button" className="photo-sheet-btn photo-sheet-btn--cancel" onClick={() => setShowPhotoActionSheet(false)}>
+                    Отмена
+                  </button>
+                </div>
+              </div>
+            )}
           </>
         )}
 

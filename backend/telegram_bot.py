@@ -99,12 +99,9 @@ YOOKASSA_REQUIRE_RECEIPT = str(os.environ.get("YOOKASSA_REQUIRE_RECEIPT", "1")).
 YOOKASSA_VAT_CODE = int(os.environ.get("YOOKASSA_VAT_CODE", "1"))
 YOOKASSA_CONTACT_MODE = (os.environ.get("YOOKASSA_CONTACT_MODE") or "email").strip().lower()
 ENABLE_YOOKASSA_PAYMENTS = str(os.environ.get("ENABLE_YOOKASSA_PAYMENTS", "1")).strip().lower() not in {"0", "false", "no"}
-ENABLE_STARS_FALLBACK = str(os.environ.get("ENABLE_STARS_FALLBACK", "1")).strip().lower() not in {"0", "false", "no"}
 ENABLE_CLICK_PAYMENTS = str(os.environ.get("ENABLE_CLICK_PAYMENTS", "0")).strip().lower() not in {"0", "false", "no"}
 CLICK_SERVICE_ID = _env_int("CLICK_SERVICE_ID", 0)
 CLICK_MERCHANT_ID = _env_int("CLICK_MERCHANT_ID", 0)
-STARS_SUB_2WEEKS = max(1, int(os.environ.get("STARS_SUB_2WEEKS", "120")))
-STARS_SUB_MONTH = max(1, int(os.environ.get("STARS_SUB_MONTH", "199")))
 CLICK_CURRENCY = (os.environ.get("CLICK_CURRENCY") or "UZS").strip().upper()
 CLICK_SUB_2WEEKS_AMOUNT = max(0, int(os.environ.get("CLICK_SUB_2WEEKS_AMOUNT", "0")))
 CLICK_SUB_MONTH_AMOUNT = max(0, int(os.environ.get("CLICK_SUB_MONTH_AMOUNT", "0")))
@@ -173,32 +170,6 @@ PRODUCTS: List[Dict[str, Any]] = [
         "priority": 20,
         "currency": "RUB",
         "provider_mode": "yookassa",
-    },
-    {
-        "code": "sub_2weeks_xtr",
-        "menu_label": f"⭐ Безлимит на 2 недели — {STARS_SUB_2WEEKS} Stars",
-        "menu_hint": "Резервный способ оплаты через Telegram Stars (обычно работает на iPhone/вне РФ).",
-        "title": "Безлимит на 2 недели (Stars)",
-        "description": "Подписка AI Tarot на 14 дней (Telegram Stars)",
-        "amount": STARS_SUB_2WEEKS,
-        "kind": "subscription",
-        "days": 14,
-        "priority": 110,
-        "currency": "XTR",
-        "provider_mode": "stars",
-    },
-    {
-        "code": "sub_month_xtr",
-        "menu_label": f"⭐ Безлимит на месяц — {STARS_SUB_MONTH} Stars",
-        "menu_hint": "Резервный способ оплаты через Telegram Stars (обычно работает на iPhone/вне РФ).",
-        "title": "Безлимит на месяц (Stars)",
-        "description": "Подписка AI Tarot на 30 дней (Telegram Stars)",
-        "amount": STARS_SUB_MONTH,
-        "kind": "subscription",
-        "days": 30,
-        "priority": 120,
-        "currency": "XTR",
-        "provider_mode": "stars",
     },
     {
         "code": "sub_2weeks_click",
@@ -379,8 +350,6 @@ def _products_for_mode(mode: str = "menu") -> List[Dict[str, Any]]:
     click_available = bool(ENABLE_CLICK_PAYMENTS and (CLICK_PROVIDER_TOKEN or click_link_available))
     if not ENABLE_YOOKASSA_PAYMENTS:
         items = [p for p in items if str(p.get("provider_mode") or "").lower() != "yookassa"]
-    if not ENABLE_STARS_FALLBACK:
-        items = [p for p in items if str(p.get("currency") or "RUB").upper() != "XTR"]
     if not click_available:
         items = [p for p in items if str(p.get("provider_mode") or "").lower() != "click"]
     items = [p for p in items if int(p.get("amount") or 0) > 0]
@@ -397,8 +366,6 @@ def _plan_key_from_code(code: str) -> str:
     raw = str(code or "").strip().lower()
     if raw.endswith("_click"):
         return raw[:-6]
-    if raw.endswith("_xtr"):
-        return raw[:-4]
     return raw
 
 
@@ -412,8 +379,6 @@ def _format_amount_label(product: Dict[str, Any]) -> str:
         return f"{rub:.2f} ₽".replace(".", ",")
     if currency == "UZS":
         return f"{amount:,}".replace(",", " ") + " UZS"
-    if currency == "XTR":
-        return f"{amount} Stars"
     return f"{amount} {currency}"
 
 
@@ -459,11 +424,6 @@ def _available_plan_keys_for_country(country_code: str) -> List[str]:
         for p in visible
         if str(p.get("provider_mode") or "").lower() == "click"
     }
-    stars_keys = {
-        _plan_key_from_code(p.get("code") or "")
-        for p in visible
-        if str(p.get("provider_mode") or "").lower() == "stars"
-    }
     visible_keys = {_plan_key_from_code(p.get("code") or "") for p in visible}
 
     result: List[str] = []
@@ -471,13 +431,13 @@ def _available_plan_keys_for_country(country_code: str) -> List[str]:
         if key not in visible_keys:
             continue
         if safe_country == "uz":
-            if key in click_keys or key in card_keys or key in stars_keys:
+            if key in click_keys or key in card_keys:
                 result.append(key)
         elif safe_country == "ru":
-            if key in card_keys or key in stars_keys:
+            if key in card_keys:
                 result.append(key)
         else:
-            if key in card_keys or key in stars_keys:
+            if key in card_keys:
                 result.append(key)
     return result
 
@@ -488,7 +448,6 @@ def _plan_summary_label(plan_key: str, country_code: str) -> str:
 
     card_product = _product_for_plan_and_provider(plan_key, "yookassa")
     click_product = _product_for_plan_and_provider(plan_key, "click")
-    stars_product = _product_for_plan_and_provider(plan_key, "stars")
 
     if safe_country == "uz" and click_product:
         return f"{title} — {_format_amount_label(click_product)}"
@@ -496,8 +455,6 @@ def _plan_summary_label(plan_key: str, country_code: str) -> str:
         return f"{title} — {_format_amount_label(card_product)}"
     if click_product:
         return f"{title} — {_format_amount_label(click_product)}"
-    if stars_product:
-        return f"{title} — {_format_amount_label(stars_product)}"
     return title
 
 
@@ -555,7 +512,6 @@ def _method_keyboard(plan_key: str, country_code: str) -> InlineKeyboardMarkup:
 
     card_product = _product_for_plan_and_provider(plan_key, "yookassa")
     click_product = _product_for_plan_and_provider(plan_key, "click")
-    stars_product = _product_for_plan_and_provider(plan_key, "stars")
 
     if safe_country == "ru":
         if card_product:
@@ -614,16 +570,6 @@ def _method_keyboard(plan_key: str, country_code: str) -> InlineKeyboardMarkup:
                 ]
             )
 
-    if stars_product:
-        rows.append(
-            [
-                InlineKeyboardButton(
-                    f"⭐ Telegram Stars — {_format_amount_label(stars_product)}",
-                    callback_data=f"buy:{stars_product['code']}",
-                )
-            ]
-        )
-
     rows.append([InlineKeyboardButton("⬅️ Назад к планам", callback_data=f"country:{safe_country}")])
     return InlineKeyboardMarkup(rows)
 
@@ -635,7 +581,6 @@ def _format_methods_text(plan_key: str, country_code: str) -> str:
 
     card_product = _product_for_plan_and_provider(plan_key, "yookassa")
     click_product = _product_for_plan_and_provider(plan_key, "click")
-    stars_product = _product_for_plan_and_provider(plan_key, "stars")
 
     if safe_country == "ru":
         if card_product:
@@ -652,9 +597,6 @@ def _format_methods_text(plan_key: str, country_code: str) -> str:
         if card_product:
             methods.append(f"• Карта МИР / ЮMoney — {_format_amount_label(card_product)}")
             methods.append("• Извините, Visa/Mastercard пока не поддерживаются. Доступны МИР и ЮMoney")
-
-    if stars_product:
-        methods.append(f"• Telegram Stars — {_format_amount_label(stars_product)}")
 
     if not methods:
         methods.append("• Способы оплаты временно недоступны")
@@ -2187,7 +2129,7 @@ async def buy_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         return
 
     currency = str(product.get("currency") or "RUB").upper()
-    provider_mode = str(product.get("provider_mode") or ("stars" if currency == "XTR" else "yookassa")).lower()
+    provider_mode = str(product.get("provider_mode") or "yookassa").lower()
     if provider_mode == "yookassa" and not PROVIDER_TOKEN:
         if query.message:
             await query.message.reply_text(
@@ -2270,8 +2212,12 @@ async def buy_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     elif provider_mode == "click":
         invoice_kwargs["provider_token"] = CLICK_PROVIDER_TOKEN
     else:
-        # В PTB параметр provider_token обязателен в сигнатуре даже для Telegram Stars.
-        invoice_kwargs["provider_token"] = ""
+        logger.error("Unsupported provider_mode=%s for product=%s", provider_mode, product_code)
+        if query.message:
+            await query.message.reply_text("Этот способ оплаты сейчас недоступен. Выберите другой вариант.")
+        ORDERS[payload]["status"] = "failed"
+        ORDERS[payload]["error"] = f"unsupported_provider_mode:{provider_mode}"
+        return
 
     try:
         await context.bot.send_invoice(**invoice_kwargs)

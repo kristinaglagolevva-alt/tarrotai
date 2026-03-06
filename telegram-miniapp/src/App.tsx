@@ -2074,36 +2074,36 @@ useEffect(() => {
     if (!askInputFocused) return
     if (!(view === 'home' && navTab === 'main')) return
 
-    const ensureVisible = (behavior: ScrollBehavior) => {
-      const scroller = contentRef.current
+    const scrollQuestionIntoView = (behavior: ScrollBehavior) => {
       const askWrap = askWrapRef.current
-      if (!scroller || !askWrap) return
+      if (!askWrap) return
+
+      try {
+        askWrap.scrollIntoView({ behavior, block: 'start', inline: 'nearest' })
+      } catch {
+        askWrap.scrollIntoView()
+      }
+
+      const scroller = contentRef.current
+      const footerRect = homePrimaryFooterRef.current?.getBoundingClientRect()
+      if (!scroller || !footerRect) return
 
       const scrollerRect = scroller.getBoundingClientRect()
       const askRect = askWrap.getBoundingClientRect()
-      const footerRect = homePrimaryFooterRef.current?.getBoundingClientRect()
-      const footerHeight = footerRect?.height ?? 84
-      const topSafe = scrollerRect.top + 72
-      const bottomSafe = scrollerRect.bottom - footerHeight - 12
-
-      let delta = 0
+      const bottomSafe = scrollerRect.bottom - footerRect.height - 12
       if (askRect.bottom > bottomSafe) {
-        delta = askRect.bottom - bottomSafe
-      } else if (askRect.top < topSafe) {
-        delta = askRect.top - topSafe
-      }
-
-      if (Math.abs(delta) > 2) {
-        scroller.scrollBy({ top: delta, behavior })
+        scroller.scrollBy({ top: askRect.bottom - bottomSafe + 8, behavior })
       }
     }
 
-    ensureVisible('auto')
-    const t1 = window.setTimeout(() => ensureVisible('smooth'), 80)
-    const t2 = window.setTimeout(() => ensureVisible('smooth'), 260)
+    scrollQuestionIntoView('auto')
+    const t1 = window.setTimeout(() => scrollQuestionIntoView('smooth'), 90)
+    const t2 = window.setTimeout(() => scrollQuestionIntoView('smooth'), 240)
+    const t3 = window.setTimeout(() => scrollQuestionIntoView('smooth'), 420)
     return () => {
       window.clearTimeout(t1)
       window.clearTimeout(t2)
+      window.clearTimeout(t3)
     }
   }, [askInputFocused, keyboardInset, navTab, view])
 

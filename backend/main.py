@@ -50,7 +50,12 @@ from telegram_auth import validate_init_data
 from jwt import create_jwt, decode_jwt
 
 from tarot_deck import get_card_by_index, DECK_SIZE
-from llm_card_of_day import generate_card_text_llm, generate_spread_text_llm, generate_photo_analysis_llm
+from llm_card_of_day import (
+    generate_card_text_llm,
+    generate_spread_text_llm,
+    generate_photo_analysis_llm,
+    generate_photo_followup_llm,
+)
 from features.common.flags import FEATURE_FLAGS
 from features.common.timezone import resolve_tz_name
 from features.analytics.schemas import KpiOut, GrowthOut
@@ -1834,6 +1839,22 @@ class PhotoAnalysisOut(BaseModel):
     topic: str = "other"
     question: str = ""
     spread_type: str = "photo_analysis"
+
+
+class PhotoFollowupIn(BaseModel):
+    topic: str = "other"
+    main_question: str = ""
+    followup_question: str = ""
+    cards: List[ReadingCard] = Field(default_factory=list)
+    base_interpretation: str = ""
+    extra_context: str = ""
+
+
+class PhotoFollowupOut(BaseModel):
+    description: str
+    topic: str = "other"
+    question: str = ""
+    spread_type: str = "photo_analysis_followup"
 
 
 # ================================== AUTH ==================================
@@ -5400,6 +5421,91 @@ async def photo_analysis(
         "topic": topic,
         "question": question,
         "spread_type": "photo_analysis",
+    }
+
+
+@app.post("/photo-analysis/followup", response_model=PhotoFollowupOut)
+async def photo_analysis_followup(
+    payload: PhotoFollowupIn,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    followup_question = str(payload.followup_question or "").strip()
+    if not followup_question:
+        raise HTTPException(status_code=400, detail="followup_question is required")
+
+    cards_for_prompt: List[dict] = []
+    for c in list(payload.cards or []):
+        try:
+            if hasattr(c, "model_dump"):
+                cards_for_prompt.append(dict(c.model_dump()))
+            else:
+                cards_for_prompt.append(dict(c.dict()))
+        except Exception:
+            continue
+
+    context_parts: List[str] = []
+    extra_context = str(payload.extra_context or "").strip()
+    if extra_context:
+        context_parts.append(extra_context)
+
+    main_q = str(payload.main_question or "").strip()
+    if main_q:
+        context_parts.append(f"Первичный вопрос: {main_q}")
+
+    base_interp = str(payload.base_interpretation or "").strip()
+    if base_interp:
+        base_excerpt = base_interp[:1400].rstrip()
+        if len(base_interp) > 1400:
+            base_excerpt += "..."
+        context_parts.append(f"Первичный ответ: {base_excerpt}")
+
+    _, memory_prompt_context, _ = await _memory_context_for_user(
+        db,
+        current_user,
+        question=followup_question,
+        current_cards=cards_for_prompt,
+    )
+    if memory_prompt_context:
+        context_parts.append(memory_prompt_context)
+
+    description = ""
+    try:
+        description = await generate_photo_followup_llm(
+            topic=str(payload.topic or "other"),
+            main_question=main_q,
+            followup_question=followup_question,
+            cards=cards_for_prompt,
+            base_interpretation=base_interp,
+            extra_context="\n\n".join([p for p in context_parts if str(p).strip()]),
+            require_llm=False,
+        )
+    except Exception as exc:
+        log.warning("photo followup llm failed: %s", repr(exc))
+
+    description = str(description or "").strip()
+    if not description:
+        card_hints: List[str] = []
+        for idx, c in enumerate(cards_for_prompt[:3], start=1):
+            name = str(c.get("card_name") or c.get("title") or f"Карта {idx}").strip()
+            orient = "перевёрнутая" if bool(c.get("is_reversed")) else "прямая"
+            if name:
+                card_hints.append(f"- {name} ({orient})")
+        cards_block = "\n".join(card_hints) if card_hints else "- Карты в этом уточнении не удалось извлечь"
+        description = (
+            "## Ответ на ваш вопрос\n"
+            "По этому раскладу ответ на уточнение лучше читать через текущий контекст карт, а не как новый расклад.\n\n"
+            "## Почему так по картам\n"
+            f"{cards_block}\n\n"
+            "## Что сделать сейчас\n"
+            "Сделайте один конкретный шаг по вашему вопросу в ближайшие 24 часа и сверяйтесь с этим раскладом как с ориентиром."
+        )
+
+    return {
+        "description": description,
+        "topic": str(payload.topic or "other"),
+        "question": followup_question,
+        "spread_type": "photo_analysis_followup",
     }
 
 

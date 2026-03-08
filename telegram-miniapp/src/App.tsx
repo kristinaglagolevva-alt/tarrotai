@@ -15,6 +15,7 @@ import {
   createCardOfDay,
   getUnifiedHistory,
   analyzeSpreadPhoto,
+  askPhotoFollowup,
   createReading,
 } from './api'
 import type {
@@ -3537,7 +3538,7 @@ useEffect(() => {
 
   const runPhotoFollowup = async () => {
     if (photoBusy || photoFollowupUsed) return
-    if (!token || !photoFile || photoStep !== 'result') return
+    if (!token || photoStep !== 'result') return
 
     const followText = String(photoFollowupQuestion || '').trim()
     if (!followText) {
@@ -3551,24 +3552,20 @@ useEffect(() => {
     const reqId = photoReqSeqRef.current + 1
     photoReqSeqRef.current = reqId
     try {
-      const preparedFile = await optimizePhotoForUpload(photoFile, false)
       const mainQ = String(photoMainQuestion || '').trim()
-      const mergedQuestion = mainQ ? `${mainQ}\n\nУточнение: ${followText}` : followText
-      const cardsContext = photoDetectedCards
-        .slice(0, 6)
-        .map((card) => String(card.card_name || card.title || card.position || 'Карта').trim())
-        .filter(Boolean)
-        .join(', ')
-      const out = await analyzeSpreadPhoto(token, preparedFile, {
+      const out = await askPhotoFollowup(token, {
         topic,
-        question: mergedQuestion,
-        extra_context: [
-          'Это уточняющий вопрос по уже интерпретированному раскладу.',
-          cardsContext ? `Распознанные карты: ${cardsContext}.` : '',
-          photoInterpretation ? `Первичный ответ: ${photoInterpretation.slice(0, 1100)}` : '',
-        ]
-          .filter(Boolean)
-          .join('\n'),
+        main_question: mainQ,
+        followup_question: followText,
+        cards: photoDetectedCards.map((card) => ({
+          position: card.position || '',
+          title: card.title || '',
+          card_index: Number.isFinite(Number(card.card_index)) ? Number(card.card_index) : null,
+          card_name: card.card_name || '',
+          is_reversed: !!card.is_reversed,
+          meaning: card.meaning || '',
+        })),
+        base_interpretation: photoInterpretation || '',
       })
       if (photoReqSeqRef.current !== reqId) return
       const desc = String((out as any)?.description || '').trim()

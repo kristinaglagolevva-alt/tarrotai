@@ -1424,3 +1424,63 @@ async def generate_photo_analysis_llm(
         description = _build_photo_fallback_description(topic, question, selected_cards)
 
     return (description, selected_cards)
+
+
+async def generate_photo_followup_llm(
+    *,
+    topic: str,
+    main_question: str,
+    followup_question: str,
+    cards: List[dict],
+    base_interpretation: str = "",
+    extra_context: str = "",
+    require_llm: bool = True,
+) -> str:
+    """
+    Follow-up answer for an already recognized spread.
+    Must answer the concrete user follow-up, not generate a full new spread interpretation.
+    """
+    api_key = _env("OPENAI_API_KEY")
+    has_relay = _relay_enabled()
+    if not api_key and not has_relay:
+        if require_llm:
+            raise RuntimeError("OPENAI_API_KEY is missing (and OPENAI_RELAY_URL is not set)")
+        return ""
+
+    text_model = _env("OPENAI_PHOTO_TEXT_MODEL", _env("OPENAI_MODEL", "gpt-4.1-mini"))
+    cards_block = _cards_for_prompt(list(cards or []), limit=10)
+    base_excerpt = str(base_interpretation or "").strip()
+    if len(base_excerpt) > 1400:
+        base_excerpt = base_excerpt[:1400].rstrip() + "..."
+
+    system_prompt = (
+        "Ты AI-таролог. Ответь только на уточняющий вопрос пользователя по уже имеющемуся раскладу.\n"
+        "Важно:\n"
+        "- Не делай новый расклад и не пересобирай полный общий разбор заново.\n"
+        "- Опирайся на уже распознанные карты и прошлую интерпретацию как контекст.\n"
+        "- Дай короткий, понятный, прикладной ответ (90-180 слов), без воды.\n"
+        "- Если данных мало, скажи это мягко и честно, без домыслов.\n"
+        "Структура markdown:\n"
+        "## Ответ на ваш вопрос\n"
+        "## Почему так по картам\n"
+        "## Что сделать сейчас\n"
+    )
+
+    user_prompt = (
+        f"Тема: {topic}\n"
+        f"Первичный вопрос: {main_question}\n"
+        f"Уточняющий вопрос: {followup_question}\n\n"
+        f"Распознанные карты:\n{cards_block if cards_block else '(нет уверенно распознанных карт)'}\n\n"
+        f"Первичная интерпретация:\n{base_excerpt or '(нет)'}\n\n"
+        f"Доп. контекст:\n{extra_context or '(нет)'}\n\n"
+        "Ответь именно на уточняющий вопрос."
+    )
+
+    text = (await _call_openai(
+        system_prompt,
+        user_prompt,
+        model=text_model,
+        temperature=0.25,
+        max_tokens=520,
+    )).strip()
+    return _sanitize_memory_meta_phrases(text or "")

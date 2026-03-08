@@ -366,6 +366,31 @@ export type PhotoAnalysisOutDto = {
   spread_type?: string
 }
 
+export type PhotoFollowupCardDto = {
+  position?: string
+  title?: string
+  card_index?: number | null
+  card_name?: string
+  is_reversed?: boolean
+  meaning?: string
+}
+
+export type PhotoFollowupInDto = {
+  topic?: string
+  main_question?: string
+  followup_question: string
+  cards?: PhotoFollowupCardDto[]
+  base_interpretation?: string
+  extra_context?: string
+}
+
+export type PhotoFollowupOutDto = {
+  description: string
+  topic?: string
+  question?: string
+  spread_type?: string
+}
+
 export type PhotoAnalysisParams = {
   topic?: string
   question?: string
@@ -414,4 +439,18 @@ export async function analyzeSpreadPhoto(
 
   const text = await readTextSafe(r)
   return { description: text || '' }
+}
+
+export async function askPhotoFollowup(
+  token: string,
+  payload: PhotoFollowupInDto
+): Promise<PhotoFollowupOutDto> {
+  return apiJson(`${API_BASE}/photo-analysis/followup`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify(payload || {}),
+  })
 }

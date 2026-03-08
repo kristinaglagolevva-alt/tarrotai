@@ -823,8 +823,34 @@ const SUPPORT_URL = `https://t.me/${BOT_USERNAME}?start=support`
 const TERMS_URL = `https://t.me/${BOT_USERNAME}?start=terms`
 const PRIVACY_URL = `https://t.me/${BOT_USERNAME}?start=privacy`
 const LEGAL_CONSENT_VERSION = '2026-02-25-v1'
+const HOME_TOUR_VERSION = '2026-03-08-v1'
 const TERMS_PDF_URL = '/docs/ai_taro_user_agreement_draft.pdf'
 const PRIVACY_PDF_URL = '/docs/ai_taro_privacy_policy_draft.pdf'
+
+type HomeTourStepId = 'card_day' | 'photo' | 'question_zone' | 'cta'
+
+const HOME_TOUR_STEPS: Array<{ id: HomeTourStepId; title: string; text: string }> = [
+  {
+    id: 'card_day',
+    title: 'Карта дня',
+    text: 'Нажмите здесь, чтобы открыть вашу карту дня и получить короткий AI-разбор на сегодня.',
+  },
+  {
+    id: 'photo',
+    title: 'Фото расклада',
+    text: 'Загрузите реальный расклад на фото, и AI распознает карты и соберет интерпретацию по ним.',
+  },
+  {
+    id: 'question_zone',
+    title: 'Вопрос и тип расклада',
+    text: 'Сначала напишите, что вас волнует, затем выберите категорию и формат расклада ниже.',
+  },
+  {
+    id: 'cta',
+    title: 'Запуск расклада',
+    text: 'Когда тип расклада выбран, нажмите кнопку «Начать расклад» внизу экрана.',
+  },
+]
 
 type LegalDocKind = 'terms' | 'privacy'
 
@@ -1006,6 +1032,8 @@ const [billing, setBilling] = useState<BillingStatus | null>(null)
 const [authStatus, setAuthStatus] = useState<AuthStatus>('loading')
 const [authError, setAuthError] = useState<string>('')
 const [authRetryNonce, setAuthRetryNonce] = useState(0)
+const [showHomeTour, setShowHomeTour] = useState(false)
+const [homeTourIndex, setHomeTourIndex] = useState(0)
 const [sbpOrderId, setSbpOrderId] = useState<string | null>(() => {
   try {
     const v = localStorage.getItem('sbp_pending_order_id')
@@ -2660,11 +2688,74 @@ useEffect(() => {
   const contentRef = useRef<HTMLDivElement | null>(null)
   const starsCanvasRef = useRef<HTMLCanvasElement | null>(null)
   const cometsCanvasRef = useRef<HTMLCanvasElement | null>(null)
+  const homeCardDayRef = useRef<HTMLDivElement | null>(null)
+  const homePhotoRef = useRef<HTMLDivElement | null>(null)
+  const homeQuestionZoneRef = useRef<HTMLDivElement | null>(null)
   const askWrapRef = useRef<HTMLDivElement | null>(null)
   const spreadListRef = useRef<HTMLDivElement | null>(null)
   const btnRef = useRef<HTMLButtonElement | null>(null)
   const homePrimaryFooterRef = useRef<HTMLDivElement | null>(null)
   const spreadActiveRef = useRef<HTMLDivElement | null>(null)
+
+  const markHomeTourSeen = () => {
+    const tgId = Number(user?.telegram_id || 0)
+    if (!tgId) return
+    const key = `ai_taro_home_tour:${HOME_TOUR_VERSION}:${tgId}`
+    try {
+      localStorage.setItem(key, '1')
+    } catch {}
+  }
+
+  const closeHomeTour = () => {
+    markHomeTourSeen()
+    setShowHomeTour(false)
+  }
+
+  const nextHomeTourStep = () => {
+    if (homeTourIndex >= HOME_TOUR_STEPS.length - 1) {
+      closeHomeTour()
+      return
+    }
+    setHomeTourIndex((i) => Math.min(HOME_TOUR_STEPS.length - 1, i + 1))
+  }
+
+  useEffect(() => {
+    if (authStatus !== 'ready' || showLegalConsent) {
+      setShowHomeTour(false)
+      return
+    }
+    if (view !== 'home' || navTab !== 'main') return
+    const tgId = Number(user?.telegram_id || 0)
+    if (!tgId) return
+    const key = `ai_taro_home_tour:${HOME_TOUR_VERSION}:${tgId}`
+    let seen = false
+    try {
+      seen = localStorage.getItem(key) === '1'
+    } catch {}
+    if (seen) return
+    setHomeTourIndex(0)
+    setShowHomeTour(true)
+  }, [authStatus, showLegalConsent, view, navTab, user?.telegram_id])
+
+  useEffect(() => {
+    if (!showHomeTour || view !== 'home' || navTab !== 'main') return
+    const step = HOME_TOUR_STEPS[homeTourIndex]
+    if (!step) return
+    const target =
+      step.id === 'card_day'
+        ? homeCardDayRef.current
+        : step.id === 'photo'
+          ? homePhotoRef.current
+          : step.id === 'question_zone'
+            ? homeQuestionZoneRef.current
+            : btnRef.current || homePrimaryFooterRef.current
+    if (!target) return
+    window.setTimeout(() => {
+      try {
+        target.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'nearest' })
+      } catch {}
+    }, 90)
+  }, [showHomeTour, homeTourIndex, view, navTab])
 
   const isResult = view === 'card_day_prep' && cardRevealed
   const [stopRequested, setStopRequested] = useState(false)
@@ -5401,6 +5492,9 @@ useEffect(() => {
   const currentLegalDoc = activeLegalDoc ? LEGAL_DOCS[activeLegalDoc] : null
   const canStartReading = !!spread
   const showHomePrimaryCta = view === 'home' && navTab === 'main'
+  const isHomeTourActive = showHomeTour && showHomePrimaryCta
+  const homeTourStep = isHomeTourActive ? HOME_TOUR_STEPS[Math.max(0, Math.min(homeTourIndex, HOME_TOUR_STEPS.length - 1))] : null
+  const homeTourStepId = homeTourStep?.id || null
   const homeKeyboardAwarePadding = showHomePrimaryCta
     ? {
         paddingBottom: `calc(${92 + Math.max(0, keyboardInset)}px + env(safe-area-inset-bottom, 0px))`,
@@ -5525,6 +5619,41 @@ useEffect(() => {
   </div>
 )}
 
+{isHomeTourActive && homeTourStep && (
+  <div
+    className="home-tour-overlay"
+    role="dialog"
+    aria-modal="true"
+    aria-label="Быстрый гид по приложению"
+    onClick={nextHomeTourStep}
+  >
+    <div className="home-tour-overlay__veil" />
+    <div className="home-tour-card" onClick={(e) => e.stopPropagation()}>
+      <div className="home-tour-card__head">
+        <div className="home-tour-card__step">
+          Шаг {homeTourIndex + 1} из {HOME_TOUR_STEPS.length}
+        </div>
+        <button
+          type="button"
+          className="home-tour-card__skip"
+          onClick={closeHomeTour}
+        >
+          Пропустить
+        </button>
+      </div>
+      <div className="home-tour-card__title">{homeTourStep.title}</div>
+      <div className="home-tour-card__text">{homeTourStep.text}</div>
+      <button
+        type="button"
+        className="glassbtn home-tour-card__next"
+        onClick={nextHomeTourStep}
+      >
+        {homeTourIndex >= HOME_TOUR_STEPS.length - 1 ? 'Понятно' : 'Далее'}
+      </button>
+    </div>
+  </div>
+)}
+
       <div
         ref={contentRef}
         className={`content ${showHomePrimaryCta ? 'content--with-home-cta' : ''}`}
@@ -5593,7 +5722,14 @@ useEffect(() => {
             <div className="nav-pages" data-dir={navDir} style={{ ['--pi' as any]: navActiveIndex }}>
               <div className="nav-track">
                 <div className="nav-page" data-page="main">
-                  <div className="card-day card-day--sun" role="button" tabIndex={0} onClick={openCardDay} onKeyDown={(e) => e.key === 'Enter' && openCardDay()}>
+                  <div
+                    ref={homeCardDayRef}
+                    className={`card-day card-day--sun ${isHomeTourActive && homeTourStepId === 'card_day' ? 'is-onboarding-focus' : ''}`}
+                    role="button"
+                    tabIndex={0}
+                    onClick={openCardDay}
+                    onKeyDown={(e) => e.key === 'Enter' && openCardDay()}
+                  >
                     <div className="card-day__rim" aria-hidden="true" />
                     <div className="card-day__spark" aria-hidden="true" />
                     <div className="card-day__text">
@@ -5608,7 +5744,14 @@ useEffect(() => {
                     </div>
                   </div>
 
-                  <div className="card-day card-day--photo" role="button" tabIndex={0} onClick={openPhotoAnalysis} onKeyDown={(e) => e.key === 'Enter' && openPhotoAnalysis()}>
+                  <div
+                    ref={homePhotoRef}
+                    className={`card-day card-day--photo ${isHomeTourActive && homeTourStepId === 'photo' ? 'is-onboarding-focus' : ''}`}
+                    role="button"
+                    tabIndex={0}
+                    onClick={openPhotoAnalysis}
+                    onKeyDown={(e) => e.key === 'Enter' && openPhotoAnalysis()}
+                  >
                     <div className="card-day__rim" aria-hidden="true" />
                     <div className="card-day__spark" aria-hidden="true" />
                     <div className="card-day__text">
@@ -5623,111 +5766,116 @@ useEffect(() => {
                     </div>
                   </div>
 
-                  <h2 className="home-section-title">Задайте ваш вопрос</h2>
-
                   <div
-                    className={`ask-wrap ${attnStage === 'question' ? 'is-attn' : ''}`}
-                    data-attn={attnStage === 'question' ? attnNonce : undefined}
-                    ref={askWrapRef}
+                    ref={homeQuestionZoneRef}
+                    className={`home-guided-zone ${isHomeTourActive && homeTourStepId === 'question_zone' ? 'is-onboarding-focus' : ''}`}
                   >
-                    <div className="ask-glass">
-                      <textarea
-                        className="ask-input"
-                        value={question}
-                        onChange={(e) => setQuestion(e.target.value)}
-                        placeholder="Что вас беспокоит? О чем хотели бы узнать?"
-                        enterKeyHint="search"
-                        rows={2}
-                      />
-                      <button
-                        type="button"
-                        className={`ask-mic ${isRecording ? 'recording' : ''}`}
-                        onClick={toggleRecording}
-                        aria-label={isRecording ? 'Остановить запись' : 'Начать запись'}
-                        title={isRecording ? 'Остановить запись' : 'Записать голосом'}
-                      >
-                        <img className="ask-mic__icon" src={micIcon} alt="" aria-hidden="true" />
-                      </button>
+                    <h2 className="home-section-title">Задайте ваш вопрос</h2>
+
+                    <div
+                      className={`ask-wrap ${attnStage === 'question' ? 'is-attn' : ''}`}
+                      data-attn={attnStage === 'question' ? attnNonce : undefined}
+                      ref={askWrapRef}
+                    >
+                      <div className="ask-glass">
+                        <textarea
+                          className="ask-input"
+                          value={question}
+                          onChange={(e) => setQuestion(e.target.value)}
+                          placeholder="Что вас беспокоит? О чем хотели бы узнать?"
+                          enterKeyHint="search"
+                          rows={2}
+                        />
+                        <button
+                          type="button"
+                          className={`ask-mic ${isRecording ? 'recording' : ''}`}
+                          onClick={toggleRecording}
+                          aria-label={isRecording ? 'Остановить запись' : 'Начать запись'}
+                          title={isRecording ? 'Остановить запись' : 'Записать голосом'}
+                        >
+                          <img className="ask-mic__icon" src={micIcon} alt="" aria-hidden="true" />
+                        </button>
+                      </div>
+
+                      <div className={`ask-hint ${isRecording ? 'is-visible' : ''}`}>Идёт запись… нажмите ещё раз, чтобы остановить</div>
                     </div>
 
-                    <div className={`ask-hint ${isRecording ? 'is-visible' : ''}`}>Идёт запись… нажмите ещё раз, чтобы остановить</div>
-                  </div>
+                    <h2 className="home-section-title">Выберите категорию вопроса</h2>
 
-                  <h2 className="home-section-title">Выберите категорию вопроса</h2>
+                    <div
+                      className={`seg seg--topics ${isBumping ? 'is-bump' : ''}`}
+                      data-bump={bump}
+                      style={{
+                        ['--seg-cols' as any]: TOPICS.length,
+                        ['--i' as any]: activeIndex,
+                        ['--from' as any]: prevIndex,
+                      }}
+                      role="tablist"
+                      aria-label="Выбор темы"
+                    >
+                      <svg className="seg__svg" aria-hidden="true">
+                        <filter id="seg-goo">
+                          <feGaussianBlur in="SourceGraphic" stdDeviation="8" result="blur" />
+                          <feColorMatrix
+                            in="blur"
+                            mode="matrix"
+                            values="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 18 -7"
+                            result="goo"
+                          />
+                          <feComposite in="SourceGraphic" in2="goo" operator="atop" />
+                        </filter>
+                      </svg>
 
-                  <div
-                    className={`seg seg--topics ${isBumping ? 'is-bump' : ''}`}
-                    data-bump={bump}
-                    style={{
-                      ['--seg-cols' as any]: TOPICS.length,
-                      ['--i' as any]: activeIndex,
-                      ['--from' as any]: prevIndex,
-                    }}
-                    role="tablist"
-                    aria-label="Выбор темы"
-                  >
-                    <svg className="seg__svg" aria-hidden="true">
-                      <filter id="seg-goo">
-                        <feGaussianBlur in="SourceGraphic" stdDeviation="8" result="blur" />
-                        <feColorMatrix
-                          in="blur"
-                          mode="matrix"
-                          values="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 18 -7"
-                          result="goo"
-                        />
-                        <feComposite in="SourceGraphic" in2="goo" operator="atop" />
-                      </filter>
-                    </svg>
+                      <div className="seg__pill" aria-hidden="true" />
 
-                    <div className="seg__pill" aria-hidden="true" />
-
-                    {TOPICS.map((t) => (
-                      <button
-                        key={t.id}
-                        type="button"
-                        className={`seg__btn ${topic === t.id ? 'is-active' : ''}`}
-                        onClick={() => onPickTopic(t.id)}
-                        role="tab"
-                        aria-selected={topic === t.id}
-                      >
-                        {t.label}
-                      </button>
-                    ))}
-                  </div>
-
-                  <h2 className="home-section-title">Выберите тип расклада</h2>
-                  <div className={`spread-soft-hint ${shouldAttnSpreads ? 'is-visible' : ''}`} aria-live="polite">
-                    Сначала выберите тип расклада
-                  </div>
-
-                  <div
-                    className={`spread-list ${shouldAttnSpreads ? 'is-attn' : ''}`}
-                    data-attn={shouldAttnSpreads ? attnNonce : undefined}
-                    ref={spreadListRef}
-                  >
-                    {SPREADS.map((s) => {
-                      const isActive = spread === s.id
-                      return (
-                        <div
-                          key={s.id}
-                          className={`spread-card ${SPREAD_THEME_CLASSES[s.id]} ${isActive ? 'is-active' : ''}`}
-                          role="button"
-                          tabIndex={0}
-                          onClick={() => setSpread(s.id)}
-                          onKeyDown={(e) => e.key === 'Enter' && setSpread(s.id)}
+                      {TOPICS.map((t) => (
+                        <button
+                          key={t.id}
+                          type="button"
+                          className={`seg__btn ${topic === t.id ? 'is-active' : ''}`}
+                          onClick={() => onPickTopic(t.id)}
+                          role="tab"
+                          aria-selected={topic === t.id}
                         >
-                          <div className="spread-icon__svg" aria-hidden="true">
-                            {SPREAD_ICON_IMAGES[s.id] ? <img src={SPREAD_ICON_IMAGES[s.id]} alt="" /> : <SpreadIcon kind={s.icon} />}
-                          </div>
+                          {t.label}
+                        </button>
+                      ))}
+                    </div>
 
-                          <div className="spread-body">
-                            <div className="spread-title">{s.title}</div>
-                            <div className="spread-subtitle">{s.subtitle}</div>
-                            <div className="spread-meta">{s.cards}</div>
+                    <h2 className="home-section-title">Выберите тип расклада</h2>
+                    <div className={`spread-soft-hint ${shouldAttnSpreads ? 'is-visible' : ''}`} aria-live="polite">
+                      Сначала выберите тип расклада
+                    </div>
+
+                    <div
+                      className={`spread-list ${shouldAttnSpreads ? 'is-attn' : ''}`}
+                      data-attn={shouldAttnSpreads ? attnNonce : undefined}
+                      ref={spreadListRef}
+                    >
+                      {SPREADS.map((s) => {
+                        const isActive = spread === s.id
+                        return (
+                          <div
+                            key={s.id}
+                            className={`spread-card ${SPREAD_THEME_CLASSES[s.id]} ${isActive ? 'is-active' : ''}`}
+                            role="button"
+                            tabIndex={0}
+                            onClick={() => setSpread(s.id)}
+                            onKeyDown={(e) => e.key === 'Enter' && setSpread(s.id)}
+                          >
+                            <div className="spread-icon__svg" aria-hidden="true">
+                              {SPREAD_ICON_IMAGES[s.id] ? <img src={SPREAD_ICON_IMAGES[s.id]} alt="" /> : <SpreadIcon kind={s.icon} />}
+                            </div>
+
+                            <div className="spread-body">
+                              <div className="spread-title">{s.title}</div>
+                              <div className="spread-subtitle">{s.subtitle}</div>
+                              <div className="spread-meta">{s.cards}</div>
+                            </div>
                           </div>
-                        </div>
-                      )
-                    })}
+                        )
+                      })}
+                    </div>
                   </div>
 
                 </div>
@@ -7245,7 +7393,7 @@ useEffect(() => {
       {showHomePrimaryCta && (
         <div
           ref={homePrimaryFooterRef}
-          className="home-primary-footer"
+          className={`home-primary-footer ${isHomeTourActive && homeTourStepId === 'cta' ? 'is-onboarding-focus' : ''}`}
           style={{ bottom: `${Math.max(0, keyboardInset)}px` }}
         >
           <button

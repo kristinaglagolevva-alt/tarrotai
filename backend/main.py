@@ -1566,7 +1566,7 @@ async def _memory_context_for_user(
                 log.warning("Lazy memory init failed for user_id=%s: %s", user.id, repr(exc))
 
     prompt_context = ""
-    if str(question or "").strip():
+    if str(question or "").strip() or bool(list(current_cards or [])):
         try:
             prompt_context = await memory_service.build_runtime_prompt_context(
                 db,
@@ -5322,6 +5322,18 @@ async def photo_analysis(
         context = (extra_context or "").strip()
         if not consider_reversed:
             context = f"{context}\nИгнорируй перевёрнутые позиции, считай карты прямыми.".strip()
+        _, memory_prompt_context, _ = await _memory_context_for_user(
+            db,
+            current_user,
+            question=question,
+            current_cards=[],
+        )
+        if memory_prompt_context:
+            context = (
+                f"{context}\n\n{memory_prompt_context}".strip()
+                if context
+                else memory_prompt_context
+            )
         description, cards = await generate_photo_analysis_llm(
             topic=topic,
             question=question,

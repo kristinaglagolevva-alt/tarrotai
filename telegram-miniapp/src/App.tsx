@@ -828,6 +828,18 @@ const TERMS_PDF_URL = '/docs/ai_taro_user_agreement_draft.pdf'
 const PRIVACY_PDF_URL = '/docs/ai_taro_privacy_policy_draft.pdf'
 
 type HomeTourStepId = 'card_day' | 'photo' | 'question_zone' | 'cta'
+type HomeTourSpotlight = {
+  top: number
+  left: number
+  width: number
+  height: number
+  radius: number
+  placement: 'top' | 'bottom'
+  bubbleTop: number
+  bubbleLeft: number
+  bubbleWidth: number
+  bubbleArrowLeft: number
+}
 
 const HOME_TOUR_STEPS: Array<{ id: HomeTourStepId; title: string; text: string }> = [
   {
@@ -1034,6 +1046,7 @@ const [authError, setAuthError] = useState<string>('')
 const [authRetryNonce, setAuthRetryNonce] = useState(0)
 const [showHomeTour, setShowHomeTour] = useState(false)
 const [homeTourIndex, setHomeTourIndex] = useState(0)
+const [homeTourSpotlight, setHomeTourSpotlight] = useState<HomeTourSpotlight | null>(null)
 const [sbpOrderId, setSbpOrderId] = useState<string | null>(() => {
   try {
     const v = localStorage.getItem('sbp_pending_order_id')
@@ -2697,6 +2710,14 @@ useEffect(() => {
   const homePrimaryFooterRef = useRef<HTMLDivElement | null>(null)
   const spreadActiveRef = useRef<HTMLDivElement | null>(null)
 
+  const getHomeTourTarget = (stepId: HomeTourStepId | null): HTMLElement | null => {
+    if (!stepId) return null
+    if (stepId === 'card_day') return homeCardDayRef.current
+    if (stepId === 'photo') return homePhotoRef.current
+    if (stepId === 'question_zone') return homeQuestionZoneRef.current
+    return btnRef.current || homePrimaryFooterRef.current
+  }
+
   const markHomeTourSeen = () => {
     const tgId = Number(user?.telegram_id || 0)
     if (!tgId) return
@@ -2709,6 +2730,7 @@ useEffect(() => {
   const closeHomeTour = () => {
     markHomeTourSeen()
     setShowHomeTour(false)
+    setHomeTourSpotlight(null)
   }
 
   const nextHomeTourStep = () => {
@@ -2719,9 +2741,14 @@ useEffect(() => {
     setHomeTourIndex((i) => Math.min(HOME_TOUR_STEPS.length - 1, i + 1))
   }
 
+  const prevHomeTourStep = () => {
+    setHomeTourIndex((i) => Math.max(0, i - 1))
+  }
+
   useEffect(() => {
     if (authStatus !== 'ready' || showLegalConsent) {
       setShowHomeTour(false)
+      setHomeTourSpotlight(null)
       return
     }
     if (view !== 'home' || navTab !== 'main') return
@@ -2741,14 +2768,7 @@ useEffect(() => {
     if (!showHomeTour || view !== 'home' || navTab !== 'main') return
     const step = HOME_TOUR_STEPS[homeTourIndex]
     if (!step) return
-    const target =
-      step.id === 'card_day'
-        ? homeCardDayRef.current
-        : step.id === 'photo'
-          ? homePhotoRef.current
-          : step.id === 'question_zone'
-            ? homeQuestionZoneRef.current
-            : btnRef.current || homePrimaryFooterRef.current
+    const target = getHomeTourTarget(step.id)
     if (!target) return
     window.setTimeout(() => {
       try {
@@ -2756,6 +2776,103 @@ useEffect(() => {
       } catch {}
     }, 90)
   }, [showHomeTour, homeTourIndex, view, navTab])
+
+  useEffect(() => {
+    if (!showHomeTour || view !== 'home' || navTab !== 'main') {
+      setHomeTourSpotlight(null)
+      return
+    }
+    const step = HOME_TOUR_STEPS[homeTourIndex]
+    if (!step) {
+      setHomeTourSpotlight(null)
+      return
+    }
+
+    let raf = 0
+    const refreshSpotlight = () => {
+      const target = getHomeTourTarget(step.id)
+      if (!target) {
+        setHomeTourSpotlight(null)
+        return
+      }
+      const rect = target.getBoundingClientRect()
+      const vw = window.innerWidth
+      const vh = window.innerHeight
+      if (rect.width < 6 || rect.height < 6 || vh < 120 || vw < 120) {
+        setHomeTourSpotlight(null)
+        return
+      }
+
+      const pad = 8
+      const minGap = 12
+      const cardHeight = 196
+      const top = Math.max(minGap, rect.top - pad)
+      const left = Math.max(minGap, rect.left - pad)
+      const width = Math.min(vw - left - minGap, rect.width + pad * 2)
+      const height = Math.min(vh - top - minGap, rect.height + pad * 2)
+      const centerX = left + width / 2
+      const topSpace = top
+      const bottomSpace = vh - (top + height)
+      const placement: 'top' | 'bottom' = bottomSpace >= cardHeight + 24 || bottomSpace >= topSpace ? 'bottom' : 'top'
+
+      const bubbleWidth = Math.min(420, vw - minGap * 2)
+      let bubbleLeft = centerX - bubbleWidth / 2
+      bubbleLeft = Math.max(minGap, Math.min(vw - bubbleWidth - minGap, bubbleLeft))
+      let bubbleTop = placement === 'bottom' ? top + height + 14 : top - cardHeight - 14
+      bubbleTop = Math.max(minGap, Math.min(vh - cardHeight - minGap, bubbleTop))
+      const bubbleArrowLeft = Math.max(28, Math.min(bubbleWidth - 28, centerX - bubbleLeft))
+
+      const radius = target.classList.contains('home-primary-footer') ? 24 : target.classList.contains('home-guided-zone') ? 26 : 22
+      const nextSpotlight: HomeTourSpotlight = {
+        top,
+        left,
+        width,
+        height,
+        radius,
+        placement,
+        bubbleTop,
+        bubbleLeft,
+        bubbleWidth,
+        bubbleArrowLeft,
+      }
+
+      setHomeTourSpotlight((prev) => {
+        if (
+          prev &&
+          Math.abs(prev.top - nextSpotlight.top) < 1 &&
+          Math.abs(prev.left - nextSpotlight.left) < 1 &&
+          Math.abs(prev.width - nextSpotlight.width) < 1 &&
+          Math.abs(prev.height - nextSpotlight.height) < 1 &&
+          Math.abs(prev.bubbleTop - nextSpotlight.bubbleTop) < 1 &&
+          Math.abs(prev.bubbleLeft - nextSpotlight.bubbleLeft) < 1 &&
+          prev.placement === nextSpotlight.placement
+        ) {
+          return prev
+        }
+        return nextSpotlight
+      })
+    }
+
+    const schedule = () => {
+      if (raf) window.cancelAnimationFrame(raf)
+      raf = window.requestAnimationFrame(refreshSpotlight)
+    }
+
+    schedule()
+    const contentNode = contentRef.current
+    window.addEventListener('resize', schedule)
+    window.addEventListener('orientationchange', schedule)
+    window.addEventListener('scroll', schedule, true)
+    contentNode?.addEventListener('scroll', schedule, { passive: true })
+
+    return () => {
+      if (raf) window.cancelAnimationFrame(raf)
+      window.removeEventListener('resize', schedule)
+      window.removeEventListener('orientationchange', schedule)
+      window.removeEventListener('scroll', schedule, true)
+      contentNode?.removeEventListener('scroll', schedule as EventListener)
+    }
+  }, [showHomeTour, homeTourIndex, view, navTab, keyboardInset])
 
   const isResult = view === 'card_day_prep' && cardRevealed
   const [stopRequested, setStopRequested] = useState(false)
@@ -5495,6 +5612,23 @@ useEffect(() => {
   const isHomeTourActive = showHomeTour && showHomePrimaryCta
   const homeTourStep = isHomeTourActive ? HOME_TOUR_STEPS[Math.max(0, Math.min(homeTourIndex, HOME_TOUR_STEPS.length - 1))] : null
   const homeTourStepId = homeTourStep?.id || null
+  const homeTourSpotlightStyle = homeTourSpotlight
+    ? {
+        top: `${homeTourSpotlight.top}px`,
+        left: `${homeTourSpotlight.left}px`,
+        width: `${homeTourSpotlight.width}px`,
+        height: `${homeTourSpotlight.height}px`,
+        borderRadius: `${homeTourSpotlight.radius}px`,
+      }
+    : undefined
+  const homeTourCardStyle = homeTourSpotlight
+    ? ({
+        top: `${homeTourSpotlight.bubbleTop}px`,
+        left: `${homeTourSpotlight.bubbleLeft}px`,
+        width: `${homeTourSpotlight.bubbleWidth}px`,
+        ['--tour-arrow-left' as any]: `${homeTourSpotlight.bubbleArrowLeft}px`,
+      } as Record<string, string>)
+    : undefined
   const homeKeyboardAwarePadding = showHomePrimaryCta
     ? {
         paddingBottom: `calc(${92 + Math.max(0, keyboardInset)}px + env(safe-area-inset-bottom, 0px))`,
@@ -5619,7 +5753,7 @@ useEffect(() => {
   </div>
 )}
 
-{isHomeTourActive && homeTourStep && (
+{isHomeTourActive && homeTourStep && homeTourSpotlight && (
   <div
     className="home-tour-overlay"
     role="dialog"
@@ -5628,28 +5762,58 @@ useEffect(() => {
     onClick={nextHomeTourStep}
   >
     <div className="home-tour-overlay__veil" />
-    <div className="home-tour-card" onClick={(e) => e.stopPropagation()}>
+    <div
+      className={`home-tour-overlay__spotlight is-${homeTourSpotlight.placement}`}
+      style={homeTourSpotlightStyle}
+      aria-hidden="true"
+    />
+    <div
+      className={`home-tour-card is-${homeTourSpotlight.placement}`}
+      style={homeTourCardStyle}
+      onClick={(e) => e.stopPropagation()}
+    >
       <div className="home-tour-card__head">
-        <div className="home-tour-card__step">
-          Шаг {homeTourIndex + 1} из {HOME_TOUR_STEPS.length}
-        </div>
+        <div className="home-tour-card__title">{homeTourStep.title}</div>
         <button
           type="button"
-          className="home-tour-card__skip"
+          className="home-tour-card__close"
           onClick={closeHomeTour}
+          aria-label="Пропустить инструкцию"
         >
-          Пропустить
+          ×
         </button>
       </div>
-      <div className="home-tour-card__title">{homeTourStep.title}</div>
       <div className="home-tour-card__text">{homeTourStep.text}</div>
-      <button
-        type="button"
-        className="glassbtn home-tour-card__next"
-        onClick={nextHomeTourStep}
-      >
-        {homeTourIndex >= HOME_TOUR_STEPS.length - 1 ? 'Понятно' : 'Далее'}
-      </button>
+      <div className="home-tour-card__foot">
+        <div className="home-tour-card__step">
+          {homeTourIndex + 1} из {HOME_TOUR_STEPS.length}
+        </div>
+        <div className="home-tour-card__actions">
+          {homeTourIndex > 0 && (
+            <button
+              type="button"
+              className="glassbtn home-tour-card__prev"
+              onClick={prevHomeTourStep}
+            >
+              Назад
+            </button>
+          )}
+          <button
+            type="button"
+            className="glassbtn home-tour-card__skip"
+            onClick={closeHomeTour}
+          >
+            Пропустить
+          </button>
+          <button
+            type="button"
+            className="glassbtn home-tour-card__next"
+            onClick={nextHomeTourStep}
+          >
+            {homeTourIndex >= HOME_TOUR_STEPS.length - 1 ? 'Готово' : 'Далее'}
+          </button>
+        </div>
+      </div>
     </div>
   </div>
 )}

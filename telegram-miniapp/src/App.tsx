@@ -823,7 +823,7 @@ const SUPPORT_URL = `https://t.me/${BOT_USERNAME}?start=support`
 const TERMS_URL = `https://t.me/${BOT_USERNAME}?start=terms`
 const PRIVACY_URL = `https://t.me/${BOT_USERNAME}?start=privacy`
 const LEGAL_CONSENT_VERSION = '2026-02-25-v1'
-const HOME_TOUR_VERSION = '2026-03-08-v2'
+const HOME_TOUR_VERSION = '2026-03-08-v3'
 const TERMS_PDF_URL = '/docs/ai_taro_user_agreement_draft.pdf'
 const PRIVACY_PDF_URL = '/docs/ai_taro_privacy_policy_draft.pdf'
 
@@ -2805,21 +2805,29 @@ useEffect(() => {
 
       const pad = 8
       const minGap = 12
-      const cardHeight = 196
+      const viewportOffsetTop = Number(window.visualViewport?.offsetTop || 0)
+      const topSafe = Math.max(minGap, 72 + viewportOffsetTop)
+      const cardHeight = 232
       const top = Math.max(minGap, rect.top - pad)
       const left = Math.max(minGap, rect.left - pad)
       const width = Math.min(vw - left - minGap, rect.width + pad * 2)
-      const height = Math.min(vh - top - minGap, rect.height + pad * 2)
+      let height = Math.min(vh - top - minGap, rect.height + pad * 2)
+      if (step.id === 'question_zone') {
+        const maxFocusHeight = Math.min(460, vh * 0.62)
+        if (height > maxFocusHeight) height = maxFocusHeight
+      }
       const centerX = left + width / 2
-      const topSpace = top
+      const topSpace = Math.max(0, top - topSafe)
       const bottomSpace = vh - (top + height)
-      const placement: 'top' | 'bottom' = bottomSpace >= cardHeight + 24 || bottomSpace >= topSpace ? 'bottom' : 'top'
+      const canBottom = bottomSpace >= cardHeight + 20
+      const canTop = topSpace >= cardHeight + 20
+      const placement: 'top' | 'bottom' = canBottom ? 'bottom' : canTop ? 'top' : bottomSpace >= topSpace ? 'bottom' : 'top'
 
       const bubbleWidth = Math.min(420, vw - minGap * 2)
       let bubbleLeft = centerX - bubbleWidth / 2
       bubbleLeft = Math.max(minGap, Math.min(vw - bubbleWidth - minGap, bubbleLeft))
       let bubbleTop = placement === 'bottom' ? top + height + 14 : top - cardHeight - 14
-      bubbleTop = Math.max(minGap, Math.min(vh - cardHeight - minGap, bubbleTop))
+      bubbleTop = Math.max(topSafe, Math.min(vh - cardHeight - minGap, bubbleTop))
       const bubbleArrowLeft = Math.max(28, Math.min(bubbleWidth - 28, centerX - bubbleLeft))
 
       const radius = target.classList.contains('home-primary-footer') ? 24 : target.classList.contains('home-guided-zone') ? 26 : 22

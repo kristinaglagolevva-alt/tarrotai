@@ -823,7 +823,7 @@ const SUPPORT_URL = `https://t.me/${BOT_USERNAME}?start=support`
 const TERMS_URL = `https://t.me/${BOT_USERNAME}?start=terms`
 const PRIVACY_URL = `https://t.me/${BOT_USERNAME}?start=privacy`
 const LEGAL_CONSENT_VERSION = '2026-02-25-v1'
-const HOME_TOUR_VERSION = '2026-03-08-v1'
+const HOME_TOUR_VERSION = '2026-03-08-v2'
 const TERMS_PDF_URL = '/docs/ai_taro_user_agreement_draft.pdf'
 const PRIVACY_PDF_URL = '/docs/ai_taro_privacy_policy_draft.pdf'
 

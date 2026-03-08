@@ -975,6 +975,17 @@ const resolveTelegramInitData = (): string => {
   return ''
 }
 
+const delayMs = (ms: number) => new Promise<void>((resolve) => window.setTimeout(resolve, ms))
+
+const resolveTelegramInitDataWithRetry = async (attempts = 8, stepMs = 250): Promise<string> => {
+  for (let i = 0; i < attempts; i++) {
+    const data = resolveTelegramInitData()
+    if (data) return data
+    await delayMs(stepMs)
+  }
+  return ''
+}
+
 export default function App() {
   /* =============================================================================================
    АВТОРИЗАЦИЯ В ТГ (при запуске мини‑приложения)
@@ -994,6 +1005,7 @@ const [user, setUser] = useState<MeDto | null>(null)
 const [billing, setBilling] = useState<BillingStatus | null>(null)
 const [authStatus, setAuthStatus] = useState<AuthStatus>('loading')
 const [authError, setAuthError] = useState<string>('')
+const [authRetryNonce, setAuthRetryNonce] = useState(0)
 const [sbpOrderId, setSbpOrderId] = useState<string | null>(() => {
   try {
     const v = localStorage.getItem('sbp_pending_order_id')
@@ -1062,16 +1074,27 @@ useEffect(() => {
 
     // 2) Телеграм‑авторизация
     try {
-      const initData = resolveTelegramInitData()
+      const initData = await resolveTelegramInitDataWithRetry(8, 250)
       if (!initData) {
         safe(() => {
           setAuthStatus('error')
-          setAuthError('Откройте мини‑приложение внутри Telegram (нет initData).')
+          setAuthError('Откройте мини‑приложение из кнопки в Telegram (initData не передан).')
         })
         return
       }
 
-      const res = await telegramAuth(initData)
+      let res: Awaited<ReturnType<typeof telegramAuth>>
+      try {
+        res = await telegramAuth(initData)
+      } catch (firstErr: any) {
+        const msg = String(firstErr?.message || firstErr || '')
+        const retryable = /Invalid Telegram initData|initData expired|Invalid initData timestamp/i.test(msg)
+        if (!retryable) throw firstErr
+        await delayMs(350)
+        const refreshed = await resolveTelegramInitDataWithRetry(6, 250)
+        if (!refreshed) throw firstErr
+        res = await telegramAuth(refreshed)
+      }
       let billingOut: BillingStatus | null = null
       try {
         billingOut = await getBillingStatus(res.token)
@@ -1085,16 +1108,25 @@ useEffect(() => {
         setBilling(billingOut)
         setAuthStatus('ready')
       })
-    } catch (e) {
+    } catch (e: any) {
       console.error('Auth error', e)
       clearStoredJwt()
+      const raw = String(e?.message || e || '')
+      let uiError = 'Не удалось авторизоваться. Перезапустите мини‑приложение в Telegram.'
+      if (/initData is empty|нет initData|initData не передан/i.test(raw)) {
+        uiError = 'Telegram не передал данные входа. Откройте приложение только через кнопку в боте.'
+      } else if (/Invalid Telegram initData|initData expired|Invalid initData timestamp/i.test(raw)) {
+        uiError = 'Данные Telegram устарели. Закройте мини‑приложение и откройте заново из бота.'
+      } else if (/401|403/.test(raw)) {
+        uiError = 'Ошибка авторизации Telegram. Закройте мини‑приложение и откройте снова.'
+      }
 
       safe(() => {
         setToken(null)
         setUser(null)
         setBilling(null)
         setAuthStatus('error')
-        setAuthError('Не удалось авторизоваться. Перезапустите мини‑приложение в Telegram.')
+        setAuthError(uiError)
       })
     }
   }
@@ -1105,7 +1137,7 @@ useEffect(() => {
     mounted = false
   }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-}, [token])/* =============================================================================================
+}, [token, authRetryNonce])/* =============================================================================================
      [9] БАЗОВОЕ СОСТОЯНИЕ UI
   ============================================================================================= */
 
@@ -5426,6 +5458,9 @@ useEffect(() => {
           onClick={() => {
             clearStoredJwt()
             setToken(null)
+            setAuthStatus('loading')
+            setAuthError('')
+            setAuthRetryNonce((n) => n + 1)
           }}
         >
           Повторить

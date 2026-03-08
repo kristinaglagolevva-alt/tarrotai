@@ -5289,6 +5289,7 @@ async def photo_analysis(
     extra_context: str = Form(default=""),
     consider_reversed: bool = Form(default=True),
     force_llm: bool = Form(default=False),
+    detect_only: bool = Form(default=False),
 ):
     up = image or file
     if not up:
@@ -5314,7 +5315,8 @@ async def photo_analysis(
     if len(data) > _MAX_UPLOAD_BYTES:
         raise HTTPException(status_code=413, detail="File too large (max 8MB)")
 
-    await _consume_reading_quota_or_raise(db, current_user.id)
+    if not detect_only:
+        await _consume_reading_quota_or_raise(db, current_user.id)
 
     try:
         context = (extra_context or "").strip()
@@ -5327,6 +5329,7 @@ async def photo_analysis(
             image_mime=content_type,
             extra_context=context,
             require_llm=force_llm,
+            skip_interpretation=detect_only,
             quota_register=_vision_register_request_global,
             quota_try_escalate=_vision_try_escalate_global,
             quota_mark_forced_escalation=_vision_mark_forced_escalation_global,
@@ -5342,36 +5345,42 @@ async def photo_analysis(
         description, cards = "", []
 
     description = (description or "").strip()
-    if not description:
+    if detect_only:
+        if cards:
+            description = "Карты распознаны."
+        elif not description:
+            description = "Не удалось распознать карты на фото. Попробуй сделать фото ближе, без бликов и с хорошим светом."
+    elif not description:
         description = "Не удалось распознать карты на фото. Попробуй сделать фото ближе, без бликов и с хорошим светом."
 
-    try:
-        row = Reading(
-            user_id=current_user.id,
-            spread_type="photo_analysis",
-            topic=topic,
-            question=question,
-            cards=cards,
-            description=description,
-        )
-        db.add(row)
-        await db.commit()
-        if FEATURE_FLAGS.memory_v1 and bool(current_user.memory_opt_in):
-            await memory_service.ingest_event(
-                db,
-                user_id=int(current_user.id),
-                source_kind="photo_analysis",
-                source_id=int(row.id) if getattr(row, "id", None) else None,
-                topic=str(topic or "other"),
+    if not detect_only:
+        try:
+            row = Reading(
+                user_id=current_user.id,
                 spread_type="photo_analysis",
-                question=str(question or ""),
-                cards=list(cards or []),
-                description=str(description or ""),
+                topic=topic,
+                question=question,
+                cards=cards,
+                description=description,
             )
+            db.add(row)
             await db.commit()
-    except Exception as e:
-        await db.rollback()
-        log.exception("Failed to persist photo-analysis reading: %s", repr(e))
+            if FEATURE_FLAGS.memory_v1 and bool(current_user.memory_opt_in):
+                await memory_service.ingest_event(
+                    db,
+                    user_id=int(current_user.id),
+                    source_kind="photo_analysis",
+                    source_id=int(row.id) if getattr(row, "id", None) else None,
+                    topic=str(topic or "other"),
+                    spread_type="photo_analysis",
+                    question=str(question or ""),
+                    cards=list(cards or []),
+                    description=str(description or ""),
+                )
+                await db.commit()
+        except Exception as e:
+            await db.rollback()
+            log.exception("Failed to persist photo-analysis reading: %s", repr(e))
 
     return {
         "description": description,

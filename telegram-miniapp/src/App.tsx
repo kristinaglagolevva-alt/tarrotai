@@ -3450,6 +3450,7 @@ useEffect(() => {
           out = await analyzeSpreadPhoto(token, fileForAttempt, {
             topic,
             question: '',
+            detect_only: true,
           })
           break
         } catch (err: any) {

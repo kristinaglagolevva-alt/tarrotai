@@ -1197,6 +1197,7 @@ async def generate_photo_analysis_llm(
     image_mime: str,
     extra_context: str = "",
     require_llm: bool = True,
+    skip_interpretation: bool = False,
     quota_register: Optional[Callable[[], Awaitable[Dict[str, Any]]]] = None,
     quota_try_escalate: Optional[Callable[[], Awaitable[Tuple[bool, str, Dict[str, Any]]]]] = None,
     quota_mark_forced_escalation: Optional[Callable[[], Awaitable[Dict[str, Any]]]] = None,
@@ -1382,6 +1383,9 @@ async def generate_photo_analysis_llm(
                     )
             except Exception as e:
                 log.warning("photo vision fallback %s failed after low primary confidence: %s", fallback_model, repr(e))
+
+    if skip_interpretation:
+        return ("", selected_cards)
 
     description = ""
     try:

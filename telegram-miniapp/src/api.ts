@@ -372,6 +372,7 @@ export type PhotoAnalysisParams = {
   consider_reversed?: boolean
   extra_context?: string
   force_llm?: boolean
+  detect_only?: boolean
 }
 
 /**
@@ -393,6 +394,7 @@ export async function analyzeSpreadPhoto(
   if (params?.extra_context) form.append('extra_context', params.extra_context)
   if (params?.consider_reversed != null) form.append('consider_reversed', String(params.consider_reversed))
   if (params?.force_llm != null) form.append('force_llm', String(params.force_llm))
+  if (params?.detect_only != null) form.append('detect_only', String(params.detect_only))
 
   const r = await fetch(`${API_BASE}/photo-analysis`, {
     method: 'POST',

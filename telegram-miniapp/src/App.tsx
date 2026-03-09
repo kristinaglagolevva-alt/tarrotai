@@ -7724,35 +7724,37 @@ useEffect(() => {
               В этом месяце: {Math.max(0, Number(billing?.free_left ?? 0))} бесплатных из {Math.max(1, Number(billing?.free_limit ?? 5))}
             </div>
 
-            <button
-              type="button"
-              className="glass-cta paywall-card__cta"
-              onClick={() => {
-                openTelegramUrl(BOT_PAYMENT_URL)
-              }}
-            >
-              <span className="glass-cta__inner">
-                <span className="glass-cta__rim" aria-hidden="true" />
-                <span className="glass-cta__text">Купить подписку</span>
-                <span className="glass-cta__spark" aria-hidden="true" />
-              </span>
-            </button>
+            <div className="paywall-card__actions">
+              <button
+                type="button"
+                className="glass-cta paywall-card__cta"
+                onClick={() => {
+                  openTelegramUrl(BOT_PAYMENT_URL)
+                }}
+              >
+                <span className="glass-cta__inner">
+                  <span className="glass-cta__rim" aria-hidden="true" />
+                  <span className="glass-cta__text">Купить подписку</span>
+                  <span className="glass-cta__spark" aria-hidden="true" />
+                </span>
+              </button>
 
-            <button
-              type="button"
-              className="glass-cta paywall-card__cta paywall-card__cta--ghost"
-              onClick={() => {
-                setShowAccessPaywall(false)
-                setView('home')
-                setNavTab('profile')
-              }}
-            >
-              <span className="glass-cta__inner">
-                <span className="glass-cta__rim" aria-hidden="true" />
-                <span className="glass-cta__text">Открыть профиль</span>
-                <span className="glass-cta__spark" aria-hidden="true" />
-              </span>
-            </button>
+              <button
+                type="button"
+                className="glass-cta paywall-card__cta paywall-card__cta--ghost"
+                onClick={() => {
+                  setShowAccessPaywall(false)
+                  setView('home')
+                  setNavTab('profile')
+                }}
+              >
+                <span className="glass-cta__inner">
+                  <span className="glass-cta__rim" aria-hidden="true" />
+                  <span className="glass-cta__text">Открыть профиль</span>
+                  <span className="glass-cta__spark" aria-hidden="true" />
+                </span>
+              </button>
+            </div>
 
             <button type="button" className="paywall-card__close" onClick={() => setShowAccessPaywall(false)}>
               Позже

@@ -3087,7 +3087,10 @@ body,
   z-index: 9998;
   display: grid;
   place-items: center;
-  padding: 18px;
+  padding:
+    max(16px, env(safe-area-inset-top, 0px))
+    16px
+    max(18px, calc(12px + env(safe-area-inset-bottom, 0px)));
   background:
     radial-gradient(640px 360px at 50% 44%, rgba(130, 90, 255, 0.22), transparent 72%),
     rgba(6, 10, 24, 0.74);
@@ -3096,23 +3099,27 @@ body,
 }
 
 .paywall-card {
-  width: min(94vw, 390px);
-  border-radius: 24px;
-  border: 1px solid rgba(191, 210, 255, 0.3);
-  padding: 18px 16px 14px;
+  width: min(92vw, 420px);
+  border-radius: 26px;
+  border: 1px solid rgba(191, 210, 255, 0.34);
+  padding: 22px 18px 14px;
   background:
-    radial-gradient(260px 140px at 50% 12%, rgba(255, 205, 116, 0.19), transparent 68%),
-    radial-gradient(260px 160px at 100% 100%, rgba(130, 92, 255, 0.19), transparent 70%),
-    linear-gradient(180deg, rgba(24, 38, 76, 0.82), rgba(16, 26, 58, 0.86));
+    radial-gradient(280px 150px at 50% 0%, rgba(255, 210, 128, 0.2), transparent 70%),
+    radial-gradient(260px 180px at 100% 100%, rgba(139, 97, 255, 0.2), transparent 72%),
+    linear-gradient(180deg, rgba(24, 38, 76, 0.84), rgba(14, 24, 56, 0.9));
   box-shadow:
     0 24px 54px rgba(2, 8, 24, 0.58),
     0 0 0 1px rgba(255, 255, 255, 0.06) inset;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
 }
 
 .paywall-card__title {
+  margin: 0;
   font-size: 24px;
-  font-weight: 800;
-  line-height: 1.08;
+  font-weight: 820;
+  line-height: 1.1;
   letter-spacing: -0.02em;
   text-align: center;
   color: rgba(248, 252, 255, 0.98);
@@ -3128,38 +3135,115 @@ body,
 }
 
 .paywall-card__meta {
-  margin-top: 10px;
+  margin: 12px auto 0;
+  padding: 8px 12px;
+  border-radius: 999px;
+  border: 1px solid rgba(184, 205, 250, 0.36);
+  background: linear-gradient(180deg, rgba(90, 114, 173, 0.34), rgba(53, 73, 130, 0.24));
   text-align: center;
-  font-size: 13px;
-  color: rgba(186, 206, 246, 0.92);
+  font-size: 12.5px;
+  color: rgba(198, 216, 251, 0.95);
+}
+
+.paywall-card__actions {
+  margin-top: 16px;
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 10px;
 }
 
 .paywall-card__cta {
+  --block-w: 100%;
+  display: block;
   width: 100%;
-  margin-top: 12px;
+  max-width: none;
+  margin: 0;
+}
+
+.paywall-card__cta .glass-cta__inner {
+  height: 56px;
 }
 
 .paywall-card__cta .glass-cta__text {
-  font-size: 18px;
+  font-size: 17px;
   font-weight: 700;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.paywall-card__cta:not(.paywall-card__cta--ghost) .glass-cta__inner {
+  border-color: rgba(255, 220, 148, 0.52);
+  background: linear-gradient(
+    110deg,
+    rgba(255, 184, 88, 0.9),
+    rgba(241, 137, 86, 0.86) 46%,
+    rgba(135, 111, 255, 0.84)
+  );
+  box-shadow:
+    0 8px 22px rgba(11, 18, 43, 0.34),
+    0 0 0 1px rgba(255, 255, 255, 0.15) inset;
+}
+
+.paywall-card__cta:not(.paywall-card__cta--ghost) .glass-cta__text {
+  color: rgba(255, 255, 255, 0.98);
+  text-shadow: 0 6px 14px rgba(19, 16, 46, 0.35);
 }
 
 .paywall-card__cta--ghost .glass-cta__inner {
   border-color: rgba(166, 190, 246, 0.34);
-  background:
-    linear-gradient(180deg, rgba(79, 98, 154, 0.5), rgba(41, 58, 109, 0.58));
+  background: linear-gradient(180deg, rgba(79, 98, 154, 0.5), rgba(41, 58, 109, 0.58));
+  box-shadow:
+    0 8px 22px rgba(7, 13, 35, 0.32),
+    0 0 0 1px rgba(255, 255, 255, 0.09) inset;
 }
 
 .paywall-card__close {
-  margin: 10px auto 0;
+  margin: 12px auto 0;
   border: 0;
   background: transparent;
-  color: rgba(212, 224, 252, 0.84);
-  font-size: 14px;
+  color: rgba(218, 229, 252, 0.9);
+  font-size: 15px;
+  font-weight: 500;
   line-height: 1.2;
   display: block;
-  padding: 6px 8px;
+  padding: 8px 10px;
   cursor: pointer;
+}
+
+@media (max-width: 375px) {
+  .paywall-card {
+    width: min(94vw, 420px);
+    border-radius: 22px;
+    padding: 18px 14px 12px;
+  }
+
+  .paywall-card__title {
+    font-size: 21px;
+  }
+
+  .paywall-card__text {
+    font-size: 14px;
+    line-height: 1.32;
+  }
+
+  .paywall-card__cta .glass-cta__inner {
+    height: 52px;
+  }
+
+  .paywall-card__cta .glass-cta__text {
+    font-size: 16px;
+  }
+}
+
+@media (min-width: 740px) {
+  .paywall-card {
+    width: min(88vw, 470px);
+    padding: 24px 22px 16px;
+  }
+
+  .paywall-card__actions {
+    grid-template-columns: 1fr 1fr;
+  }
 }
 
 @keyframes auth-ring-spin {

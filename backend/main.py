@@ -1625,6 +1625,145 @@ async def _ensure_card_day_memory_event(
         log.warning("Memory ingest failed for card_of_day id=%s: %s", row.id, repr(exc))
 
 
+def _md_excerpt(text: str, *, max_chars: int = 170) -> str:
+    src = str(text or "")
+    if not src.strip():
+        return ""
+    src = re.sub(r"```.*?```", " ", src, flags=re.S)
+    src = re.sub(r"`[^`]*`", " ", src)
+    src = re.sub(r"(?m)^\s{0,3}#{1,6}\s*", "", src)
+    src = re.sub(r"(?m)^\s*[-*•]\s*", "", src)
+    src = re.sub(r"[*_>~]", " ", src)
+    src = re.sub(r"\s+", " ", src).strip(" .")
+    if not src:
+        return ""
+    first = re.split(r"(?<=[.!?])\s+", src, maxsplit=1)[0].strip(" .")
+    out = first or src
+    if len(out) <= max_chars:
+        return out
+    cut = out[:max_chars].rsplit(" ", 1)[0].strip()
+    return cut or out[:max_chars].strip()
+
+
+def _ru_days_ago(days: int) -> str:
+    d = max(1, int(days))
+    tail = d % 100
+    if 11 <= tail <= 14:
+        suffix = "дней"
+    else:
+        last = d % 10
+        if last == 1:
+            suffix = "день"
+        elif 2 <= last <= 4:
+            suffix = "дня"
+        else:
+            suffix = "дней"
+    return f"{d} {suffix} назад"
+
+
+def _topic_focus_label(topic: str) -> str:
+    code = str(topic or "").strip().lower()
+    return {
+        "relations": "отношениях и личных границах",
+        "career": "работе, решениях и ролях",
+        "finance": "деньгах и устойчивости",
+        "other": "общем внутреннем фоне и выборе шага",
+    }.get(code, "общем внутреннем фоне и выборе шага")
+
+
+async def _build_card_day_repeat_note(
+    db: AsyncSession,
+    *,
+    user_id: int,
+    day_key: str,
+    card_name: str,
+    is_reversed: bool,
+    topic: str,
+    question: str,
+) -> str:
+    name = str(card_name or "").strip()
+    if not name:
+        return ""
+
+    prev_q = await db.execute(
+        select(CardOfDay)
+        .where(
+            CardOfDay.user_id == int(user_id),
+            CardOfDay.card_name == name,
+            CardOfDay.day_key < str(day_key),
+        )
+        .order_by(desc(CardOfDay.day_key))
+        .limit(1)
+    )
+    prev = prev_q.scalar_one_or_none()
+    if not prev:
+        return ""
+
+    days_ago_text = str(getattr(prev, "day_key", "") or "").strip()
+    try:
+        curr_date = date.fromisoformat(str(day_key))
+        prev_date = date.fromisoformat(str(prev.day_key))
+        delta_days = max(1, int((curr_date - prev_date).days))
+        days_ago_text = _ru_days_ago(delta_days)
+    except Exception:
+        pass
+
+    prev_excerpt = _md_excerpt(str(getattr(prev, "description", "") or ""))
+    if not prev_excerpt:
+        prev_excerpt = f"фокус был на теме о { _topic_focus_label(str(getattr(prev, 'topic', 'other') or 'other')) }"
+
+    q = str(question or "").strip()
+    if q:
+        now_line = f"фокус смещён к вопросу: «{q}»"
+    else:
+        now_line = f"фокус на теме о { _topic_focus_label(topic) }"
+
+    prev_orient = "перевёрнутая" if bool(getattr(prev, "is_reversed", False)) else "прямая"
+    curr_orient = "перевёрнутая" if bool(is_reversed) else "прямая"
+    orient_line = ""
+    if prev_orient != curr_orient:
+        orient_line = f"Ориентация изменилась: тогда карта была {prev_orient}, сейчас {curr_orient}.\n"
+
+    return (
+        "## Повтор карты дня\n"
+        f"Смотрите, карта «{name}» уже выпадала {days_ago_text} ({str(prev.day_key)}).\n"
+        f"{orient_line}"
+        f"Тогда: {prev_excerpt}.\n"
+        f"Сейчас: {now_line}.\n"
+        "Сверьте, что в вашем состоянии повторяется, а что уже сдвинулось."
+    ).strip()
+
+
+async def _decorate_card_day_description_with_repeat(
+    db: AsyncSession,
+    *,
+    user_id: int,
+    day_key: str,
+    card_name: str,
+    is_reversed: bool,
+    topic: str,
+    question: str,
+    description: str,
+) -> str:
+    src = str(description or "").strip()
+    if not src:
+        return src
+    if re.search(r"(?im)^\s*##\s*Повтор\s+карты\s+дня\b", src):
+        return src
+    note = await _build_card_day_repeat_note(
+        db,
+        user_id=int(user_id),
+        day_key=str(day_key),
+        card_name=str(card_name or ""),
+        is_reversed=bool(is_reversed),
+        topic=str(topic or "other"),
+        question=str(question or ""),
+    )
+    if not note:
+        return src
+    return f"{note}\n\n{src}".strip()
+
+
 def _get_bearer_token(authorization: Optional[str]) -> str:
     if not authorization:
         raise HTTPException(status_code=401, detail="Missing Authorization header")
@@ -4966,6 +5105,16 @@ async def create_or_get_card_of_day(
             row=existing,
             is_reversed_hint=bool(getattr(existing, "is_reversed", False)),
         )
+        decorated_description = await _decorate_card_day_description_with_repeat(
+            db,
+            user_id=int(current_user.id),
+            day_key=str(existing.day_key),
+            card_name=str(existing.card_name or ""),
+            is_reversed=bool(getattr(existing, "is_reversed", False)),
+            topic=str(existing.topic or "other"),
+            question=str(existing.question or ""),
+            description=str(existing.description or ""),
+        )
         return {
             "day_key": existing.day_key,
             "topic": existing.topic,
@@ -4973,7 +5122,7 @@ async def create_or_get_card_of_day(
             "card_index": existing.card_index,
             "card_name": existing.card_name,
             "is_reversed": bool(getattr(existing, "is_reversed", False)),
-            "description": existing.description,
+            "description": decorated_description,
         }
 
     effective_deck = min(max(int(payload.deck_size), 1), DECK_SIZE)
@@ -4999,6 +5148,17 @@ async def create_or_get_card_of_day(
             detail="LLM недоступна. Проверь OPENAI_API_KEY/OPENAI_MODEL и доступ к OpenAI. "
                    "Если хочешь fallback — отправь force_llm=false.",
         )
+
+    description = await _decorate_card_day_description_with_repeat(
+        db,
+        user_id=int(current_user.id),
+        day_key=str(day_key),
+        card_name=str(card["name"] or ""),
+        is_reversed=bool(is_reversed),
+        topic=str(payload.topic or "other"),
+        question=str(payload.question or ""),
+        description=str(description or ""),
+    )
 
     row = CardOfDay(
         user_id=current_user.id,
@@ -5053,6 +5213,16 @@ async def get_card_of_day_today(
         row=existing,
         is_reversed_hint=bool(getattr(existing, "is_reversed", False)),
     )
+    decorated_description = await _decorate_card_day_description_with_repeat(
+        db,
+        user_id=int(current_user.id),
+        day_key=str(existing.day_key),
+        card_name=str(existing.card_name or ""),
+        is_reversed=bool(getattr(existing, "is_reversed", False)),
+        topic=str(existing.topic or "other"),
+        question=str(existing.question or ""),
+        description=str(existing.description or ""),
+    )
 
     return {
         "day_key": existing.day_key,
@@ -5061,7 +5231,7 @@ async def get_card_of_day_today(
         "card_index": existing.card_index,
         "card_name": existing.card_name,
         "is_reversed": bool(getattr(existing, "is_reversed", False)),
-        "description": existing.description,
+        "description": decorated_description,
     }
 
 
@@ -5343,30 +5513,43 @@ async def photo_analysis(
         context = (extra_context or "").strip()
         if not consider_reversed:
             context = f"{context}\nИгнорируй перевёрнутые позиции, считай карты прямыми.".strip()
-        _, memory_prompt_context, _ = await _memory_context_for_user(
-            db,
-            current_user,
-            question=question,
-            current_cards=[],
-        )
-        if memory_prompt_context:
-            context = (
-                f"{context}\n\n{memory_prompt_context}".strip()
-                if context
-                else memory_prompt_context
-            )
-        description, cards = await generate_photo_analysis_llm(
+        # 1) Сначала только детекция карт (без интерпретации).
+        _, cards = await generate_photo_analysis_llm(
             topic=topic,
             question=question,
             image_bytes=data,
             image_mime=content_type,
             extra_context=context,
             require_llm=force_llm,
-            skip_interpretation=detect_only,
+            skip_interpretation=True,
             quota_register=_vision_register_request_global,
             quota_try_escalate=_vision_try_escalate_global,
             quota_mark_forced_escalation=_vision_mark_forced_escalation_global,
         )
+        description = ""
+        # 2) Для финального ответа собираем history-контекст уже по распознанным картам.
+        if not detect_only and cards:
+            interpret_context = context
+            _, memory_prompt_context, _ = await _memory_context_for_user(
+                db,
+                current_user,
+                question=question,
+                current_cards=list(cards or []),
+            )
+            if memory_prompt_context:
+                interpret_context = (
+                    f"{interpret_context}\n\n{memory_prompt_context}".strip()
+                    if interpret_context
+                    else memory_prompt_context
+                )
+            description = await generate_spread_text_llm(
+                topic=topic,
+                question=question,
+                spread_type="photo_analysis",
+                cards=list(cards or []),
+                extra_context=interpret_context,
+                require_llm=force_llm,
+            )
     except Exception as e:
         log.exception("LLM photo-analysis failed: %s", repr(e))
         if force_llm:

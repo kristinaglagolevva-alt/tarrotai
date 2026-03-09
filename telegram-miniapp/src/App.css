@@ -5594,6 +5594,35 @@ button.profile-link-row {
   font-size: clamp(24px, 5.6vw, 30px);
 }
 
+.home-guided-zone {
+  padding: 6px 0 10px;
+}
+
+.home-guided-zone > .home-section-title {
+  margin: 0;
+}
+
+.home-guided-zone > .home-section-title + .ask-wrap,
+.home-guided-zone > .home-section-title + .seg,
+.home-guided-zone > .home-section-title + .spread-soft-hint {
+  margin-top: 8px;
+}
+
+.home-guided-zone > .ask-wrap + .home-section-title,
+.home-guided-zone > .seg + .home-section-title,
+.home-guided-zone > .spread-list + .home-section-title {
+  margin-top: 14px;
+}
+
+.home-guided-zone > .spread-soft-hint {
+  min-height: 0;
+  margin: 0;
+}
+
+.home-guided-zone > .spread-soft-hint + .spread-list {
+  margin-top: 6px;
+}
+
 .home-head {
   width: var(--block-w);
   display: flex;

@@ -5595,7 +5595,7 @@ button.profile-link-row {
 }
 
 .home-guided-zone {
-  padding: 6px 0 10px;
+  padding: 10px 0 16px;
 }
 
 .home-guided-zone > .home-section-title {
@@ -5605,13 +5605,13 @@ button.profile-link-row {
 .home-guided-zone > .home-section-title + .ask-wrap,
 .home-guided-zone > .home-section-title + .seg,
 .home-guided-zone > .home-section-title + .spread-soft-hint {
-  margin-top: 8px;
+  margin-top: 12px;
 }
 
 .home-guided-zone > .ask-wrap + .home-section-title,
 .home-guided-zone > .seg + .home-section-title,
 .home-guided-zone > .spread-list + .home-section-title {
-  margin-top: 14px;
+  margin-top: 20px;
 }
 
 .home-guided-zone > .spread-soft-hint {
@@ -5620,7 +5620,7 @@ button.profile-link-row {
 }
 
 .home-guided-zone > .spread-soft-hint + .spread-list {
-  margin-top: 6px;
+  margin-top: 10px;
 }
 
 .home-head {

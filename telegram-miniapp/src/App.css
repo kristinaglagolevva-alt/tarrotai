@@ -5592,10 +5592,12 @@ button.profile-link-row {
   margin: 4px 0 0;
   padding-left: 2px;
   font-size: clamp(24px, 5.6vw, 30px);
+  color: rgba(255, 255, 255, 0.985);
+  text-shadow: 0 10px 26px rgba(3, 9, 29, 0.56);
 }
 
 .home-guided-zone {
-  padding: 10px 0 16px;
+  padding: 2px 0 12px;
 }
 
 .home-guided-zone > .home-section-title {
@@ -5605,13 +5607,13 @@ button.profile-link-row {
 .home-guided-zone > .home-section-title + .ask-wrap,
 .home-guided-zone > .home-section-title + .seg,
 .home-guided-zone > .home-section-title + .spread-soft-hint {
-  margin-top: 12px;
+  margin-top: 10px;
 }
 
 .home-guided-zone > .ask-wrap + .home-section-title,
 .home-guided-zone > .seg + .home-section-title,
 .home-guided-zone > .spread-list + .home-section-title {
-  margin-top: 20px;
+  margin-top: 18px;
 }
 
 .home-guided-zone > .spread-soft-hint {
@@ -5620,7 +5622,7 @@ button.profile-link-row {
 }
 
 .home-guided-zone > .spread-soft-hint + .spread-list {
-  margin-top: 10px;
+  margin-top: 8px;
 }
 
 .home-head {

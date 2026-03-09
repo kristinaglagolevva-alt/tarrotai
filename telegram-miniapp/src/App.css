@@ -5597,32 +5597,32 @@ button.profile-link-row {
 }
 
 .home-guided-zone {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  row-gap: 12px;
   padding: 0 0 12px;
+}
+
+.home-guided-zone > * {
+  margin: 0;
 }
 
 .home-guided-zone > .home-section-title {
   margin: 0;
 }
 
-.home-guided-zone > .home-section-title + .ask-wrap,
-.home-guided-zone > .home-section-title + .seg,
 .home-guided-zone > .home-section-title + .spread-soft-hint {
-  margin-top: 12px;
-}
-
-.home-guided-zone > .ask-wrap + .home-section-title,
-.home-guided-zone > .seg + .home-section-title,
-.home-guided-zone > .spread-list + .home-section-title {
-  margin-top: 16px;
+  margin-top: 0;
 }
 
 .home-guided-zone > .spread-soft-hint {
   min-height: 0;
   margin: 0;
+  display: none;
 }
 
-.home-guided-zone > .spread-soft-hint + .spread-list {
-  margin-top: 9px;
+.home-guided-zone > .spread-soft-hint.is-visible {
+  display: block;
 }
 
 .home-head {

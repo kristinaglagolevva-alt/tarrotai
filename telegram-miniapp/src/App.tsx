@@ -1443,6 +1443,7 @@ useEffect(() => {
   }
 
   const [needsMotionPermission, setNeedsMotionPermission] = useState(false)
+  const [motionParallaxEnabled, setMotionParallaxEnabled] = useState(false)
   const [pressed, setPressed] = useState(false)
 
   const [askInputFocused, setAskInputFocused] = useState(false)
@@ -1798,7 +1799,9 @@ useEffect(() => {
       tgtGX = clamp(ax / 9.8, -1, 1)
       tgtGY = clamp(ay / 9.8, -1, 1)
     }
-    const useGyroParallax = !lowPowerDevice && !reducedMotion
+    const useGyroParallax = motionParallaxEnabled && !reducedMotion
+    const gyroMix = useGyroParallax ? (lowPowerDevice ? 0.22 : 0.35) : 0
+    const pointerMix = 1 - gyroMix
     if (useGyroParallax) {
       window.addEventListener('devicemotion', onMotion, { passive: true })
     }
@@ -1914,8 +1917,8 @@ useEffect(() => {
       gx += (tgtGX - gx) * 0.06
       gy += (tgtGY - gy) * 0.06
 
-      const mixX = pX * 0.65 + gx * 0.35
-      const mixY = pY * 0.65 + gy * 0.35
+      const mixX = pX * pointerMix + gx * gyroMix
+      const mixY = pY * pointerMix + gy * gyroMix
 
       appEl.style.setProperty('--bgx', `${50 + mixX * PARALLAX.bgX}%`)
       appEl.style.setProperty('--bgy', `${50 + mixY * PARALLAX.bgY}%`)
@@ -2004,7 +2007,7 @@ useEffect(() => {
         window.removeEventListener('devicemotion', onMotion as any)
       }
     }
-  }, [])
+  }, [motionParallaxEnabled])
 
   /* =============================================================================================
      [17] iOS: РАЗРЕШЕНИЕ НА MOTION
@@ -2022,9 +2025,12 @@ useEffect(() => {
       const DME = (window as any).DeviceMotionEvent
       if (typeof DME?.requestPermission === 'function') {
         const res = await DME.requestPermission()
-        setNeedsMotionPermission(res !== 'granted')
+        const granted = res === 'granted'
+        setNeedsMotionPermission(!granted)
+        if (granted) setMotionParallaxEnabled(true)
       } else {
         setNeedsMotionPermission(false)
+        setMotionParallaxEnabled(true)
       }
     } catch {
       setNeedsMotionPermission(true)
@@ -3125,6 +3131,8 @@ useEffect(() => {
         setCardRevealed(false)
         if (needsMotionPermission) {
           void requestMotion()
+        } else {
+          setMotionParallaxEnabled(true)
         }
       }
       setCardDayLoading(false)
@@ -3782,6 +3790,7 @@ useEffect(() => {
     if (threeQuestion !== effectiveQuestion) setThreeQuestion(effectiveQuestion)
 
     if (needsMotionPermission) await requestMotion()
+    else setMotionParallaxEnabled(true)
 
     threeLastAccelRef.current = null
     threeShakeCooldownRef.current = 0
@@ -3900,6 +3909,7 @@ useEffect(() => {
 
   const autoShuffleThree = async () => {
     if (needsMotionPermission) await requestMotion()
+    else setMotionParallaxEnabled(true)
 
     setThreeShakeEnabled(true)
     setThreeReadyToOpen(false)
@@ -5527,6 +5537,7 @@ useEffect(() => {
     if (view !== 'card_day_prep') return
     if (shakenOnce) return
     if (needsMotionPermission) await requestMotion()
+    else setMotionParallaxEnabled(true)
 
     setShakeEnabled(true)
 

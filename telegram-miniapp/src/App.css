@@ -750,6 +750,14 @@ body,
   filter: drop-shadow(0 2px 8px rgba(11, 30, 72, 0.3));
 }
 
+.glass-cta--primary-footer .glass-cta__icon img {
+  width: 26px;
+  height: 26px;
+  display: block;
+  opacity: 0.95;
+  filter: drop-shadow(0 3px 10px rgba(10, 28, 70, 0.35));
+}
+
 .glass-cta--primary-footer .glass-cta__text {
   position: relative;
   z-index: 1;
@@ -779,6 +787,11 @@ body,
 .glass-cta--primary-footer.is-inactive .glass-cta__icon {
   color: rgba(232, 241, 255, 0.62);
   text-shadow: none;
+}
+
+.glass-cta--primary-footer.is-inactive .glass-cta__icon img {
+  opacity: 0.58;
+  filter: none;
 }
 
 .glass-cta--primary-footer.is-error .glass-cta__inner {

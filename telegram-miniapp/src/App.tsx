@@ -31,6 +31,7 @@ import cameraIcon from './assets/icons/camera.png'
 import futureIcon from './assets/icons/future_icon.png'
 import threeCardIcon from './assets/icons/three_card_icon.png'
 import selectCardIcon from './assets/icons/select_icon.png'
+import startSunUserWhiteIcon from './assets/icons/start-sun-user-white.png'
 
 // ✅ ЗАДНЯЯ СТОРОНА КАРТЫ — ВСЕГДА ТОЛЬКО ЭТА
 import backCardImg from './assets/cards/back/back.png'
@@ -597,28 +598,7 @@ function SpreadIcon({ kind }: { kind: 'sun' | 'clock' | 'cards' | 'branch' }) {
 }
 
 function StartReadingIcon() {
-  const wavyAngles = [-90, -45, 0, 45, 90, 135, 180, 225]
-  const pointedAngles = [-67.5, -22.5, 22.5, 67.5, 112.5, 157.5, 202.5, 247.5]
-  return (
-    <svg viewBox="0 0 64 64" aria-hidden="true" fill="none">
-      <g stroke="currentColor" strokeLinecap="round" strokeLinejoin="round">
-        {wavyAngles.map((angle) => (
-          <g key={`wavy-${angle}`} transform={`rotate(${angle} 32 32)`}>
-            <path d="M32 4.8c2.3 3 2.7 7 1.45 10.45" strokeWidth="1.55" />
-            <path d="M32 7.7c1.45 2.08 1.72 4.73.84 7.3" strokeWidth="1.2" opacity="0.86" />
-            <path d="M32 10.4c.92 1.3 1.03 2.95.43 4.52" strokeWidth="0.95" opacity="0.7" />
-          </g>
-        ))}
-        {pointedAngles.map((angle) => (
-          <g key={`point-${angle}`} transform={`rotate(${angle} 32 32)`}>
-            <path d="M32 6.4 29.6 15.7 34.4 15.7 32 6.4Z" strokeWidth="1.45" />
-          </g>
-        ))}
-        <circle cx="32" cy="32" r="14.8" strokeWidth="1.75" />
-        <circle cx="32" cy="32" r="16.9" strokeWidth="1.1" opacity="0.72" />
-      </g>
-    </svg>
-  )
+  return <img src={startSunUserWhiteIcon} alt="" aria-hidden="true" />
 }
 
 /* =================================================================================================

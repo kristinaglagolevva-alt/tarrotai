@@ -191,7 +191,7 @@ SUPPORT_INBOX_WEBHOOK_URL = (
     os.getenv("SUPPORT_INBOX_WEBHOOK_URL")
     or "https://api.tarrotai.ru/support/inbox/webhook"
 ).strip()
-SBP_AUTOPAY_ENABLED = str(os.getenv("SBP_AUTOPAY_ENABLED", "1")).strip().lower() not in {"0", "false", "no"}
+SBP_AUTOPAY_ENABLED = str(os.getenv("SBP_AUTOPAY_ENABLED", "0")).strip().lower() not in {"0", "false", "no"}
 SBP_AUTOPAY_PLAN_CODE = (os.getenv("SBP_AUTOPAY_PLAN_CODE") or "sub_month").strip().lower()
 SBP_AUTOPAY_INTERVAL_DAYS = max(1, int(os.getenv("SBP_AUTOPAY_INTERVAL_DAYS", "30")))
 SBP_AUTOPAY_MAX_FAILS = max(1, int(os.getenv("SBP_AUTOPAY_MAX_FAILS", "3")))

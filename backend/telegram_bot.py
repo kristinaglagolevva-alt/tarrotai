@@ -118,7 +118,7 @@ CLICK_BOT_LINK_SECRET = (
     or ""
 ).strip()
 CLICK_BOT_LINK_TTL_SEC = max(60, int(os.environ.get("CLICK_BOT_LINK_TTL_SEC", "900")))
-SBP_AUTOPAY_ENABLED = str(os.environ.get("SBP_AUTOPAY_ENABLED", "1")).strip().lower() not in {"0", "false", "no"}
+SBP_AUTOPAY_ENABLED = str(os.environ.get("SBP_AUTOPAY_ENABLED", "0")).strip().lower() not in {"0", "false", "no"}
 SBP_AUTOPAY_PLAN_KEY = (os.environ.get("SBP_AUTOPAY_PLAN_CODE") or "sub_month").strip().lower()
 
 APP_URL_RAW = (os.environ.get("TELEGRAM_APP_URL") or "").strip()  # например https://tarrotai.ru
@@ -1002,10 +1002,17 @@ def _howto_text() -> str:
 
 
 def _subscription_manage_text() -> str:
+    if SBP_AUTOPAY_ENABLED:
+        return (
+            "<b>Управление подпиской</b>\n\n"
+            "Выберите действие:\n"
+            "• подключить/настроить СБП автоплатёж;\n"
+            "• запросить отмену подписки через поддержку;\n"
+            "• перейти к тарифам и оплате."
+        )
     return (
         "<b>Управление подпиской</b>\n\n"
         "Выберите действие:\n"
-        "• подключить/настроить СБП автоплатёж;\n"
         "• запросить отмену подписки через поддержку;\n"
         "• перейти к тарифам и оплате."
     )

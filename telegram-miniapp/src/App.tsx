@@ -1820,9 +1820,24 @@ useEffect(() => {
 
     const comets: Comet[] = []
 
-    const spawnComet = () => {
+    const pickCometEdge = (introTopBias: boolean) => {
+      const r = Math.random()
+      if (introTopBias) {
+        if (r < 0.84) return 0 // top
+        if (r < 0.92) return 3 // left
+        if (r < 0.98) return 1 // right
+        return 2 // bottom
+      }
+
+      if (r < 0.62) return 0 // top
+      if (r < 0.79) return 3 // left
+      if (r < 0.94) return 1 // right
+      return 2 // bottom
+    }
+
+    const spawnComet = (introTopBias = false) => {
       const pad = 120
-      const edge = Math.floor(Math.random() * 4) // 0=top,1=right,2=bottom,3=left
+      const edge = pickCometEdge(introTopBias) // 0=top,1=right,2=bottom,3=left
 
       let x = 0
       let y = 0
@@ -1842,7 +1857,9 @@ useEffect(() => {
       }
 
       const targetX = rand(width * 0.14, width * 0.86)
-      const targetY = rand(height * 0.12, height * 0.88)
+      const targetY = introTopBias
+        ? rand(height * 0.16, height * 0.58)
+        : rand(height * 0.12, height * 0.88)
       const dirX = targetX - x
       const dirY = targetY - y
       const len = Math.hypot(dirX, dirY) || 1
@@ -1864,11 +1881,16 @@ useEffect(() => {
     }
 
     let last = performance.now()
+    let sceneAge = 0
     let cometTimer = 0
     const cometInterval = lowPowerDevice ? 1.75 : 1.08
     const cometChance = lowPowerDevice ? 0.56 : 0.86
     const maxComets = lowPowerDevice ? 3 : 5
     let rafId = 0
+
+    const introBurstCount = lowPowerDevice ? 2 : 3
+    for (let i = 0; i < introBurstCount; i++) spawnComet(true)
+    cometTimer = cometInterval * 0.35
 
     const draw = (now: number) => {
       const frameGap = now - last
@@ -1879,6 +1901,7 @@ useEffect(() => {
 
       const dt = clamp(frameGap / 1000, 0, 0.05)
       last = now
+      sceneAge += dt
 
       if (document.hidden) {
         rafId = requestAnimationFrame(draw)
@@ -1923,7 +1946,9 @@ useEffect(() => {
       cometTimer += dt
       if (cometTimer > cometInterval) {
         cometTimer = 0
-        if (comets.length < maxComets && Math.random() < cometChance) spawnComet()
+        const introTopBias = sceneAge < 6.5
+        const chance = introTopBias ? Math.min(0.98, cometChance + 0.1) : cometChance
+        if (comets.length < maxComets && Math.random() < chance) spawnComet(introTopBias)
       }
 
       for (let i = comets.length - 1; i >= 0; i--) {

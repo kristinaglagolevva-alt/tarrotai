@@ -5208,6 +5208,13 @@ button.profile-link-row {
   gap: 8px;
 }
 
+.photo-field__input-row {
+  width: 100%;
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+}
+
 .photo-field__label {
   font-size: 15px;
   font-weight: 760;
@@ -5242,6 +5249,23 @@ button.profile-link-row {
 
 .photo-field__input::placeholder {
   color: rgba(187, 203, 236, 0.7);
+}
+
+.photo-field__input--with-mic {
+  flex: 1;
+  min-width: 0;
+  resize: none;
+}
+
+.photo-field__mic {
+  flex: 0 0 46px;
+  width: 46px;
+  height: 46px;
+  align-self: flex-end;
+}
+
+.photo-field__hint {
+  padding-left: 2px;
 }
 
 .photo-field__input--sm {

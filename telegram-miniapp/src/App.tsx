@@ -806,6 +806,7 @@ function PremiumFlipCard({
 
 type Stage = 'question' | 'spread'
 type View = 'home' | 'card_day_prep' | 'three_cards_prep' | 'past_present_future_prep' | 'decision_prep' | 'photo_analysis'
+type VoiceInputTarget = 'home' | 'photo_main'
 type BillingStatus = {
   free_limit: number
   month_used: number
@@ -1459,6 +1460,7 @@ useEffect(() => {
   ============================================================================================= */
 
   const [isRecording, setIsRecording] = useState(false)
+  const [activeVoiceTarget, setActiveVoiceTarget] = useState<VoiceInputTarget | null>(null)
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
   const chunksRef = useRef<BlobPart[]>([])
   const streamRef = useRef<MediaStream | null>(null)
@@ -2072,19 +2074,26 @@ useEffect(() => {
       streamRef.current = null
       chunksRef.current = []
       setIsRecording(false)
+      setActiveVoiceTarget(null)
     }
   }
 
-  const toggleRecording = async () => {
+  const toggleRecording = async (target: VoiceInputTarget = 'home') => {
+    const seedValue = target === 'photo_main' ? photoMainQuestion : question
+    const setTargetValue = target === 'photo_main' ? setPhotoMainQuestion : setQuestion
+
     if (isRecording) {
+      if (activeVoiceTarget === target) {
+        await stopRecording()
+        return
+      }
       await stopRecording()
-      return
     }
 
     const SpeechRecognitionCtor = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition
     if (typeof SpeechRecognitionCtor === 'function') {
       try {
-        speechSeedRef.current = question.trim()
+        speechSeedRef.current = seedValue.trim()
         speechFinalRef.current = ''
 
         const recognition = new SpeechRecognitionCtor()
@@ -2107,7 +2116,7 @@ useEffect(() => {
           }
 
           const full = [speechSeedRef.current, speechFinalRef.current, interim].filter(Boolean).join(' ').trim()
-          if (full) setQuestion(full)
+          if (full) setTargetValue(full)
         }
 
         recognition.onerror = async () => {
@@ -2117,12 +2126,14 @@ useEffect(() => {
         recognition.onend = () => {
           speechRecognitionRef.current = null
           const full = [speechSeedRef.current, speechFinalRef.current].filter(Boolean).join(' ').trim()
-          if (full) setQuestion(full)
+          if (full) setTargetValue(full)
           setIsRecording(false)
+          setActiveVoiceTarget(null)
         }
 
         recognition.start()
         setIsRecording(true)
+        setActiveVoiceTarget(target)
         return
       } catch (e) {
         console.error('Speech recognition unavailable, fallback to MediaRecorder', e)
@@ -2144,12 +2155,17 @@ useEffect(() => {
 
       recorder.start()
       setIsRecording(true)
+      setActiveVoiceTarget(target)
     } catch (e) {
       console.error(e)
       setIsRecording(false)
+      setActiveVoiceTarget(null)
       await stopRecording()
     }
   }
+
+  const isHomeRecording = isRecording && activeVoiceTarget === 'home'
+  const isPhotoMainRecording = isRecording && activeVoiceTarget === 'photo_main'
 
   useEffect(() => {
     return () => {
@@ -6012,16 +6028,16 @@ useEffect(() => {
                         />
                         <button
                           type="button"
-                          className={`ask-mic ${isRecording ? 'recording' : ''}`}
-                          onClick={toggleRecording}
-                          aria-label={isRecording ? 'Остановить запись' : 'Начать запись'}
-                          title={isRecording ? 'Остановить запись' : 'Записать голосом'}
+                          className={`ask-mic ${isHomeRecording ? 'recording' : ''}`}
+                          onClick={() => void toggleRecording('home')}
+                          aria-label={isHomeRecording ? 'Остановить запись' : 'Начать запись'}
+                          title={isHomeRecording ? 'Остановить запись' : 'Записать голосом'}
                         >
                           <img className="ask-mic__icon" src={micIcon} alt="" aria-hidden="true" />
                         </button>
                       </div>
 
-                      <div className={`ask-hint ${isRecording ? 'is-visible' : ''}`}>Идёт запись… нажмите ещё раз, чтобы остановить</div>
+                      <div className={`ask-hint ${isHomeRecording ? 'is-visible' : ''}`}>Идёт запись… нажмите ещё раз, чтобы остановить</div>
                     </div>
 
                     <h2 className="home-section-title">Выберите категорию вопроса</h2>
@@ -6657,15 +6673,29 @@ useEffect(() => {
 
                   <div className="photo-field">
                     <label className="photo-field__label" htmlFor="photo-main-question">Ваш вопрос</label>
-                    <textarea
-                      id="photo-main-question"
-                      className="photo-field__input"
-                      value={photoMainQuestion}
-                      onChange={(e) => setPhotoMainQuestion(e.target.value)}
-                      placeholder="Что мне важно понять?"
-                      rows={3}
-                      enterKeyHint="send"
-                    />
+                    <div className="photo-field__input-row">
+                      <textarea
+                        id="photo-main-question"
+                        className="photo-field__input photo-field__input--with-mic"
+                        value={photoMainQuestion}
+                        onChange={(e) => setPhotoMainQuestion(e.target.value)}
+                        placeholder="Что мне важно понять?"
+                        rows={3}
+                        enterKeyHint="send"
+                      />
+                      <button
+                        type="button"
+                        className={`ask-mic photo-field__mic ${isPhotoMainRecording ? 'recording' : ''}`}
+                        onClick={() => void toggleRecording('photo_main')}
+                        aria-label={isPhotoMainRecording ? 'Остановить запись' : 'Начать запись'}
+                        title={isPhotoMainRecording ? 'Остановить запись' : 'Записать голосом'}
+                      >
+                        <img className="ask-mic__icon" src={micIcon} alt="" aria-hidden="true" />
+                      </button>
+                    </div>
+                    <div className={`ask-hint photo-field__hint ${isPhotoMainRecording ? 'is-visible' : ''}`}>
+                      Идёт запись… нажмите ещё раз, чтобы остановить
+                    </div>
                   </div>
 
                   <button

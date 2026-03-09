@@ -597,21 +597,25 @@ function SpreadIcon({ kind }: { kind: 'sun' | 'clock' | 'cards' | 'branch' }) {
 }
 
 function StartReadingIcon() {
+  const wavyAngles = [-90, -45, 0, 45, 90, 135, 180, 225]
+  const pointedAngles = [-67.5, -22.5, 22.5, 67.5, 112.5, 157.5, 202.5, 247.5]
   return (
-    <svg viewBox="0 0 24 24" aria-hidden="true" fill="none">
-      <g stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-        <circle cx="12" cy="12" r="4.25" />
-        <circle cx="12" cy="12" r="5.8" opacity="0.55" />
-
-        <path d="M12 2.2c.6 1 .95 2 .95 3.35" />
-        <path d="M21.8 12c-1 .6-2 .95-3.35.95" />
-        <path d="M12 21.8c-.6-1-.95-2-.95-3.35" />
-        <path d="M2.2 12c1-.6 2-.95 3.35-.95" />
-
-        <path d="M18.6 5.4c-.95 1-1.95 1.65-3.1 2.25" />
-        <path d="M18.6 18.6c-1-.95-1.65-1.95-2.25-3.1" />
-        <path d="M5.4 18.6c.95-1 1.95-1.65 3.1-2.25" />
-        <path d="M5.4 5.4c1 .95 1.65 1.95 2.25 3.1" />
+    <svg viewBox="0 0 64 64" aria-hidden="true" fill="none">
+      <g stroke="currentColor" strokeLinecap="round" strokeLinejoin="round">
+        {wavyAngles.map((angle) => (
+          <g key={`wavy-${angle}`} transform={`rotate(${angle} 32 32)`}>
+            <path d="M32 4.8c2.3 3 2.7 7 1.45 10.45" strokeWidth="1.55" />
+            <path d="M32 7.7c1.45 2.08 1.72 4.73.84 7.3" strokeWidth="1.2" opacity="0.86" />
+            <path d="M32 10.4c.92 1.3 1.03 2.95.43 4.52" strokeWidth="0.95" opacity="0.7" />
+          </g>
+        ))}
+        {pointedAngles.map((angle) => (
+          <g key={`point-${angle}`} transform={`rotate(${angle} 32 32)`}>
+            <path d="M32 6.4 29.6 15.7 34.4 15.7 32 6.4Z" strokeWidth="1.45" />
+          </g>
+        ))}
+        <circle cx="32" cy="32" r="14.8" strokeWidth="1.75" />
+        <circle cx="32" cy="32" r="16.9" strokeWidth="1.1" opacity="0.72" />
       </g>
     </svg>
   )

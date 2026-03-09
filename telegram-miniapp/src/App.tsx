@@ -1821,22 +1821,35 @@ useEffect(() => {
     const comets: Comet[] = []
 
     const spawnComet = () => {
-      const edge = Math.random()
+      const pad = 120
+      const edge = Math.floor(Math.random() * 4) // 0=top,1=right,2=bottom,3=left
+
       let x = 0
       let y = 0
 
-      if (edge < 0.5) {
-        x = rand(-width * 0.15, width * 0.25)
-        y = rand(-height * 0.25, 0)
+      if (edge === 0) {
+        x = rand(-pad, width + pad)
+        y = -pad
+      } else if (edge === 1) {
+        x = width + pad
+        y = rand(-pad, height + pad)
+      } else if (edge === 2) {
+        x = rand(-pad, width + pad)
+        y = height + pad
       } else {
-        x = rand(-width * 0.25, 0)
-        y = rand(-height * 0.15, height * 0.25)
+        x = -pad
+        y = rand(-pad, height + pad)
       }
 
-      const speed = rand(lowPowerDevice ? 440 : 520, lowPowerDevice ? 760 : 920)
-      const ang = rand(0.8, 1.05)
-      const vx = Math.cos(ang) * speed
-      const vy = Math.sin(ang) * speed
+      const targetX = rand(width * 0.14, width * 0.86)
+      const targetY = rand(height * 0.12, height * 0.88)
+      const dirX = targetX - x
+      const dirY = targetY - y
+      const len = Math.hypot(dirX, dirY) || 1
+
+      const speed = rand(lowPowerDevice ? 430 : 520, lowPowerDevice ? 720 : 900)
+      const vx = (dirX / len) * speed
+      const vy = (dirY / len) * speed
 
       comets.push({
         x,
@@ -1844,16 +1857,17 @@ useEffect(() => {
         vx,
         vy,
         life: 0,
-        maxLife: rand(lowPowerDevice ? 0.55 : 0.7, lowPowerDevice ? 1.05 : 1.25),
-        tail: rand(lowPowerDevice ? 68 : 90, lowPowerDevice ? 112 : 140),
-        width: rand(lowPowerDevice ? 1.1 : 1.3, lowPowerDevice ? 2.1 : 2.6),
+        maxLife: rand(lowPowerDevice ? 0.6 : 0.72, lowPowerDevice ? 1.1 : 1.32),
+        tail: rand(lowPowerDevice ? 72 : 94, lowPowerDevice ? 118 : 148),
+        width: rand(lowPowerDevice ? 1.1 : 1.35, lowPowerDevice ? 2.1 : 2.65),
       })
     }
 
     let last = performance.now()
     let cometTimer = 0
-    const cometInterval = lowPowerDevice ? 2.05 : 1.35
-    const cometChance = lowPowerDevice ? 0.4 : 0.75
+    const cometInterval = lowPowerDevice ? 1.75 : 1.08
+    const cometChance = lowPowerDevice ? 0.56 : 0.86
+    const maxComets = lowPowerDevice ? 3 : 5
     let rafId = 0
 
     const draw = (now: number) => {
@@ -1909,7 +1923,7 @@ useEffect(() => {
       cometTimer += dt
       if (cometTimer > cometInterval) {
         cometTimer = 0
-        if (Math.random() < cometChance) spawnComet()
+        if (comets.length < maxComets && Math.random() < cometChance) spawnComet()
       }
 
       for (let i = comets.length - 1; i >= 0; i--) {

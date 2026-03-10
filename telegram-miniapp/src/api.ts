@@ -7,6 +7,8 @@ const API_BASE =
   ((import.meta as any).env?.VITE_API_BASE as string | undefined)?.trim().replace(/\/$/, '') ||
   DEFAULT_API_BASE
 
+type ApiRequestInit = RequestInit & { timeoutMs?: number }
+
 async function readTextSafe(r: Response) {
   try {
     return await r.text()
@@ -15,13 +17,34 @@ async function readTextSafe(r: Response) {
   }
 }
 
-async function apiJson<T>(url: string, init?: RequestInit): Promise<T> {
-  const r = await fetch(url, init)
-  if (!r.ok) {
-    const txt = await readTextSafe(r)
-    throw new Error(`${r.status} ${r.statusText}${txt ? `: ${txt}` : ''}`)
+async function apiJson<T>(url: string, init?: ApiRequestInit): Promise<T> {
+  const timeoutMs = Math.max(0, Number(init?.timeoutMs || 0))
+  const reqInit: RequestInit = { ...(init || {}) }
+  delete (reqInit as any).timeoutMs
+
+  let timer: ReturnType<typeof setTimeout> | null = null
+  let controller: AbortController | null = null
+  if (timeoutMs > 0) {
+    controller = new AbortController()
+    reqInit.signal = controller.signal
+    timer = setTimeout(() => controller?.abort(), timeoutMs)
   }
-  return (await r.json()) as T
+
+  try {
+    const r = await fetch(url, reqInit)
+    if (!r.ok) {
+      const txt = await readTextSafe(r)
+      throw new Error(`${r.status} ${r.statusText}${txt ? `: ${txt}` : ''}`)
+    }
+    return (await r.json()) as T
+  } catch (e: any) {
+    if (String(e?.name || '') === 'AbortError' && timeoutMs > 0) {
+      throw new Error(`Network timeout after ${timeoutMs}ms`)
+    }
+    throw e
+  } finally {
+    if (timer) clearTimeout(timer)
+  }
 }
 
 // =============================== AUTH / ME ===============================
@@ -87,6 +110,7 @@ export async function getMe(token: string): Promise<MeDto> {
   return apiJson(`${API_BASE}/me`, {
     method: 'GET',
     headers: { Authorization: `Bearer ${token}` },
+    timeoutMs: 12000,
   })
 }
 
@@ -133,6 +157,7 @@ export async function getBillingStatus(token: string): Promise<BillingStatusDto>
   return apiJson(`${API_BASE}/billing/status`, {
     method: 'GET',
     headers: { Authorization: `Bearer ${token}` },
+    timeoutMs: 10000,
   })
 }
 
@@ -198,6 +223,7 @@ export async function telegramAuth(initData?: string): Promise<{ token: string; 
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ init_data }),
+    timeoutMs: 12000,
   })
 
   const token = (auth?.access_token || '').trim()

@@ -42,6 +42,22 @@ def _safe_rate(numer: int, denom: int) -> float:
     return round(float(numer) / float(denom), 4)
 
 
+def _currency_minor_divisor(code: str) -> int:
+    up = str(code or "").strip().upper()
+    # In our billing DB RUB amounts are stored in kopeks.
+    if up in {"RUB", "USD", "EUR"}:
+        return 100
+    # UZS is stored in whole sums in current integrations.
+    return 1
+
+
+def _to_major_amount(*, currency: str, raw_amount: int) -> int:
+    divisor = _currency_minor_divisor(currency)
+    if divisor <= 1:
+        return int(raw_amount or 0)
+    return int(round(float(raw_amount or 0) / float(divisor)))
+
+
 async def _load_activity_days(
     db: AsyncSession,
     *,
@@ -419,7 +435,10 @@ async def build_growth_snapshot(
     paid_users_by_currency: Dict[str, int] = {}
     for currency, revenue_raw, paid_users_raw in revenue_q.all():
         code = str(currency or "").strip().upper() or "UNK"
-        revenue_by_currency[code] = int(revenue_raw or 0)
+        revenue_by_currency[code] = _to_major_amount(
+            currency=code,
+            raw_amount=int(revenue_raw or 0),
+        )
         paid_users_by_currency[code] = int(paid_users_raw or 0)
 
     first_paid_sq = (
@@ -867,6 +886,7 @@ async def build_growth_snapshot(
         "notes": [
             "trial_to_month: доля пользователей, купивших trial и затем месячный тариф в окне conversion_window_days.",
             "unit_economics_by_currency: ARPPU/CAC/Payback считаются отдельно по каждой валюте.",
+            "Суммы в unit_economics_by_currency нормализуются в основные единицы валюты (например, RUB: копейки -> рубли).",
             "activation_funnel: поведение новых пользователей за период lookback_days.",
             "photo_funnel: конверсия пользователей фото-анализа в оплату в окне conversion_window_days.",
             "retention_summary: D1/D7/D30 + repeat paid 30d.",

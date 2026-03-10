@@ -1088,14 +1088,25 @@ useEffect(() => {
           setAuthStatus('ready')
         })
         return
-      } catch {
-        // jwt невалиден — очищаем и продолжаем телеграм‑авторизацию
-        clearStoredJwt()
-        safe(() => {
-          setToken(null)
-          setUser(null)
-          setBilling(null)
-        })
+      } catch (meErr: any) {
+        const raw = String(meErr?.message || meErr || '')
+        const isAuthRejected = /(?:^|\\b)(401|403)(?:\\b|$)|unauthorized|forbidden/i.test(raw)
+        if (isAuthRejected) {
+          // jwt действительно невалиден — очищаем и продолжаем Telegram auth
+          clearStoredJwt()
+          safe(() => {
+            setToken(null)
+            setUser(null)
+            setBilling(null)
+          })
+        } else {
+          // Временная сеть/таймаут: не сбрасываем сессию, чтобы не деавторизовать пользователя.
+          safe(() => {
+            setAuthStatus('error')
+            setAuthError('Проблема сети при проверке сессии. Нажмите «Повторить» или перезапустите мини‑приложение.')
+          })
+          return
+        }
       }
     }
 
@@ -1144,6 +1155,8 @@ useEffect(() => {
         uiError = 'Telegram не передал данные входа. Откройте приложение только через кнопку в боте.'
       } else if (/Invalid Telegram initData|initData expired|Invalid initData timestamp/i.test(raw)) {
         uiError = 'Данные Telegram устарели. Закройте мини‑приложение и откройте заново из бота.'
+      } else if (/Network timeout/i.test(raw)) {
+        uiError = 'Сеть отвечает слишком долго. Проверьте интернет и нажмите «Повторить».'
       } else if (/401|403/.test(raw)) {
         uiError = 'Ошибка авторизации Telegram. Закройте мини‑приложение и откройте снова.'
       }

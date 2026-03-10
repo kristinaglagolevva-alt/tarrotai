@@ -316,6 +316,7 @@ ANALYTICS_AD_SPEND_RUB = max(0, _safe_env_int("ANALYTICS_AD_SPEND_RUB", 0))
 ANALYTICS_EXCLUDE_TELEGRAM_IDS = _parse_csv_ints(ANALYTICS_EXCLUDE_TELEGRAM_IDS_RAW)
 ANALYTICS_EXCLUDE_SUPPORT_ADMINS = _env_bool("ANALYTICS_EXCLUDE_SUPPORT_ADMINS", False)
 ANALYTICS_EXCLUDE_INTERNAL_DEFAULT = _env_bool("ANALYTICS_EXCLUDE_INTERNAL_DEFAULT", False)
+ANALYTICS_EXCLUDE_TEST_PAYMENTS_DEFAULT = _env_bool("ANALYTICS_EXCLUDE_TEST_PAYMENTS_DEFAULT", False)
 ANALYTICS_MONTH_PRODUCT_CODES = _parse_csv_values(
     ANALYTICS_MONTH_PRODUCT_CODES_RAW,
     lower=True,
@@ -2248,6 +2249,7 @@ def _render_analytics_dashboard_html(
     ad_spend_uzs: int,
     ad_spend_rub: int,
     exclude_internal: bool,
+    exclude_test_payments: bool,
     token: Optional[str],
 ) -> str:
     trial = snapshot.get("trial_to_month") or {}
@@ -2267,10 +2269,39 @@ def _render_analytics_dashboard_html(
         "ad_spend_uzs": int(ad_spend_uzs),
         "ad_spend_rub": int(ad_spend_rub),
         "exclude_internal": 1 if bool(exclude_internal) else 0,
+        "exclude_test_payments": 1 if bool(exclude_test_payments) else 0,
     }
     if token:
         refresh_q["token"] = token
     refresh_url = f"/analytics/dashboard?{urlencode(refresh_q)}"
+
+    filter_q_base: Dict[str, Any] = {
+        "lookback_days": int(lookback_days),
+        "conversion_window_days": int(conversion_window_days),
+        "ad_spend_uzs": int(ad_spend_uzs),
+        "ad_spend_rub": int(ad_spend_rub),
+    }
+    if token:
+        filter_q_base["token"] = token
+
+    filter_all_users_q = dict(filter_q_base)
+    filter_all_users_q["exclude_internal"] = 0
+    filter_all_users_q["exclude_test_payments"] = 1 if bool(exclude_test_payments) else 0
+    filter_exclude_users_q = dict(filter_q_base)
+    filter_exclude_users_q["exclude_internal"] = 1
+    filter_exclude_users_q["exclude_test_payments"] = 1 if bool(exclude_test_payments) else 0
+    filter_all_payments_q = dict(filter_q_base)
+    filter_all_payments_q["exclude_internal"] = 1 if bool(exclude_internal) else 0
+    filter_all_payments_q["exclude_test_payments"] = 0
+    filter_prod_payments_q = dict(filter_q_base)
+    filter_prod_payments_q["exclude_internal"] = 1 if bool(exclude_internal) else 0
+    filter_prod_payments_q["exclude_test_payments"] = 1
+
+    all_users_url = f"/analytics/dashboard?{urlencode(filter_all_users_q)}"
+    exclude_users_url = f"/analytics/dashboard?{urlencode(filter_exclude_users_q)}"
+    all_payments_url = f"/analytics/dashboard?{urlencode(filter_all_payments_q)}"
+    production_payments_url = f"/analytics/dashboard?{urlencode(filter_prod_payments_q)}"
+    payments_scope_label = "боевые (без manual/test)" if bool(exclude_test_payments) else "все (включая manual/test)"
 
     currency_cards = ""
     for row in by_currency:
@@ -2383,6 +2414,7 @@ def _render_analytics_dashboard_html(
       white-space: nowrap;
     }}
     .section {{ margin-top: 12px; }}
+    .section-compact {{ margin-top: 8px; }}
     .title {{ margin: 0 0 8px; font-size: 15px; color: #d4e0ff; }}
     .grid {{
       display: grid;
@@ -2397,6 +2429,26 @@ def _render_analytics_dashboard_html(
       backdrop-filter: blur(14px);
     }}
     .card h3 {{ margin: 0 0 7px; font-size: 13px; color: #cfe0ff; }}
+    .chips {{
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 6px;
+    }}
+    .chip {{
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      padding: 6px 10px;
+      font-size: 12px;
+      color: #dbe6ff;
+      text-decoration: none;
+      background: rgba(255,255,255,0.06);
+    }}
+    .chip.active {{
+      color: #fff;
+      border-color: rgba(125, 165, 255, 0.68);
+      background: linear-gradient(90deg, rgba(122,92,255,0.42), rgba(102,166,255,0.42));
+    }}
     .kpi-label {{ font-size: 12px; color: var(--muted); margin-bottom: 5px; }}
     .kpi-val {{ font-size: 22px; font-weight: 800; letter-spacing: 0.2px; }}
     .funnel-row {{ margin-bottom: 8px; }}
@@ -2431,6 +2483,25 @@ def _render_analytics_dashboard_html(
       </div>
       <a class="btn" href="{escape(refresh_url)}">Обновить</a>
     </header>
+
+    <section class="section section-compact">
+      <div class="grid">
+        <article class="card list">
+          <h3>Пользователи</h3>
+          <div class="chips">
+            <a class="chip {'active' if not bool(exclude_internal) else ''}" href="{escape(all_users_url)}">Все</a>
+            <a class="chip {'active' if bool(exclude_internal) else ''}" href="{escape(exclude_users_url)}">Без внутренних</a>
+          </div>
+        </article>
+        <article class="card list">
+          <h3>Платежи</h3>
+          <div class="chips">
+            <a class="chip {'active' if not bool(exclude_test_payments) else ''}" href="{escape(all_payments_url)}">Все</a>
+            <a class="chip {'active' if bool(exclude_test_payments) else ''}" href="{escape(production_payments_url)}">Только боевые</a>
+          </div>
+        </article>
+      </div>
+    </section>
 
     <section class="section">
       <h2 class="title">Ключевые KPI</h2>
@@ -2489,6 +2560,7 @@ def _render_analytics_dashboard_html(
           <h3>Параметры</h3>
           <p>Lookback: <b>{int(lookback_days)} дн</b></p>
           <p>Conversion window: <b>{int(conversion_window_days)} дн</b></p>
+          <p>Payments: <b>{payments_scope_label}</b></p>
           <p>Ad spend UZS: <b>{_analytics_fmt_num(ad_spend_uzs)}</b></p>
           <p>Ad spend RUB: <b>{_analytics_fmt_num(ad_spend_rub)}</b></p>
         </article>
@@ -2521,6 +2593,7 @@ async def analytics_growth(
     ad_spend_uzs: Optional[int] = Query(default=None, ge=0),
     ad_spend_rub: Optional[int] = Query(default=None, ge=0),
     exclude_internal: bool = Query(default=ANALYTICS_EXCLUDE_INTERNAL_DEFAULT),
+    exclude_test_payments: bool = Query(default=ANALYTICS_EXCLUDE_TEST_PAYMENTS_DEFAULT),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -2539,6 +2612,7 @@ async def analytics_growth(
         ad_spend_by_currency={"UZS": safe_ad_spend_uzs, "RUB": safe_ad_spend_rub},
         free_limit=FREE_READINGS_PER_MONTH,
         exclude_user_ids=excluded_user_ids,
+        exclude_test_payments=exclude_test_payments,
     )
     return GrowthOut(**snapshot)
 
@@ -2552,6 +2626,7 @@ async def analytics_dashboard(
     ad_spend_uzs: Optional[int] = Query(default=None, ge=0),
     ad_spend_rub: Optional[int] = Query(default=None, ge=0),
     exclude_internal: bool = Query(default=ANALYTICS_EXCLUDE_INTERNAL_DEFAULT),
+    exclude_test_payments: bool = Query(default=ANALYTICS_EXCLUDE_TEST_PAYMENTS_DEFAULT),
     db: AsyncSession = Depends(get_db),
 ):
     _assert_analytics_token_only(
@@ -2572,6 +2647,7 @@ async def analytics_dashboard(
         ad_spend_by_currency={"UZS": safe_ad_spend_uzs, "RUB": safe_ad_spend_rub},
         free_limit=FREE_READINGS_PER_MONTH,
         exclude_user_ids=excluded_user_ids,
+        exclude_test_payments=exclude_test_payments,
     )
     html = _render_analytics_dashboard_html(
         snapshot=snapshot,
@@ -2580,6 +2656,7 @@ async def analytics_dashboard(
         ad_spend_uzs=safe_ad_spend_uzs,
         ad_spend_rub=safe_ad_spend_rub,
         exclude_internal=exclude_internal,
+        exclude_test_payments=exclude_test_payments,
         token=token,
     )
     return HTMLResponse(content=html, status_code=200)
@@ -3586,6 +3663,7 @@ async def support_inbox_webhook(
                     "ad_spend_uzs": int(ANALYTICS_AD_SPEND_UZS),
                     "ad_spend_rub": int(ANALYTICS_AD_SPEND_RUB),
                     "exclude_internal": 1 if ANALYTICS_EXCLUDE_INTERNAL_DEFAULT else 0,
+                    "exclude_test_payments": 1 if ANALYTICS_EXCLUDE_TEST_PAYMENTS_DEFAULT else 0,
                 }
             )
         )
@@ -3620,6 +3698,7 @@ async def support_inbox_webhook(
             ad_spend_by_currency={"UZS": ad_spend_uzs, "RUB": ad_spend_rub},
             free_limit=FREE_READINGS_PER_MONTH,
             exclude_user_ids=excluded_user_ids,
+            exclude_test_payments=ANALYTICS_EXCLUDE_TEST_PAYMENTS_DEFAULT,
         )
         trial_to_month = snapshot.get("trial_to_month") or {}
         unit = snapshot.get("unit_economics") or {}
@@ -3631,14 +3710,17 @@ async def support_inbox_webhook(
         ai_ops = snapshot.get("ai_operations") or {}
         notes = snapshot.get("notes") or []
         excluded_users_count = 0
+        payments_scope = "all"
         for note in notes:
             s = str(note or "").strip()
-            if not s.startswith("excluded_user_ids_count:"):
+            if s.startswith("excluded_user_ids_count:"):
+                try:
+                    excluded_users_count = int(s.split(":", 1)[1].strip())
+                except Exception:
+                    excluded_users_count = 0
                 continue
-            try:
-                excluded_users_count = int(s.split(":", 1)[1].strip())
-            except Exception:
-                excluded_users_count = 0
+            if s.startswith("payments_scope:"):
+                payments_scope = str(s.split(":", 1)[1].strip() or "all").lower()
         by_currency = snapshot.get("unit_economics_by_currency") or []
         currency_lines = []
         for row in by_currency[:4]:
@@ -3681,7 +3763,8 @@ async def support_inbox_webhook(
             f"• Refund rate: {_fmt_pct(quality.get('refund_rate'))}\n"
             f"• Click/SBP fail: {_fmt_pct(quality.get('click_failure_rate'))} / {_fmt_pct(quality.get('sbp_failure_rate'))}\n"
             f"• Vision escalation: {_fmt_pct(ai_ops.get('vision_escalation_rate'))}\n\n"
-            f"Исключено тестовых пользователей: {_fmt_num(excluded_users_count)}\n\n"
+            f"Срез платежей: {'боевые (без manual/test)' if payments_scope == 'production_only' else 'все (включая manual/test)'}\n"
+            f"Исключено внутренних пользователей: {_fmt_num(excluded_users_count)}\n\n"
             "Команда: /metrics [days] [ad_spend_uzs] [window] [ad_spend_rub]\n"
             "Пример: /metrics 30 3000000 30 120000"
         )

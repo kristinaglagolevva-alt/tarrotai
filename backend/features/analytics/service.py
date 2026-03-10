@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from models import (
@@ -56,6 +56,19 @@ def _to_major_amount(*, currency: str, raw_amount: int) -> int:
     if divisor <= 1:
         return int(raw_amount or 0)
     return int(round(float(raw_amount or 0) / float(divisor)))
+
+
+def _payment_is_test_expr():
+    provider_ref = func.coalesce(PaymentTransaction.provider_payment_charge_id, "")
+    invoice_payload = func.coalesce(PaymentTransaction.invoice_payload, "")
+    return or_(
+        provider_ref.ilike("manual:%"),
+        provider_ref.ilike("test:%"),
+        provider_ref.ilike("sandbox:%"),
+        invoice_payload.ilike("manual:%"),
+        invoice_payload.ilike("test:%"),
+        invoice_payload.ilike("sandbox:%"),
+    )
 
 
 async def _load_activity_days(
@@ -163,6 +176,7 @@ async def calculate_conversion_after_free(
     window_days: int = 30,
     lookback_days: int = 120,
     exclude_user_ids: Optional[Sequence[int]] = None,
+    exclude_test_payments: bool = False,
     now: Optional[datetime] = None,
 ) -> Dict[str, float | int]:
     now_utc = now or _utc_now()
@@ -213,6 +227,8 @@ async def calculate_conversion_after_free(
         )
         .order_by(PaymentTransaction.user_id.asc(), PaymentTransaction.created_at.asc())
     )
+    if exclude_test_payments:
+        payments_stmt = payments_stmt.where(~_payment_is_test_expr())
     if excluded:
         payments_stmt = payments_stmt.where(~PaymentTransaction.user_id.in_(sorted(excluded)))
     payments_q = await db.execute(payments_stmt)
@@ -329,6 +345,7 @@ async def build_growth_snapshot(
     ad_spend_by_currency: Optional[Dict[str, int]] = None,
     free_limit: int = 5,
     exclude_user_ids: Optional[Sequence[int]] = None,
+    exclude_test_payments: bool = False,
     now: Optional[datetime] = None,
 ) -> dict:
     now_utc = now or _utc_now()
@@ -346,6 +363,18 @@ async def build_growth_snapshot(
     if not safe_month_codes:
         safe_month_codes = ["sub_month_click"]
 
+    payment_non_refunded_filters = [
+        PaymentTransaction.kind == "subscription",
+        PaymentTransaction.refunded_at.is_(None),
+    ]
+    payment_any_subscription_filters = [
+        PaymentTransaction.kind == "subscription",
+    ]
+    if exclude_test_payments:
+        non_test_expr = ~_payment_is_test_expr()
+        payment_non_refunded_filters.append(non_test_expr)
+        payment_any_subscription_filters.append(non_test_expr)
+
     safe_ad_spend_by_currency: Dict[str, int] = {
         "UZS": max(0, int(ad_spend_uzs or 0)),
         "RUB": max(0, int(ad_spend_rub or 0)),
@@ -358,8 +387,7 @@ async def build_growth_snapshot(
 
     trial_q = await db.execute(
         select(PaymentTransaction.user_id, PaymentTransaction.created_at).where(
-            PaymentTransaction.kind == "subscription",
-            PaymentTransaction.refunded_at.is_(None),
+            *payment_non_refunded_filters,
             PaymentTransaction.product_code == safe_trial_code,
             PaymentTransaction.created_at >= since,
             *(
@@ -389,8 +417,7 @@ async def build_growth_snapshot(
             select(PaymentTransaction.user_id, PaymentTransaction.created_at)
             .where(
                 PaymentTransaction.user_id.in_(trial_user_ids),
-                PaymentTransaction.kind == "subscription",
-                PaymentTransaction.refunded_at.is_(None),
+                *payment_non_refunded_filters,
                 PaymentTransaction.product_code.in_(safe_month_codes),
                 *(
                     [~PaymentTransaction.user_id.in_(excluded_user_ids)]
@@ -421,8 +448,7 @@ async def build_growth_snapshot(
             func.coalesce(func.sum(PaymentTransaction.amount), 0),
             func.count(func.distinct(PaymentTransaction.user_id)),
         ).where(
-            PaymentTransaction.kind == "subscription",
-            PaymentTransaction.refunded_at.is_(None),
+            *payment_non_refunded_filters,
             PaymentTransaction.created_at >= since,
             *(
                 [~PaymentTransaction.user_id.in_(excluded_user_ids)]
@@ -448,8 +474,7 @@ async def build_growth_snapshot(
             func.min(PaymentTransaction.created_at).label("first_paid_at"),
         )
         .where(
-            PaymentTransaction.kind == "subscription",
-            PaymentTransaction.refunded_at.is_(None),
+            *payment_non_refunded_filters,
             *(
                 [~PaymentTransaction.user_id.in_(excluded_user_ids)]
                 if excluded_user_ids
@@ -580,8 +605,7 @@ async def build_growth_snapshot(
         trial_in_new_q = await db.execute(
             select(func.count(func.distinct(PaymentTransaction.user_id))).where(
                 PaymentTransaction.user_id.in_(new_user_ids),
-                PaymentTransaction.kind == "subscription",
-                PaymentTransaction.refunded_at.is_(None),
+                *payment_non_refunded_filters,
                 PaymentTransaction.product_code == safe_trial_code,
                 PaymentTransaction.created_at >= since,
                 *(
@@ -596,8 +620,7 @@ async def build_growth_snapshot(
         paid_in_new_q = await db.execute(
             select(func.count(func.distinct(PaymentTransaction.user_id))).where(
                 PaymentTransaction.user_id.in_(new_user_ids),
-                PaymentTransaction.kind == "subscription",
-                PaymentTransaction.refunded_at.is_(None),
+                *payment_non_refunded_filters,
                 PaymentTransaction.created_at >= since,
                 *(
                     [~PaymentTransaction.user_id.in_(excluded_user_ids)]
@@ -637,8 +660,7 @@ async def build_growth_snapshot(
             select(PaymentTransaction.user_id, PaymentTransaction.created_at, PaymentTransaction.product_code)
             .where(
                 PaymentTransaction.user_id.in_(photo_user_ids),
-                PaymentTransaction.kind == "subscription",
-                PaymentTransaction.refunded_at.is_(None),
+                *payment_non_refunded_filters,
                 *(
                     [~PaymentTransaction.user_id.in_(excluded_user_ids)]
                     if excluded_user_ids
@@ -678,6 +700,7 @@ async def build_growth_snapshot(
         window_days=conversion_days,
         lookback_days=max(period_days, conversion_days + 7),
         exclude_user_ids=excluded_user_ids,
+        exclude_test_payments=exclude_test_payments,
         now=now_utc,
     )
 
@@ -694,8 +717,7 @@ async def build_growth_snapshot(
     prev_30_since = now_utc - timedelta(days=60)
     current_paid_q = await db.execute(
         select(PaymentTransaction.user_id).where(
-            PaymentTransaction.kind == "subscription",
-            PaymentTransaction.refunded_at.is_(None),
+            *payment_non_refunded_filters,
             PaymentTransaction.created_at >= current_30_since,
             *(
                 [~PaymentTransaction.user_id.in_(excluded_user_ids)]
@@ -706,8 +728,7 @@ async def build_growth_snapshot(
     )
     prev_paid_q = await db.execute(
         select(PaymentTransaction.user_id).where(
-            PaymentTransaction.kind == "subscription",
-            PaymentTransaction.refunded_at.is_(None),
+            *payment_non_refunded_filters,
             PaymentTransaction.created_at >= prev_30_since,
             PaymentTransaction.created_at < current_30_since,
             *(
@@ -731,7 +752,7 @@ async def build_growth_snapshot(
 
     total_sub_payments_q = await db.execute(
         select(func.count(PaymentTransaction.id)).where(
-            PaymentTransaction.kind == "subscription",
+            *payment_any_subscription_filters,
             PaymentTransaction.created_at >= since,
             *(
                 [~PaymentTransaction.user_id.in_(excluded_user_ids)]
@@ -742,7 +763,7 @@ async def build_growth_snapshot(
     )
     refunded_sub_payments_q = await db.execute(
         select(func.count(PaymentTransaction.id)).where(
-            PaymentTransaction.kind == "subscription",
+            *payment_any_subscription_filters,
             PaymentTransaction.created_at >= since,
             PaymentTransaction.refunded_at.is_not(None),
             *(
@@ -887,6 +908,7 @@ async def build_growth_snapshot(
             "trial_to_month: доля пользователей, купивших trial и затем месячный тариф в окне conversion_window_days.",
             "unit_economics_by_currency: ARPPU/CAC/Payback считаются отдельно по каждой валюте.",
             "Суммы в unit_economics_by_currency нормализуются в основные единицы валюты (например, RUB: копейки -> рубли).",
+            f"payments_scope: {'production_only' if exclude_test_payments else 'all'}",
             "activation_funnel: поведение новых пользователей за период lookback_days.",
             "photo_funnel: конверсия пользователей фото-анализа в оплату в окне conversion_window_days.",
             "retention_summary: D1/D7/D30 + repeat paid 30d.",

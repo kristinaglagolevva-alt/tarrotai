@@ -272,6 +272,11 @@ def _safe_env_int(name: str, default: int) -> int:
         return int(default)
 
 
+def _env_bool(name: str, default: bool) -> bool:
+    raw = str(os.getenv(name, "1" if default else "0")).strip().lower()
+    return raw in {"1", "true", "yes", "on"}
+
+
 VISION_ESCALATION_MAX_RATIO = min(1.0, max(0.0, _safe_env_float("OPENAI_VISION_ESCALATION_MAX_RATIO", 0.25)))
 VISION_ESCALATION_DAILY_MAX = max(0, _safe_env_int("OPENAI_VISION_ESCALATION_DAILY_MAX", 0))
 VISION_ESCALATION_MIN_SAMPLES = max(0, _safe_env_int("OPENAI_VISION_ESCALATION_MIN_SAMPLES", 20))
@@ -309,6 +314,8 @@ ANALYTICS_TRIAL_TO_MONTH_WINDOW_DAYS = max(1, _safe_env_int("ANALYTICS_TRIAL_TO_
 ANALYTICS_AD_SPEND_UZS = max(0, _safe_env_int("ANALYTICS_AD_SPEND_UZS", 0))
 ANALYTICS_AD_SPEND_RUB = max(0, _safe_env_int("ANALYTICS_AD_SPEND_RUB", 0))
 ANALYTICS_EXCLUDE_TELEGRAM_IDS = _parse_csv_ints(ANALYTICS_EXCLUDE_TELEGRAM_IDS_RAW)
+ANALYTICS_EXCLUDE_SUPPORT_ADMINS = _env_bool("ANALYTICS_EXCLUDE_SUPPORT_ADMINS", False)
+ANALYTICS_EXCLUDE_INTERNAL_DEFAULT = _env_bool("ANALYTICS_EXCLUDE_INTERNAL_DEFAULT", False)
 ANALYTICS_MONTH_PRODUCT_CODES = _parse_csv_values(
     ANALYTICS_MONTH_PRODUCT_CODES_RAW,
     lower=True,
@@ -829,21 +836,15 @@ def _click_build_payment_url(
     target_return = str(return_url or CLICK_RETURN_URL or "").strip()
     if target_return:
         params["return_url"] = _append_query_param(target_return, "click_order_id", str(order_id))
-    safe_card_type = str(card_type or "").strip().lower()
-    if safe_card_type in {"uzcard", "humo"}:
-        params["card_type"] = safe_card_type
+    # NOTE:
+    # We intentionally do not pass card_type to CLICK URL.
+    # Some partner-side links with forced card_type may return
+    # "invalid card type" for end users. Keeping it generic is safer.
     return f"{CLICK_PAYMENT_BASE_URL}?{urlencode(params)}"
 
 
 def _click_amount_decimal(amount: int) -> str:
     return f"{max(0, int(amount)):0.2f}"
-
-
-def _click_normalize_card_type(raw: Optional[str]) -> str:
-    value = str(raw or "").strip().lower()
-    if value in {"uzcard", "humo"}:
-        return value
-    return ""
 
 
 def _render_click_card_checkout_html(
@@ -852,7 +853,6 @@ def _render_click_card_checkout_html(
     amount: int,
     return_url: str,
     fallback_url: str,
-    default_card_type: str = "",
 ) -> str:
     req: Dict[str, str] = {
         "service_id": str(CLICK_SERVICE_ID),
@@ -865,9 +865,6 @@ def _render_click_card_checkout_html(
     safe_return = str(return_url or "").strip()
     if safe_return:
         req["return_url"] = safe_return
-    safe_default_card_type = _click_normalize_card_type(default_card_type)
-    if safe_default_card_type:
-        req["card_type"] = safe_default_card_type
 
     req_json = json.dumps(req, ensure_ascii=False)
     fallback_json = json.dumps(str(fallback_url or "").strip(), ensure_ascii=False)
@@ -922,8 +919,6 @@ def _render_click_card_checkout_html(
       <h1>Оплата картой через CLICK</h1>
       <p>Открываем форму оплаты картой без перехода в приложение.</p>
       <button class="btn" id="pay-any">Оплатить картой</button>
-      <button class="btn alt" id="pay-uzcard">Оплатить Uzcard</button>
-      <button class="btn alt" id="pay-humo">Оплатить Humo</button>
       <button class="btn alt" id="open-click">Открыть стандартную страницу CLICK</button>
       <p class="hint">Если форма не открылась автоматически, нажмите кнопку выше.</p>
     </section>
@@ -934,11 +929,7 @@ def _render_click_card_checkout_html(
       const fallbackUrl = {fallback_json};
       function openCard(cardType) {{
         const payload = Object.assign({{}}, requestBase);
-        if (cardType) {{
-          payload.card_type = cardType;
-        }} else if (payload.card_type) {{
-          delete payload.card_type;
-        }}
+        if (payload.card_type) delete payload.card_type;
         try {{
           if (typeof window.createPaymentRequest === "function") {{
             window.createPaymentRequest(payload, function() {{}});
@@ -950,8 +941,6 @@ def _render_click_card_checkout_html(
         }}
       }}
       document.getElementById("pay-any")?.addEventListener("click", function() {{ openCard(""); }});
-      document.getElementById("pay-uzcard")?.addEventListener("click", function() {{ openCard("uzcard"); }});
-      document.getElementById("pay-humo")?.addEventListener("click", function() {{ openCard("humo"); }});
       document.getElementById("open-click")?.addEventListener("click", function() {{
         if (fallbackUrl) {{
           window.location.href = fallbackUrl;
@@ -2180,9 +2169,11 @@ def _assert_analytics_access(current_user: User, x_analytics_token: Optional[str
 async def _resolve_analytics_excluded_user_ids(db: AsyncSession) -> List[int]:
     tg_ids = {
         int(x)
-        for x in [*ANALYTICS_EXCLUDE_TELEGRAM_IDS, *SUPPORT_ADMIN_IDS]
+        for x in ANALYTICS_EXCLUDE_TELEGRAM_IDS
         if int(x) > 0
     }
+    if ANALYTICS_EXCLUDE_SUPPORT_ADMINS:
+        tg_ids.update({int(x) for x in SUPPORT_ADMIN_IDS if int(x) > 0})
     if not tg_ids:
         return []
     q = await db.execute(
@@ -2256,6 +2247,7 @@ def _render_analytics_dashboard_html(
     conversion_window_days: int,
     ad_spend_uzs: int,
     ad_spend_rub: int,
+    exclude_internal: bool,
     token: Optional[str],
 ) -> str:
     trial = snapshot.get("trial_to_month") or {}
@@ -2274,6 +2266,7 @@ def _render_analytics_dashboard_html(
         "conversion_window_days": int(conversion_window_days),
         "ad_spend_uzs": int(ad_spend_uzs),
         "ad_spend_rub": int(ad_spend_rub),
+        "exclude_internal": 1 if bool(exclude_internal) else 0,
     }
     if token:
         refresh_q["token"] = token
@@ -2527,13 +2520,14 @@ async def analytics_growth(
     conversion_window_days: int = Query(default=ANALYTICS_TRIAL_TO_MONTH_WINDOW_DAYS, ge=1, le=90),
     ad_spend_uzs: Optional[int] = Query(default=None, ge=0),
     ad_spend_rub: Optional[int] = Query(default=None, ge=0),
+    exclude_internal: bool = Query(default=ANALYTICS_EXCLUDE_INTERNAL_DEFAULT),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     _assert_analytics_access(current_user, x_analytics_token)
     safe_ad_spend_uzs = int(ANALYTICS_AD_SPEND_UZS if ad_spend_uzs is None else ad_spend_uzs)
     safe_ad_spend_rub = int(ANALYTICS_AD_SPEND_RUB if ad_spend_rub is None else ad_spend_rub)
-    excluded_user_ids = await _resolve_analytics_excluded_user_ids(db)
+    excluded_user_ids = await _resolve_analytics_excluded_user_ids(db) if exclude_internal else []
     snapshot = await analytics_service.build_growth_snapshot(
         db,
         lookback_days=max(7, int(lookback_days)),
@@ -2557,6 +2551,7 @@ async def analytics_dashboard(
     conversion_window_days: int = Query(default=ANALYTICS_TRIAL_TO_MONTH_WINDOW_DAYS, ge=1, le=90),
     ad_spend_uzs: Optional[int] = Query(default=None, ge=0),
     ad_spend_rub: Optional[int] = Query(default=None, ge=0),
+    exclude_internal: bool = Query(default=ANALYTICS_EXCLUDE_INTERNAL_DEFAULT),
     db: AsyncSession = Depends(get_db),
 ):
     _assert_analytics_token_only(
@@ -2565,7 +2560,7 @@ async def analytics_dashboard(
     )
     safe_ad_spend_uzs = int(ANALYTICS_AD_SPEND_UZS if ad_spend_uzs is None else ad_spend_uzs)
     safe_ad_spend_rub = int(ANALYTICS_AD_SPEND_RUB if ad_spend_rub is None else ad_spend_rub)
-    excluded_user_ids = await _resolve_analytics_excluded_user_ids(db)
+    excluded_user_ids = await _resolve_analytics_excluded_user_ids(db) if exclude_internal else []
     snapshot = await analytics_service.build_growth_snapshot(
         db,
         lookback_days=max(7, int(lookback_days)),
@@ -2584,6 +2579,7 @@ async def analytics_dashboard(
         conversion_window_days=max(1, int(conversion_window_days)),
         ad_spend_uzs=safe_ad_spend_uzs,
         ad_spend_rub=safe_ad_spend_rub,
+        exclude_internal=exclude_internal,
         token=token,
     )
     return HTMLResponse(content=html, status_code=200)
@@ -3589,6 +3585,7 @@ async def support_inbox_webhook(
                     "conversion_window_days": conversion_window_days,
                     "ad_spend_uzs": int(ANALYTICS_AD_SPEND_UZS),
                     "ad_spend_rub": int(ANALYTICS_AD_SPEND_RUB),
+                    "exclude_internal": 1 if ANALYTICS_EXCLUDE_INTERNAL_DEFAULT else 0,
                 }
             )
         )
@@ -3607,7 +3604,11 @@ async def support_inbox_webhook(
 
     if lower.startswith("/metrics") or lower.startswith("/kpi"):
         lookback_days, conversion_window_days, ad_spend_uzs, ad_spend_rub = _parse_metrics_args(text)
-        excluded_user_ids = await _resolve_analytics_excluded_user_ids(db)
+        excluded_user_ids = (
+            await _resolve_analytics_excluded_user_ids(db)
+            if ANALYTICS_EXCLUDE_INTERNAL_DEFAULT
+            else []
+        )
         snapshot = await analytics_service.build_growth_snapshot(
             db,
             lookback_days=lookback_days,
@@ -4625,7 +4626,6 @@ async def billing_click_bot_link(
             )
 
     order_id = f"click_tg_{user.id}_{secrets.token_hex(8)}"
-    safe_card_type = _click_normalize_card_type(card_type)
     target_return_url = _append_query_param(
         str(CLICK_RETURN_URL or "").strip(),
         "click_order_id",
@@ -4635,7 +4635,7 @@ async def billing_click_bot_link(
         order_id=order_id,
         amount=int(plan["amount"]),
         return_url=target_return_url,
-        card_type=(safe_card_type if checkout_mode == "card" else None),
+        card_type=None,
     )
     row = ClickOrder(
         user_id=int(user.id),
@@ -4654,7 +4654,6 @@ async def billing_click_bot_link(
             amount=int(plan["amount"]),
             return_url=target_return_url,
             fallback_url=payment_url,
-            default_card_type=safe_card_type,
         )
         return HTMLResponse(content=html, status_code=200)
 

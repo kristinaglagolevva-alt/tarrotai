@@ -967,6 +967,13 @@ def _welcome_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(rows)
 
 
+def _start_open_keyboard() -> Optional[InlineKeyboardMarkup]:
+    app_btn = _build_app_button(APP_BUTTON_TEXT)
+    if not app_btn:
+        return None
+    return InlineKeyboardMarkup([[app_btn]])
+
+
 def _quick_reply_keyboard() -> Optional[ReplyKeyboardMarkup]:
     rows: List[List[KeyboardButton]] = []
     webapp_url = _app_webapp_url()
@@ -1498,13 +1505,13 @@ async def configure_bot_ui_at_startup(application: Application) -> None:
 
 
 async def _send_start_panel(chat_id: int, context: ContextTypes.DEFAULT_TYPE) -> None:
-    quick_kb = _quick_reply_keyboard()
-    if quick_kb:
+    start_inline_kb = _start_open_keyboard()
+    if start_inline_kb:
         await context.bot.send_message(
             chat_id=chat_id,
-            text="👇 Нажмите большую кнопку <b>«🚀 Начать»</b> внизу — приложение откроется сразу.",
+            text="👇 Нажмите кнопку <b>«🚀 Начать»</b> — мини‑приложение откроется сразу.",
             parse_mode=ParseMode.HTML,
-            reply_markup=quick_kb,
+            reply_markup=start_inline_kb,
         )
     await context.bot.send_message(
         chat_id=chat_id,
@@ -1512,6 +1519,14 @@ async def _send_start_panel(chat_id: int, context: ContextTypes.DEFAULT_TYPE) ->
         parse_mode=ParseMode.HTML,
         reply_markup=_welcome_keyboard(),
     )
+    quick_kb = _quick_reply_keyboard()
+    if quick_kb:
+        await context.bot.send_message(
+            chat_id=chat_id,
+            text="Если хотите, оставьте нижнюю клавиатуру — там тоже есть кнопка <b>«🚀 Начать»</b>.",
+            parse_mode=ParseMode.HTML,
+            reply_markup=quick_kb,
+        )
 
 
 def _to_utc(dt: Optional[datetime]) -> Optional[datetime]:

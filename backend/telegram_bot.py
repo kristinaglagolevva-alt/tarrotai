@@ -122,7 +122,8 @@ SBP_AUTOPAY_ENABLED = str(os.environ.get("SBP_AUTOPAY_ENABLED", "0")).strip().lo
 SBP_AUTOPAY_PLAN_KEY = (os.environ.get("SBP_AUTOPAY_PLAN_CODE") or "sub_month").strip().lower()
 
 APP_URL_RAW = (os.environ.get("TELEGRAM_APP_URL") or "").strip()  # например https://tarrotai.ru
-APP_BUTTON_TEXT = os.environ.get("TELEGRAM_APP_BUTTON_TEXT") or "Открыть приложение"
+APP_BUTTON_TEXT = os.environ.get("TELEGRAM_APP_BUTTON_TEXT") or "🚀 Начать"
+APP_MENU_BUTTON_TEXT = os.environ.get("TELEGRAM_MENU_BUTTON_TEXT") or "Начать"
 BOT_VERSION = os.environ.get("TELEGRAM_BOT_VERSION") or os.environ.get("APP_VERSION") or "unknown"
 YOOKASSA_REQUIRE_RECEIPT = str(os.environ.get("YOOKASSA_REQUIRE_RECEIPT", "1")).strip().lower() not in {"0", "false", "no"}
 YOOKASSA_VAT_CODE = int(os.environ.get("YOOKASSA_VAT_CODE", "1"))
@@ -234,19 +235,19 @@ START_ONBOARDING_TEXT = (
         "• карта дня каждый день\n"
         "• <b>5 раскладов в месяц</b>\n\n"
         "Если нужен безлимит — нажмите <b>«💎 Подключить подписку»</b>.\n"
-        "Чтобы начать, нажмите <b>«🚀 Открыть AI Taro»</b>.\n\n"
+        "Чтобы начать, нажмите <b>«🚀 Начать»</b>.\n\n"
         "Открывая приложение, вы принимаете Пользовательское соглашение и Политику конфиденциальности."
     )
 ).strip()
 BOT_SHORT_DESCRIPTION = (
     os.environ.get("TELEGRAM_BOT_SHORT_DESCRIPTION")
-    or "Нажмите Start, затем «Открыть AI Taro»."
+    or "Нажмите Start, затем «Начать»."
 ).strip()
 BOT_DESCRIPTION = (
     os.environ.get("TELEGRAM_BOT_DESCRIPTION")
     or (
         "AI Taro — мини‑приложение с раскладами и AI‑интерпретацией.\n"
-        "Чтобы начать, нажмите Start, затем кнопку «Открыть AI Taro»."
+        "Чтобы начать, нажмите Start, затем кнопку «Начать»."
     )
 ).strip()
 
@@ -947,7 +948,7 @@ def _build_app_button(custom_text: Optional[str] = None) -> Optional[InlineKeybo
 
 def _welcome_keyboard() -> InlineKeyboardMarkup:
     rows: List[List[InlineKeyboardButton]] = []
-    app_btn = _build_app_button("🚀 Открыть AI Taro")
+    app_btn = _build_app_button(APP_BUTTON_TEXT)
     if app_btn:
         rows.append([app_btn])
     rows.append(
@@ -971,9 +972,9 @@ def _quick_reply_keyboard() -> Optional[ReplyKeyboardMarkup]:
     webapp_url = _app_webapp_url()
 
     if webapp_url:
-        rows.append([KeyboardButton("🚀 Открыть AI Taro", web_app=WebAppInfo(url=webapp_url))])
+        rows.append([KeyboardButton(APP_BUTTON_TEXT, web_app=WebAppInfo(url=webapp_url))])
     elif APP_URL_RAW:
-        rows.append([KeyboardButton("🚀 Открыть AI Taro")])
+        rows.append([KeyboardButton(APP_BUTTON_TEXT)])
 
     rows.append([KeyboardButton("💎 Подключить подписку"), KeyboardButton("💬 Поддержка")])
     rows.append([KeyboardButton("📄 Соглашение"), KeyboardButton("🔐 Политика")])
@@ -990,7 +991,7 @@ def _quick_reply_keyboard() -> Optional[ReplyKeyboardMarkup]:
 def _howto_text() -> str:
     return (
         "<b>Как быстро начать</b>\n\n"
-        "1) Нажмите <b>🚀 Открыть AI Taro</b>\n"
+        "1) Нажмите <b>🚀 Начать</b>\n"
         "2) Разрешите открытие мини‑приложения в Telegram\n"
         "3) Задайте вопрос и выберите расклад\n\n"
         "💡 Оплату можно открыть кнопкой <b>«💎 Подключить подписку»</b>.\n"
@@ -1470,7 +1471,7 @@ async def _ensure_bot_ui(context: ContextTypes.DEFAULT_TYPE) -> None:
     try:
         await context.bot.set_my_commands(
             [
-                BotCommand("start", "Запустить AI Taro"),
+                BotCommand("start", "Начать"),
                 BotCommand("menu", "Тарифы и оплата"),
                 BotCommand("help", "Как начать"),
                 BotCommand("support", "Написать в поддержку"),
@@ -1484,7 +1485,7 @@ async def _ensure_bot_ui(context: ContextTypes.DEFAULT_TYPE) -> None:
         webapp_url = _app_webapp_url()
         if webapp_url:
             await context.bot.set_chat_menu_button(
-                menu_button=MenuButtonWebApp(text="Открыть AI Taro", web_app=WebAppInfo(url=webapp_url))
+                menu_button=MenuButtonWebApp(text=APP_MENU_BUTTON_TEXT, web_app=WebAppInfo(url=webapp_url))
             )
         _BOT_UI_CONFIGURED = True
     except Exception as exc:
@@ -1497,20 +1498,20 @@ async def configure_bot_ui_at_startup(application: Application) -> None:
 
 
 async def _send_start_panel(chat_id: int, context: ContextTypes.DEFAULT_TYPE) -> None:
+    quick_kb = _quick_reply_keyboard()
+    if quick_kb:
+        await context.bot.send_message(
+            chat_id=chat_id,
+            text="👇 Нажмите большую кнопку <b>«🚀 Начать»</b> внизу — приложение откроется сразу.",
+            parse_mode=ParseMode.HTML,
+            reply_markup=quick_kb,
+        )
     await context.bot.send_message(
         chat_id=chat_id,
         text=START_ONBOARDING_TEXT,
         parse_mode=ParseMode.HTML,
         reply_markup=_welcome_keyboard(),
     )
-    quick_kb = _quick_reply_keyboard()
-    if quick_kb:
-        await context.bot.send_message(
-            chat_id=chat_id,
-            text="👇 Нажмите синюю кнопку <b>«Открыть AI Taro»</b> внизу, чтобы сразу перейти в приложение.",
-            parse_mode=ParseMode.HTML,
-            reply_markup=quick_kb,
-        )
 
 
 def _to_utc(dt: Optional[datetime]) -> Optional[datetime]:
@@ -2146,6 +2147,8 @@ async def text_fallback_handler(update: Update, context: ContextTypes.DEFAULT_TY
         if text in {
             "💳 тарифы и оплата",
             "💎 подключить подписку",
+            "🚀 начать",
+            "🚀 начать ai taro",
             "🚀 открыть ai taro",
             "ℹ️ как начать",
             "📄 соглашение",
@@ -2236,7 +2239,7 @@ async def text_fallback_handler(update: Update, context: ContextTypes.DEFAULT_TY
         )
         return
 
-    if "как начать" in text or "помощ" in text or text in {"help", "start", "старт", "ℹ️ как начать"}:
+    if "как начать" in text or "помощ" in text or text in {"help", "start", "старт", "начать", "ℹ️ как начать"}:
         await context.bot.send_message(
             chat_id=message.chat.id,
             text=_howto_text(),
@@ -2245,7 +2248,11 @@ async def text_fallback_handler(update: Update, context: ContextTypes.DEFAULT_TY
         )
         return
 
-    if "открыть" in text or "прилож" in text or text == "🚀 открыть ai taro":
+    if (
+        "открыть" in text
+        or "прилож" in text
+        or text in {"🚀 открыть ai taro", "🚀 начать", "🚀 начать ai taro"}
+    ):
         await context.bot.send_message(
             chat_id=message.chat.id,
             text=START_ONBOARDING_TEXT,
@@ -2256,7 +2263,7 @@ async def text_fallback_handler(update: Update, context: ContextTypes.DEFAULT_TY
 
     await context.bot.send_message(
         chat_id=message.chat.id,
-        text="Нажмите «🚀 Открыть AI Taro», чтобы сразу перейти в мини‑приложение.",
+        text="Нажмите «🚀 Начать», чтобы сразу перейти в мини‑приложение.",
         reply_markup=_welcome_keyboard(),
     )
 

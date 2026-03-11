@@ -825,7 +825,7 @@ const METRIKA_GOALS = {
 } as const
 const LEGAL_CONSENT_VERSION = '2026-02-25-v1'
 const HOME_TOUR_VERSION = '2026-03-08-v3'
-const BOT_BOOTSTRAP_DM_VERSION = '2026-03-11-v2'
+const BOT_BOOTSTRAP_DM_VERSION = '2026-03-11-v3'
 const BOT_BOOTSTRAP_RETRY_MS = 12 * 60 * 60 * 1000
 const BOT_BOOTSTRAP_PROMPT_COOLDOWN_MS = 6 * 60 * 60 * 1000
 const TERMS_PDF_URL = '/docs/ai_taro_user_agreement_draft.pdf'
@@ -1259,18 +1259,16 @@ useEffect(() => {
         if (cancelled) return
 
         const status = String(result?.status || '').toLowerCase()
-        if (status === 'sent' || status === 'already_sent') {
+        if (status === 'sent') {
           try {
             localStorage.removeItem(keys.retryAt)
-            if (status === 'sent') {
-              localStorage.removeItem(keys.promptAt)
-            }
+            localStorage.removeItem(keys.promptAt)
           } catch {}
           setShowBotChatPinPrompt(false)
           return
         }
 
-        if (status === 'forbidden') {
+        if (status === 'already_sent' || status === 'forbidden') {
           try {
             const lastPromptAt = Number(localStorage.getItem(keys.promptAt) || '0')
             if (!Number.isFinite(lastPromptAt) || nowTs - lastPromptAt > BOT_BOOTSTRAP_PROMPT_COOLDOWN_MS) {

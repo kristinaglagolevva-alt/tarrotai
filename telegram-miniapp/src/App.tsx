@@ -825,6 +825,7 @@ const METRIKA_GOALS = {
 } as const
 const LEGAL_CONSENT_VERSION = '2026-02-25-v1'
 const HOME_TOUR_VERSION = '2026-03-08-v3'
+const BOT_BOOTSTRAP_STARTAPP_RECHECK_MS = 24 * 60 * 60 * 1000
 const TERMS_PDF_URL = '/docs/ai_taro_user_agreement_draft.pdf'
 const PRIVACY_PDF_URL = '/docs/ai_taro_privacy_policy_draft.pdf'
 
@@ -1257,13 +1258,24 @@ useEffect(() => {
         if (status === 'already_sent') {
           const startParam = getTelegramStartParam()
           if (!startParam) return
+          const recheckKey = `ai_taro_bootstrap_startapp_recheck_at:${tgId}`
+          const nowTs = Date.now()
+          try {
+            const lastTs = Number(localStorage.getItem(recheckKey) || '0')
+            if (Number.isFinite(lastTs) && nowTs - lastTs < BOT_BOOTSTRAP_STARTAPP_RECHECK_MS) return
+          } catch {}
 
           const canWrite = await requestTelegramWriteAccess()
           if (!canWrite) return
 
           const forceResult = await bootstrapBotChat(token, { force: true })
           const forceStatus = String(forceResult?.status || '').toLowerCase()
-          if (forceStatus === 'sent' || forceStatus === 'already_sent') return
+          if (forceStatus === 'sent' || forceStatus === 'already_sent') {
+            try {
+              localStorage.setItem(recheckKey, String(nowTs))
+            } catch {}
+            return
+          }
           return
         }
 

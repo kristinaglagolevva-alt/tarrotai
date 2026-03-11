@@ -122,8 +122,8 @@ SBP_AUTOPAY_ENABLED = str(os.environ.get("SBP_AUTOPAY_ENABLED", "0")).strip().lo
 SBP_AUTOPAY_PLAN_KEY = (os.environ.get("SBP_AUTOPAY_PLAN_CODE") or "sub_month").strip().lower()
 
 APP_URL_RAW = (os.environ.get("TELEGRAM_APP_URL") or "").strip()  # например https://tarrotai.ru
-APP_BUTTON_TEXT = os.environ.get("TELEGRAM_APP_BUTTON_TEXT") or "🚀 Начать"
-APP_MENU_BUTTON_TEXT = os.environ.get("TELEGRAM_MENU_BUTTON_TEXT") or "Начать"
+APP_BUTTON_TEXT = os.environ.get("TELEGRAM_APP_BUTTON_TEXT") or "🚀 Открыть приложение"
+APP_MENU_BUTTON_TEXT = os.environ.get("TELEGRAM_MENU_BUTTON_TEXT") or "Открыть приложение"
 BOT_VERSION = os.environ.get("TELEGRAM_BOT_VERSION") or os.environ.get("APP_VERSION") or "unknown"
 YOOKASSA_REQUIRE_RECEIPT = str(os.environ.get("YOOKASSA_REQUIRE_RECEIPT", "1")).strip().lower() not in {"0", "false", "no"}
 YOOKASSA_VAT_CODE = int(os.environ.get("YOOKASSA_VAT_CODE", "1"))
@@ -235,19 +235,19 @@ START_ONBOARDING_TEXT = (
         "• карта дня каждый день\n"
         "• <b>5 раскладов в месяц</b>\n\n"
         "Если нужен безлимит — нажмите <b>«💎 Подключить подписку»</b>.\n"
-        "Чтобы начать, нажмите <b>«🚀 Начать»</b>.\n\n"
+        "Чтобы начать, нажмите <b>«🚀 Открыть приложение»</b>.\n\n"
         "Открывая приложение, вы принимаете Пользовательское соглашение и Политику конфиденциальности."
     )
 ).strip()
 BOT_SHORT_DESCRIPTION = (
     os.environ.get("TELEGRAM_BOT_SHORT_DESCRIPTION")
-    or "Нажмите Start, затем «Начать»."
+    or "Нажмите Start, затем «Открыть приложение»."
 ).strip()
 BOT_DESCRIPTION = (
     os.environ.get("TELEGRAM_BOT_DESCRIPTION")
     or (
         "AI Taro — мини‑приложение с раскладами и AI‑интерпретацией.\n"
-        "Чтобы начать, нажмите Start, затем кнопку «Начать»."
+        "Чтобы начать, нажмите Start, затем кнопку «Открыть приложение»."
     )
 ).strip()
 
@@ -998,7 +998,7 @@ def _quick_reply_keyboard() -> Optional[ReplyKeyboardMarkup]:
 def _howto_text() -> str:
     return (
         "<b>Как быстро начать</b>\n\n"
-        "1) Нажмите <b>🚀 Начать</b>\n"
+        "1) Нажмите <b>🚀 Открыть приложение</b>\n"
         "2) Разрешите открытие мини‑приложения в Telegram\n"
         "3) Задайте вопрос и выберите расклад\n\n"
         "💡 Оплату можно открыть кнопкой <b>«💎 Подключить подписку»</b>.\n"
@@ -1509,24 +1509,18 @@ async def _send_start_panel(chat_id: int, context: ContextTypes.DEFAULT_TYPE) ->
     if start_inline_kb:
         await context.bot.send_message(
             chat_id=chat_id,
-            text="👇 Нажмите кнопку <b>«🚀 Начать»</b> — мини‑приложение откроется сразу.",
+            text=START_ONBOARDING_TEXT,
             parse_mode=ParseMode.HTML,
             reply_markup=start_inline_kb,
         )
+        return
+
     await context.bot.send_message(
         chat_id=chat_id,
         text=START_ONBOARDING_TEXT,
         parse_mode=ParseMode.HTML,
         reply_markup=_welcome_keyboard(),
     )
-    quick_kb = _quick_reply_keyboard()
-    if quick_kb:
-        await context.bot.send_message(
-            chat_id=chat_id,
-            text="Если хотите, оставьте нижнюю клавиатуру — там тоже есть кнопка <b>«🚀 Начать»</b>.",
-            parse_mode=ParseMode.HTML,
-            reply_markup=quick_kb,
-        )
 
 
 def _to_utc(dt: Optional[datetime]) -> Optional[datetime]:
@@ -2165,6 +2159,7 @@ async def text_fallback_handler(update: Update, context: ContextTypes.DEFAULT_TY
             "🚀 начать",
             "🚀 начать ai taro",
             "🚀 открыть ai taro",
+            "🚀 открыть приложение",
             "ℹ️ как начать",
             "📄 соглашение",
             "🔐 политика",
@@ -2266,7 +2261,7 @@ async def text_fallback_handler(update: Update, context: ContextTypes.DEFAULT_TY
     if (
         "открыть" in text
         or "прилож" in text
-        or text in {"🚀 открыть ai taro", "🚀 начать", "🚀 начать ai taro"}
+        or text in {"🚀 открыть ai taro", "🚀 начать", "🚀 начать ai taro", "🚀 открыть приложение"}
     ):
         await context.bot.send_message(
             chat_id=message.chat.id,
@@ -2278,7 +2273,7 @@ async def text_fallback_handler(update: Update, context: ContextTypes.DEFAULT_TY
 
     await context.bot.send_message(
         chat_id=message.chat.id,
-        text="Нажмите «🚀 Начать», чтобы сразу перейти в мини‑приложение.",
+        text="Нажмите «🚀 Открыть приложение», чтобы сразу перейти в мини‑приложение.",
         reply_markup=_welcome_keyboard(),
     )
 

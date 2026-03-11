@@ -1301,29 +1301,38 @@ useEffect(() => {
     const tgId = Number(user?.telegram_id || 0)
     if (!tgId) return
     const keys = getBotBootstrapStorageKeys(tgId)
+    const setRetry = () => {
+      try {
+        localStorage.setItem(keys.retryAt, String(Date.now() + BOT_BOOTSTRAP_RETRY_MS))
+      } catch {}
+    }
 
     setBotChatPinBusy(true)
+    setShowBotChatPinPrompt(false)
     try {
-      await requestTelegramWriteAccess()
-      const result = await bootstrapBotChat(token, { force: true })
-      const status = String(result?.status || '').toLowerCase()
+      let result = await bootstrapBotChat(token, { force: true })
+      let status = String(result?.status || '').toLowerCase()
+
+      if (status === 'forbidden') {
+        const canWrite = await requestTelegramWriteAccess()
+        if (!canWrite) {
+          setRetry()
+          return
+        }
+        result = await bootstrapBotChat(token, { force: true })
+        status = String(result?.status || '').toLowerCase()
+      }
+
       if (status === 'sent' || status === 'already_sent') {
         try {
           localStorage.removeItem(keys.retryAt)
           localStorage.removeItem(keys.promptAt)
         } catch {}
-        setShowBotChatPinPrompt(false)
         return
       }
-      try {
-        localStorage.setItem(keys.retryAt, String(Date.now() + BOT_BOOTSTRAP_RETRY_MS))
-      } catch {}
-      setShowBotChatPinPrompt(false)
+      setRetry()
     } catch {
-      try {
-        localStorage.setItem(keys.retryAt, String(Date.now() + BOT_BOOTSTRAP_RETRY_MS))
-      } catch {}
-      setShowBotChatPinPrompt(false)
+      setRetry()
     } finally {
       setBotChatPinBusy(false)
     }

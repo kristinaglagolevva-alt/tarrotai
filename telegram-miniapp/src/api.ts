@@ -233,6 +233,19 @@ export async function telegramAuth(initData?: string): Promise<{ token: string; 
   return { token, user }
 }
 
+export type BotBootstrapOutDto = {
+  status: 'sent' | 'already_sent' | 'not_configured' | 'forbidden' | 'error'
+  message?: string
+}
+
+export async function bootstrapBotChat(token: string): Promise<BotBootstrapOutDto> {
+  return apiJson(`${API_BASE}/bot/bootstrap-chat`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}` },
+    timeoutMs: 12000,
+  })
+}
+
 // =============================== CARD OF DAY ===============================
 
 export type CardOfDayDto = {

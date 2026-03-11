@@ -6,6 +6,7 @@ import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import './App.css'
 import {
   telegramAuth,
+  bootstrapBotChat,
   getMe,
   updateMePreferences,
   getBillingStatus,
@@ -824,6 +825,7 @@ const METRIKA_GOALS = {
 } as const
 const LEGAL_CONSENT_VERSION = '2026-02-25-v1'
 const HOME_TOUR_VERSION = '2026-03-08-v3'
+const BOT_BOOTSTRAP_DM_VERSION = '2026-03-11-v1'
 const TERMS_PDF_URL = '/docs/ai_taro_user_agreement_draft.pdf'
 const PRIVACY_PDF_URL = '/docs/ai_taro_privacy_policy_draft.pdf'
 
@@ -1024,6 +1026,34 @@ const resolveTelegramInitDataWithRetry = async (attempts = 8, stepMs = 250): Pro
   return ''
 }
 
+const requestTelegramWriteAccess = async (): Promise<boolean> => {
+  const tg = (window as any)?.Telegram?.WebApp
+  if (!tg) return false
+  try {
+    if (Boolean(tg?.initDataUnsafe?.user?.allows_write_to_pm)) return true
+  } catch {}
+  if (typeof tg?.requestWriteAccess !== 'function') return false
+  try {
+    return await new Promise<boolean>((resolve) => {
+      let settled = false
+      const done = (value: boolean) => {
+        if (settled) return
+        settled = true
+        resolve(Boolean(value))
+      }
+      try {
+        tg.requestWriteAccess((granted: boolean) => done(Boolean(granted)))
+      } catch {
+        done(false)
+        return
+      }
+      window.setTimeout(() => done(false), 10000)
+    })
+  } catch {
+    return false
+  }
+}
+
 export default function App() {
   /* =============================================================================================
    АВТОРИЗАЦИЯ В ТГ (при запуске мини‑приложения)
@@ -1194,6 +1224,61 @@ useEffect(() => {
 }, [token, authRetryNonce])/* =============================================================================================
      [9] БАЗОВОЕ СОСТОЯНИЕ UI
   ============================================================================================= */
+
+  useEffect(() => {
+    if (authStatus !== 'ready' || !token) return
+    const tgId = Number(user?.telegram_id || 0)
+    if (!tgId) return
+
+    const successKey = `ai_taro_bot_bootstrap_dm:${BOT_BOOTSTRAP_DM_VERSION}:${tgId}`
+    const retryKey = `${successKey}:retry_at`
+    const nowTs = Date.now()
+
+    try {
+      if (localStorage.getItem(successKey) === '1') return
+      const retryUntil = Number(localStorage.getItem(retryKey) || '0')
+      if (Number.isFinite(retryUntil) && retryUntil > nowTs) return
+    } catch {}
+
+    let cancelled = false
+    ;(async () => {
+      const canWrite = await requestTelegramWriteAccess()
+      if (cancelled) return
+
+      if (!canWrite) {
+        try {
+          localStorage.setItem(retryKey, String(Date.now() + 24 * 60 * 60 * 1000))
+        } catch {}
+        return
+      }
+
+      try {
+        const result = await bootstrapBotChat(token)
+        if (cancelled) return
+
+        const status = String(result?.status || '').toLowerCase()
+        if (status === 'sent' || status === 'already_sent') {
+          try {
+            localStorage.setItem(successKey, '1')
+            localStorage.removeItem(retryKey)
+          } catch {}
+          return
+        }
+
+        try {
+          localStorage.setItem(retryKey, String(Date.now() + 12 * 60 * 60 * 1000))
+        } catch {}
+      } catch {
+        try {
+          localStorage.setItem(retryKey, String(Date.now() + 12 * 60 * 60 * 1000))
+        } catch {}
+      }
+    })()
+
+    return () => {
+      cancelled = true
+    }
+  }, [authStatus, token, user?.telegram_id])
 
   useEffect(() => {
     setMemoryOptIn(Boolean(user?.memory_opt_in ?? true))

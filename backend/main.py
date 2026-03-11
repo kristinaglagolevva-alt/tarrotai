@@ -32,6 +32,7 @@ from dotenv import load_dotenv
 
 from db import engine, get_db, Base, SessionLocal
 from models import (
+    BotPmBootstrap,
     User,
     CardOfDay,
     Reading,
@@ -1390,6 +1391,19 @@ async def _ensure_runtime_schema(conn) -> None:
         "CREATE INDEX IF NOT EXISTS ix_support_ticket_messages_ticket_id ON support_ticket_messages (ticket_id);",
         "CREATE INDEX IF NOT EXISTS ix_support_ticket_messages_created_at ON support_ticket_messages (created_at);",
         """
+        CREATE TABLE IF NOT EXISTS bot_pm_bootstrap (
+            id SERIAL PRIMARY KEY,
+            user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            telegram_id BIGINT NOT NULL,
+            message_id BIGINT NULL,
+            sent_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+        """,
+        "CREATE UNIQUE INDEX IF NOT EXISTS uq_bot_pm_bootstrap_user_id ON bot_pm_bootstrap (user_id);",
+        "CREATE INDEX IF NOT EXISTS ix_bot_pm_bootstrap_telegram_id ON bot_pm_bootstrap (telegram_id);",
+        "CREATE INDEX IF NOT EXISTS ix_bot_pm_bootstrap_sent_at ON bot_pm_bootstrap (sent_at);",
+        """
         CREATE TABLE IF NOT EXISTS user_memory_events (
             id SERIAL PRIMARY KEY,
             user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -1791,6 +1805,11 @@ class AuthOut(BaseModel):
     token_type: str = "bearer"
 
 
+class BotBootstrapOut(BaseModel):
+    status: Literal["sent", "already_sent", "not_configured", "forbidden", "error"]
+    message: str = ""
+
+
 class MeOut(BaseModel):
     id: int
     telegram_id: int
@@ -2019,6 +2038,63 @@ async def auth_telegram(payload: dict, db: AsyncSession = Depends(get_db)):
 
     token = create_jwt(user.id, user.telegram_id)
     return {"access_token": token}
+
+
+@app.post("/bot/bootstrap-chat", response_model=BotBootstrapOut)
+async def bot_bootstrap_chat(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    existing_q = await db.execute(
+        select(BotPmBootstrap).where(BotPmBootstrap.user_id == int(current_user.id))
+    )
+    existing = existing_q.scalar_one_or_none()
+    if existing is not None:
+        return {
+            "status": "already_sent",
+            "message": "Bootstrap message already sent.",
+        }
+
+    app_url = str(os.getenv("TELEGRAM_APP_URL") or "").strip()
+    reply_markup: Optional[Dict[str, Any]] = None
+    if app_url.startswith("https://"):
+        reply_markup = {
+            "inline_keyboard": [[{"text": "🚀 Открыть приложение", "url": app_url}]]
+        }
+
+    send_result = await _send_bot_message_with_result(
+        int(current_user.telegram_id),
+        (
+            "✅ Приложение AI Taro запущено.\n\n"
+            "Этот чат сохранён в истории Telegram, чтобы вы могли быстро вернуться."
+        ),
+        reply_markup=reply_markup,
+    )
+    status = str(send_result.get("status") or "error").strip().lower()
+    if status == "not_configured":
+        return {"status": "not_configured", "message": "Bot token is not configured."}
+    if status == "forbidden":
+        return {
+            "status": "forbidden",
+            "message": "Telegram не разрешил отправить сообщение в личку без /start.",
+        }
+    if not bool(send_result.get("ok")):
+        return {
+            "status": "error",
+            "message": str(send_result.get("detail") or "Send failed"),
+        }
+
+    row = BotPmBootstrap(
+        user_id=int(current_user.id),
+        telegram_id=int(current_user.telegram_id),
+        message_id=(int(send_result.get("message_id") or 0) or None),
+    )
+    db.add(row)
+    await db.commit()
+    return {
+        "status": "sent",
+        "message": "Message sent.",
+    }
 
 
 @app.get("/me", response_model=MeOut)
@@ -2844,6 +2920,55 @@ async def _send_bot_message(
     except Exception as exc:
         log.warning("sendMessage exception: %s", repr(exc))
         return False
+
+
+async def _send_bot_message_with_result(
+    chat_id: int,
+    text: str,
+    *,
+    reply_markup: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    token = (TELEGRAM_BOT_TOKEN or os.getenv("TELEGRAM_BOT_TOKEN") or "").strip()
+    if not token:
+        return {"ok": False, "status": "not_configured", "detail": "TELEGRAM_BOT_TOKEN is empty"}
+
+    url = f"https://api.telegram.org/bot{token}/sendMessage"
+    payload: Dict[str, Any] = {
+        "chat_id": int(chat_id),
+        "text": str(text or "").strip(),
+        "disable_web_page_preview": True,
+    }
+    if reply_markup:
+        payload["reply_markup"] = reply_markup
+
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.post(url, json=payload)
+            data = {}
+            try:
+                data = resp.json()
+            except Exception:
+                data = {}
+
+            if resp.status_code >= 400:
+                detail = str(data.get("description") or resp.text or "").strip()
+                lowered = detail.lower()
+                if resp.status_code == 403 and (
+                    "bot can't initiate conversation" in lowered
+                    or "bot was blocked by the user" in lowered
+                    or "forbidden" in lowered
+                ):
+                    return {"ok": False, "status": "forbidden", "detail": detail}
+                return {"ok": False, "status": "error", "detail": detail}
+
+            return {
+                "ok": bool(data.get("ok")),
+                "status": "sent" if bool(data.get("ok")) else "error",
+                "detail": str(data.get("description") or "").strip(),
+                "message_id": int(((data.get("result") or {}).get("message_id") or 0) or 0) or None,
+            }
+    except Exception as exc:
+        return {"ok": False, "status": "error", "detail": repr(exc)}
 
 
 async def _send_bot_message_with_token(

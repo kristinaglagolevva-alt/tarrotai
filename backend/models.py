@@ -118,6 +118,24 @@ class BotOpenUser(Base):
     opens_count: Mapped[int] = mapped_column(Integer, default=1, server_default="1")
 
 
+class BotPmBootstrap(Base):
+    __tablename__ = "bot_pm_bootstrap"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), unique=True, index=True)
+    telegram_id: Mapped[int] = mapped_column(BigInteger, index=True)
+    message_id: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)
+    sent_at: Mapped[DateTime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        index=True,
+    )
+    created_at: Mapped[DateTime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+    )
+
+
 class CardOfDay(Base):
     __tablename__ = "card_of_day"
 

@@ -76,12 +76,16 @@ class CurrencyUnitEconomicsOut(BaseModel):
 
 class ActivationFunnelOut(BaseModel):
     lookback_days: int
+    bot_opened_users: int
+    bot_opened_users_total: int
+    bot_open_events_total: int
     new_users: int
     activated_users: int
     photo_users: int
     reached_free_limit_users: int
     trial_users: int
     paid_users: int
+    signup_from_bot_open_rate: float
     activation_rate: float
     paid_rate: float
 

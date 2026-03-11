@@ -92,6 +92,32 @@ class User(Base):
     )
 
 
+class BotOpenUser(Base):
+    __tablename__ = "bot_open_users"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    telegram_id: Mapped[int] = mapped_column(BigInteger, unique=True, index=True)
+
+    username: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    first_name: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    last_name: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    first_chat_id: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)
+    last_chat_id: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)
+    last_start_mode: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+
+    first_opened_at: Mapped[DateTime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        index=True,
+    )
+    last_opened_at: Mapped[DateTime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        index=True,
+    )
+    opens_count: Mapped[int] = mapped_column(Integer, default=1, server_default="1")
+
+
 class CardOfDay(Base):
     __tablename__ = "card_of_day"
 

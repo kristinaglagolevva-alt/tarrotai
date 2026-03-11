@@ -9,6 +9,7 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from models import (
+    BotOpenUser,
     CardOfDay,
     ClickOrder,
     PaymentTransaction,
@@ -363,6 +364,19 @@ async def build_growth_snapshot(
     if not safe_month_codes:
         safe_month_codes = ["sub_month_click"]
 
+    excluded_bot_tg_ids: List[int] = []
+    if excluded_user_ids:
+        excluded_tg_q = await db.execute(
+            select(User.telegram_id).where(User.id.in_(excluded_user_ids))
+        )
+        excluded_bot_tg_ids = sorted(
+            {
+                int(tg_id)
+                for (tg_id,) in excluded_tg_q.all()
+                if tg_id is not None and int(tg_id) > 0
+            }
+        )
+
     payment_non_refunded_filters = [
         PaymentTransaction.kind == "subscription",
         PaymentTransaction.refunded_at.is_(None),
@@ -555,6 +569,47 @@ async def build_growth_snapshot(
             "payback_months": 0.0,
             "payback_days": 0.0,
         }
+
+    bot_opened_users = 0
+    bot_opened_users_total = 0
+    bot_open_events_total = 0
+    try:
+        bot_open_new_q = await db.execute(
+            select(func.count(BotOpenUser.id)).where(
+                BotOpenUser.first_opened_at >= since,
+                *(
+                    [~BotOpenUser.telegram_id.in_(excluded_bot_tg_ids)]
+                    if excluded_bot_tg_ids
+                    else []
+                ),
+            )
+        )
+        bot_open_total_q = await db.execute(
+            select(func.count(BotOpenUser.id)).where(
+                *(
+                    [~BotOpenUser.telegram_id.in_(excluded_bot_tg_ids)]
+                    if excluded_bot_tg_ids
+                    else []
+                ),
+            )
+        )
+        bot_open_events_q = await db.execute(
+            select(func.coalesce(func.sum(BotOpenUser.opens_count), 0)).where(
+                *(
+                    [~BotOpenUser.telegram_id.in_(excluded_bot_tg_ids)]
+                    if excluded_bot_tg_ids
+                    else []
+                ),
+            )
+        )
+        bot_opened_users = int(bot_open_new_q.scalar() or 0)
+        bot_opened_users_total = int(bot_open_total_q.scalar() or 0)
+        bot_open_events_total = int(bot_open_events_q.scalar() or 0)
+    except Exception:
+        # Fail-open for analytics: dashboard still works even if bot_open_users table is not ready yet.
+        bot_opened_users = 0
+        bot_opened_users_total = 0
+        bot_open_events_total = 0
 
     new_users_q = await db.execute(
         select(User.id).where(
@@ -850,12 +905,16 @@ async def build_growth_snapshot(
         "unit_economics_by_currency": unit_economics_by_currency,
         "activation_funnel": {
             "lookback_days": period_days,
+            "bot_opened_users": int(bot_opened_users),
+            "bot_opened_users_total": int(bot_opened_users_total),
+            "bot_open_events_total": int(bot_open_events_total),
             "new_users": int(new_users),
             "activated_users": int(activated_users),
             "photo_users": int(photo_users_in_new),
             "reached_free_limit_users": int(reached_free_limit_users),
             "trial_users": int(trial_users_in_new),
             "paid_users": int(paid_users_in_new),
+            "signup_from_bot_open_rate": _safe_rate(new_users, bot_opened_users),
             "activation_rate": _safe_rate(activated_users, new_users),
             "paid_rate": _safe_rate(paid_users_in_new, new_users),
         },
@@ -909,6 +968,7 @@ async def build_growth_snapshot(
             "unit_economics_by_currency: ARPPU/CAC/Payback считаются отдельно по каждой валюте.",
             "Суммы в unit_economics_by_currency нормализуются в основные единицы валюты (например, RUB: копейки -> рубли).",
             f"payments_scope: {'production_only' if exclude_test_payments else 'all'}",
+            "bot_opened_users: пользователи, впервые открывшие бота через /start в период lookback_days.",
             "activation_funnel: поведение новых пользователей за период lookback_days.",
             "photo_funnel: конверсия пользователей фото-анализа в оплату в окне conversion_window_days.",
             "retention_summary: D1/D7/D30 + repeat paid 30d.",

@@ -2322,10 +2322,13 @@ def _render_analytics_dashboard_html(
     if not currency_cards:
         currency_cards = "<article class='card'><p>Нет платежей за выбранный период.</p></article>"
 
-    activation_base = int(activation.get("new_users") or 0)
+    bot_opened_users = int(activation.get("bot_opened_users") or 0)
+    app_new_users = int(activation.get("new_users") or 0)
+    activation_base = max(bot_opened_users, app_new_users)
     activation_rows = "".join(
         [
-            _analytics_funnel_row_html("Новые", activation_base, activation_base),
+            _analytics_funnel_row_html("Открыли бота", bot_opened_users, activation_base),
+            _analytics_funnel_row_html("Новые", app_new_users, activation_base),
             _analytics_funnel_row_html("Активировались", int(activation.get("activated_users") or 0), activation_base),
             _analytics_funnel_row_html("С фото", int(activation.get("photo_users") or 0), activation_base),
             _analytics_funnel_row_html("Дошли до лимита", int(activation.get("reached_free_limit_users") or 0), activation_base),
@@ -2510,6 +2513,8 @@ def _render_analytics_dashboard_html(
         <article class="card"><div class="kpi-label">CAC (UZS)</div><div class="kpi-val">{_analytics_fmt_num(unit.get("cac_uzs"))}</div></article>
         <article class="card"><div class="kpi-label">Payback (UZS)</div><div class="kpi-val">{float(unit.get("payback_months") or 0.0):.2f} мес</div></article>
         <article class="card"><div class="kpi-label">Paid rate (new users)</div><div class="kpi-val">{_analytics_fmt_pct(activation.get("paid_rate"))}</div></article>
+        <article class="card"><div class="kpi-label">Открыли бота (новые)</div><div class="kpi-val">{_analytics_fmt_num(activation.get("bot_opened_users"))}</div></article>
+        <article class="card"><div class="kpi-label">Signup rate (bot → app)</div><div class="kpi-val">{_analytics_fmt_pct(activation.get("signup_from_bot_open_rate"))}</div></article>
       </div>
     </section>
 
@@ -2561,6 +2566,8 @@ def _render_analytics_dashboard_html(
           <p>Lookback: <b>{int(lookback_days)} дн</b></p>
           <p>Conversion window: <b>{int(conversion_window_days)} дн</b></p>
           <p>Payments: <b>{payments_scope_label}</b></p>
+          <p>Открыли бота (всего): <b>{_analytics_fmt_num(activation.get("bot_opened_users_total"))}</b></p>
+          <p>Запусков /start (всего): <b>{_analytics_fmt_num(activation.get("bot_open_events_total"))}</b></p>
           <p>Ad spend UZS: <b>{_analytics_fmt_num(ad_spend_uzs)}</b></p>
           <p>Ad spend RUB: <b>{_analytics_fmt_num(ad_spend_rub)}</b></p>
         </article>
@@ -3749,6 +3756,9 @@ async def support_inbox_webhook(
             "По валютам:\n"
             f"{by_currency_text}\n\n"
             "Активация:\n"
+            f"• Bot opened (new): {_fmt_num(activation.get('bot_opened_users'))}\n"
+            f"• Bot opened (total): {_fmt_num(activation.get('bot_opened_users_total'))}\n"
+            f"• Signup bot→app: {_fmt_pct(activation.get('signup_from_bot_open_rate'))}\n"
             f"• New users: {_fmt_num(activation.get('new_users'))}\n"
             f"• Activation rate: {_fmt_pct(activation.get('activation_rate'))}\n"
             f"• Paid rate: {_fmt_pct(activation.get('paid_rate'))}\n\n"

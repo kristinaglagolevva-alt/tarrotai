@@ -47,7 +47,7 @@ from db import SessionLocal
 from features.common.flags import FEATURE_FLAGS
 from features.support_tickets import repository as support_ticket_repository
 from features.support_tickets import service as support_ticket_service
-from models import SupportTicket, User
+from models import BotOpenUser, SupportTicket, User
 
 load_dotenv()
 
@@ -1763,6 +1763,53 @@ async def _send_menu(
                 )
 
 
+async def _track_bot_open(*, update: Update, mode: str = "") -> None:
+    tg_user_id = int(getattr(update.effective_user, "id", 0) or 0)
+    if tg_user_id <= 0:
+        return
+
+    chat_id = int(getattr(update.effective_chat, "id", 0) or 0)
+    username = (str(getattr(update.effective_user, "username", "") or "").strip() or None)
+    first_name = (str(getattr(update.effective_user, "first_name", "") or "").strip() or None)
+    last_name = (str(getattr(update.effective_user, "last_name", "") or "").strip() or None)
+    safe_mode = (str(mode or "").strip().lower() or None)
+    now_utc = datetime.now(timezone.utc)
+
+    async with SessionLocal() as db:
+        try:
+            q = await db.execute(select(BotOpenUser).where(BotOpenUser.telegram_id == tg_user_id))
+            row = q.scalar_one_or_none()
+            if row is None:
+                row = BotOpenUser(
+                    telegram_id=tg_user_id,
+                    username=username,
+                    first_name=first_name,
+                    last_name=last_name,
+                    first_chat_id=(chat_id if chat_id > 0 else None),
+                    last_chat_id=(chat_id if chat_id > 0 else None),
+                    last_start_mode=safe_mode,
+                    first_opened_at=now_utc,
+                    last_opened_at=now_utc,
+                    opens_count=1,
+                )
+                db.add(row)
+            else:
+                row.username = username
+                row.first_name = first_name
+                row.last_name = last_name
+                if chat_id > 0:
+                    row.last_chat_id = chat_id
+                if safe_mode:
+                    row.last_start_mode = safe_mode
+                row.last_opened_at = now_utc
+                row.opens_count = int(row.opens_count or 0) + 1
+
+            await db.commit()
+        except Exception as exc:
+            await db.rollback()
+            logger.warning("Failed to track bot /start for tg_user=%s: %s", tg_user_id, exc)
+
+
 # =============================== HANDLERS ===============================
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -1771,6 +1818,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
     logger.info("start: tg_user=%s bot_version=%s", getattr(update.effective_user, "id", None), BOT_VERSION)
     mode = str((context.args or [""])[0] or "").strip().lower()
+    await _track_bot_open(update=update, mode=mode)
     await _ensure_bot_ui(context)
 
     if mode in {"menu", "buy", "buy_credits", "credits"}:

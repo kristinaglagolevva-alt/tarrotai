@@ -1049,6 +1049,23 @@ const requestTelegramWriteAccess = async (): Promise<boolean> => {
   }
 }
 
+const getTelegramStartParam = (): string => {
+  try {
+    const fromUnsafe = String((window as any)?.Telegram?.WebApp?.initDataUnsafe?.start_param || '').trim()
+    if (fromUnsafe) return fromUnsafe
+  } catch {}
+  try {
+    const fromWebApp = String((window as any)?.Telegram?.WebApp?.startParam || '').trim()
+    if (fromWebApp) return fromWebApp
+  } catch {}
+  try {
+    const p = new URLSearchParams(String(window.location.search || '').replace(/^\?/, ''))
+    const fromQuery = String(p.get('tgWebAppStartParam') || p.get('startapp') || '').trim()
+    if (fromQuery) return fromQuery
+  } catch {}
+  return ''
+}
+
 export default function App() {
   /* =============================================================================================
    АВТОРИЗАЦИЯ В ТГ (при запуске мини‑приложения)
@@ -1233,13 +1250,25 @@ useEffect(() => {
         if (cancelled) return
 
         const status = String(result?.status || '').toLowerCase()
-        if (status === 'sent' || status === 'already_sent') {
+        if (status === 'sent') {
+          return
+        }
+
+        if (status === 'already_sent') {
+          const startParam = getTelegramStartParam()
+          if (!startParam) return
+
+          const canWrite = await requestTelegramWriteAccess()
+          if (!canWrite) return
+
+          const forceResult = await bootstrapBotChat(token, { force: true })
+          const forceStatus = String(forceResult?.status || '').toLowerCase()
+          if (forceStatus === 'sent' || forceStatus === 'already_sent') return
           return
         }
 
         if (status === 'forbidden') {
-          // Просим системное разрешение Telegram только когда бот реально не может писать в ЛС.
-          // Не вызываем это на already_sent, чтобы не спамить повторными сообщениями.
+          // Просим системное разрешение Telegram, когда бот реально не может писать в ЛС.
           const canWrite = await requestTelegramWriteAccess()
           if (!canWrite) return
 

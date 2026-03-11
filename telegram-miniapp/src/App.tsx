@@ -1037,34 +1037,6 @@ const resolveTelegramInitDataWithRetry = async (attempts = 8, stepMs = 250): Pro
   return ''
 }
 
-const requestTelegramWriteAccess = async (): Promise<boolean> => {
-  const tg = (window as any)?.Telegram?.WebApp
-  if (!tg) return false
-  try {
-    if (Boolean(tg?.initDataUnsafe?.user?.allows_write_to_pm)) return true
-  } catch {}
-  if (typeof tg?.requestWriteAccess !== 'function') return false
-  try {
-    return await new Promise<boolean>((resolve) => {
-      let settled = false
-      const done = (value: boolean) => {
-        if (settled) return
-        settled = true
-        resolve(Boolean(value))
-      }
-      try {
-        tg.requestWriteAccess((granted: boolean) => done(Boolean(granted)))
-      } catch {
-        done(false)
-        return
-      }
-      window.setTimeout(() => done(false), 10000)
-    })
-  } catch {
-    return false
-  }
-}
-
 export default function App() {
   /* =============================================================================================
    АВТОРИЗАЦИЯ В ТГ (при запуске мини‑приложения)
@@ -1314,13 +1286,11 @@ useEffect(() => {
       let status = String(result?.status || '').toLowerCase()
 
       if (status === 'forbidden') {
-        const canWrite = await requestTelegramWriteAccess()
-        if (!canWrite) {
-          setRetry()
-          return
-        }
-        result = await bootstrapBotChat(token, { force: true })
-        status = String(result?.status || '').toLowerCase()
+        // Не вызываем системный Telegram popup "Разрешить отправку сообщений".
+        // Вместо этого открываем чат бота напрямую, чтобы пользователь видел его в истории.
+        openTelegramUrl(`https://t.me/${BOT_USERNAME}?start=menu`)
+        setRetry()
+        return
       }
 
       if (status === 'sent' || status === 'already_sent') {

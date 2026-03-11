@@ -2046,28 +2046,17 @@ async def bot_bootstrap_chat(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    now_utc = datetime.now(timezone.utc)
-    resend_cooldown_min = max(
-        0,
-        int(os.getenv("BOT_BOOTSTRAP_RESEND_COOLDOWN_MINUTES", "240") or 240),
-    )
-    resend_cooldown = timedelta(minutes=resend_cooldown_min)
-
     existing_q = await db.execute(
         select(BotPmBootstrap).where(BotPmBootstrap.user_id == int(current_user.id))
     )
     existing = existing_q.scalar_one_or_none()
     if existing is not None and not force:
-        last_sent_at = _to_utc(existing.sent_at)
-        if (
-            last_sent_at is not None
-            and resend_cooldown.total_seconds() > 0
-            and (now_utc - last_sent_at) < resend_cooldown
-        ):
-            return {
-                "status": "already_sent",
-                "message": "Bootstrap message sent recently.",
-            }
+        return {
+            "status": "already_sent",
+            "message": "Bootstrap message already sent.",
+        }
+
+    now_utc = datetime.now(timezone.utc)
 
     app_url = str(os.getenv("TELEGRAM_APP_URL") or "").strip()
     reply_markup: Optional[Dict[str, Any]] = None

@@ -22,6 +22,7 @@ import type {
   MeDto,
 } from './api'
 import SubscriptionManageCard from './features/profile/SubscriptionManageCard'
+import { metrikaHit, metrikaReachGoal } from './metrika'
 
 
 
@@ -31,7 +32,7 @@ import cameraIcon from './assets/icons/camera.png'
 import futureIcon from './assets/icons/future_icon.png'
 import threeCardIcon from './assets/icons/three_card_icon.png'
 import selectCardIcon from './assets/icons/select_icon.png'
-import startSunUserWhiteIcon from './assets/icons/start-sun-user-white.png'
+import startSunUserWhiteIcon from './assets/icons/start-sun-user-white-outline.png'
 
 // ✅ ЗАДНЯЯ СТОРОНА КАРТЫ — ВСЕГДА ТОЛЬКО ЭТА
 import backCardImg from './assets/cards/back/back.png'
@@ -808,6 +809,19 @@ const BOT_SUB_MANAGE_URL = `https://t.me/${BOT_USERNAME}?start=sub_manage`
 const SUPPORT_URL = `https://t.me/${BOT_USERNAME}?start=support`
 const TERMS_URL = `https://t.me/${BOT_USERNAME}?start=terms`
 const PRIVACY_URL = `https://t.me/${BOT_USERNAME}?start=privacy`
+
+const METRIKA_GOALS = {
+  appOpen: 'app_open',
+  openCardDay: 'open_card_day',
+  openPhotoAnalysis: 'open_photo_analysis',
+  readingStart: 'reading_start',
+  photoDetectSuccess: 'photo_detect_success',
+  photoInterpretationDone: 'photo_interpretation_done',
+  photoFollowupDone: 'photo_followup_done',
+  paywallShown: 'paywall_shown',
+  paymentStart: 'payment_start',
+  paymentSuccess: 'payment_success',
+} as const
 const LEGAL_CONSENT_VERSION = '2026-02-25-v1'
 const HOME_TOUR_VERSION = '2026-03-08-v3'
 const TERMS_PDF_URL = '/docs/ai_taro_user_agreement_draft.pdf'
@@ -1322,6 +1336,13 @@ useEffect(() => {
       const msg = String(out?.message || '').trim()
 
       if (status === 'succeeded') {
+        if (!paidOrdersTrackedRef.current.has(orderId)) {
+          paidOrdersTrackedRef.current.add(orderId)
+          metrikaReachGoal(METRIKA_GOALS.paymentSuccess, {
+            provider: 'sbp',
+            plan: String(out?.plan_code || ''),
+          })
+        }
         setPendingSbpOrder(null)
         void refreshBilling(jwt)
       } else if (status === 'canceled' || status === 'cancelled') {
@@ -1353,6 +1374,7 @@ useEffect(() => {
     if (!jwt) return
 
     try {
+      metrikaReachGoal(METRIKA_GOALS.paymentStart, { provider: 'sbp', plan: planCode })
       setSbpBusyPlan(planCode)
       setSbpStatusText('')
 
@@ -1682,6 +1704,12 @@ useEffect(() => {
       pulseCtaRed()
       return flashStageBorder('spread')
     }
+
+    metrikaReachGoal(METRIKA_GOALS.readingStart, {
+      spread,
+      topic,
+      has_question: String(question || '').trim().length > 0 ? 1 : 0,
+    })
 
     // роутинг по выбранному раскладу
     if (spread === 'card_of_day') {
@@ -2210,6 +2238,9 @@ useEffect(() => {
   ============================================================================================= */
 
   const [view, setView] = useState<View>('home')
+  const lastMetrikaPathRef = useRef('')
+  const paywallShownRef = useRef(false)
+  const paidOrdersTrackedRef = useRef<Set<string>>(new Set())
 
   /* =============================================================================================
      [20.1] NAV (HOME): Главная / История / Профиль — слайд влево/вправо
@@ -3045,6 +3076,7 @@ useEffect(() => {
   // ---------------------------------------------------------------------------------------------
 
   const openCardDay = async () => {
+    metrikaReachGoal(METRIKA_GOALS.openCardDay, { source: 'home' })
     // ✅ форсим ремоунт карты (иначе мог сохраниться фронт с прошлого захода)
     setPflipMountKey((k) => k + 1)
 
@@ -3153,6 +3185,7 @@ useEffect(() => {
   }
 
   const openCardDayFromHistory = (it: CardHistoryItem) => {
+    metrikaReachGoal(METRIKA_GOALS.openCardDay, { source: 'history' })
     const idx = clamp(it.card_index ?? 0, 0, 77)
     const img = FRONT_CARD_URLS[idx] || backCardImg
 
@@ -3273,6 +3306,7 @@ useEffect(() => {
   }
 
   const openPhotoAnalysis = () => {
+    metrikaReachGoal(METRIKA_GOALS.openPhotoAnalysis, { source: 'home' })
     resetPhotoFlow()
     setView('photo_analysis')
   }
@@ -3534,6 +3568,9 @@ useEffect(() => {
       }
       setPhotoDetectedCards(detection.cards || [])
       setPhotoStep('detected')
+      metrikaReachGoal(METRIKA_GOALS.photoDetectSuccess, {
+        cards_count: Array.isArray(detection.cards) ? detection.cards.length : 0,
+      })
       void refreshBilling(token)
     } catch (err: any) {
       if (photoReqSeqRef.current !== reqId) return
@@ -3583,6 +3620,10 @@ useEffect(() => {
         desc || buildPhotoFallbackText(detection.ok ? (detection.cards || photoDetectedCards) : photoDetectedCards, photoMainQuestion)
       )
       setPhotoStep('result')
+      metrikaReachGoal(METRIKA_GOALS.photoInterpretationDone, {
+        cards_count: (detection.ok ? (detection.cards || photoDetectedCards) : photoDetectedCards).length || 0,
+        has_question: String(photoMainQuestion || '').trim().length > 0 ? 1 : 0,
+      })
       setPhotoFollowupQuestion('')
       setPhotoFollowupAnswer('')
       setPhotoFollowupUsed(false)
@@ -3631,6 +3672,9 @@ useEffect(() => {
       const desc = String((out as any)?.description || '').trim()
       setPhotoFollowupAnswer(desc || buildPhotoFallbackText(photoDetectedCards, followText))
       setPhotoFollowupUsed(true)
+      metrikaReachGoal(METRIKA_GOALS.photoFollowupDone, {
+        has_main_question: String(mainQ || '').trim().length > 0 ? 1 : 0,
+      })
       setPhotoFollowupQuestion('')
       void refreshBilling(token)
     } catch (err: any) {
@@ -5585,6 +5629,51 @@ useEffect(() => {
     requestAnimationFrame(tick)
   }
 
+  useEffect(() => {
+    metrikaReachGoal(METRIKA_GOALS.appOpen)
+  }, [])
+
+  useEffect(() => {
+    const virtualPath = (() => {
+      if (showAccessPaywall) return '/paywall'
+      if (view === 'home') return `/home/${navTab}`
+      if (view === 'photo_analysis') return `/photo/${photoStep}`
+      if (view === 'three_cards_prep') return `/reading/three_cards/${threeScreen}`
+      if (view === 'past_present_future_prep') return `/reading/past_present_future/${ppfScreen}`
+      if (view === 'decision_prep') return `/reading/decision/${decisionScreen}`
+      if (view === 'card_day_prep') return '/reading/card_day'
+      return '/home/main'
+    })()
+
+    if (lastMetrikaPathRef.current === virtualPath) return
+
+    const prev = lastMetrikaPathRef.current
+    metrikaHit(virtualPath, {
+      title: `AI Taro ${virtualPath}`,
+      referer: prev ? `${window.location.origin}${prev}` : undefined,
+      params: {
+        view,
+        nav_tab: navTab,
+        photo_step: photoStep,
+      },
+    })
+    lastMetrikaPathRef.current = virtualPath
+  }, [view, navTab, photoStep, threeScreen, ppfScreen, decisionScreen, showAccessPaywall])
+
+  useEffect(() => {
+    if (showAccessPaywall && !paywallShownRef.current) {
+      metrikaReachGoal(METRIKA_GOALS.paywallShown, {
+        view,
+        nav_tab: navTab,
+      })
+      paywallShownRef.current = true
+      return
+    }
+    if (!showAccessPaywall) {
+      paywallShownRef.current = false
+    }
+  }, [showAccessPaywall, view, navTab])
+
   /* =============================================================================================
      [24] TELEGRAM BACK BUTTON
   ============================================================================================= */
@@ -6384,6 +6473,7 @@ useEffect(() => {
                             className="profile-piece__cta profile-piece__cta--card"
                             onClick={(e) => {
                               e.preventDefault()
+                              metrikaReachGoal(METRIKA_GOALS.paymentStart, { provider: 'bot_card' })
                               openTelegramUrl(BOT_CARD_URL)
                             }}
                           >
@@ -6397,6 +6487,7 @@ useEffect(() => {
                             className="profile-piece__cta profile-piece__cta--click"
                             onClick={(e) => {
                               e.preventDefault()
+                              metrikaReachGoal(METRIKA_GOALS.paymentStart, { provider: 'click_app' })
                               openTelegramUrl(BOT_CLICK_URL)
                             }}
                           >
@@ -6410,6 +6501,7 @@ useEffect(() => {
                             className="profile-piece__cta profile-piece__cta--click"
                             onClick={(e) => {
                               e.preventDefault()
+                              metrikaReachGoal(METRIKA_GOALS.paymentStart, { provider: 'click_card' })
                               openTelegramUrl(BOT_CLICK_CARD_URL)
                             }}
                           >
@@ -6666,27 +6758,29 @@ useEffect(() => {
 
                   <div className="photo-field">
                     <label className="photo-field__label" htmlFor="photo-main-question">Ваш вопрос</label>
-                    <div className="photo-field__input-row">
-                      <textarea
-                        id="photo-main-question"
-                        className="photo-field__input photo-field__input--with-mic"
-                        value={photoMainQuestion}
-                        onChange={(e) => setPhotoMainQuestion(e.target.value)}
-                        placeholder="Что мне важно понять?"
-                        rows={3}
-                        enterKeyHint="send"
-                      />
-                      <button
-                        type="button"
-                        className={`ask-mic photo-field__mic ${isPhotoMainRecording ? 'recording' : ''}`}
-                        onClick={() => void toggleRecording('photo_main')}
-                        aria-label={isPhotoMainRecording ? 'Остановить запись' : 'Начать запись'}
-                        title={isPhotoMainRecording ? 'Остановить запись' : 'Записать голосом'}
-                      >
-                        <img className="ask-mic__icon" src={micIcon} alt="" aria-hidden="true" />
-                      </button>
+                    <div className="ask-wrap photo-question-ask">
+                      <div className="ask-glass">
+                        <textarea
+                          id="photo-main-question"
+                          className="ask-input photo-question-ask__input"
+                          value={photoMainQuestion}
+                          onChange={(e) => setPhotoMainQuestion(e.target.value)}
+                          placeholder="Что мне важно понять?"
+                          rows={2}
+                          enterKeyHint="send"
+                        />
+                        <button
+                          type="button"
+                          className={`ask-mic ${isPhotoMainRecording ? 'recording' : ''}`}
+                          onClick={() => void toggleRecording('photo_main')}
+                          aria-label={isPhotoMainRecording ? 'Остановить запись' : 'Начать запись'}
+                          title={isPhotoMainRecording ? 'Остановить запись' : 'Записать голосом'}
+                        >
+                          <img className="ask-mic__icon" src={micIcon} alt="" aria-hidden="true" />
+                        </button>
+                      </div>
                     </div>
-                    <div className={`ask-hint photo-field__hint ${isPhotoMainRecording ? 'is-visible' : ''}`}>
+                    <div className={`ask-hint ${isPhotoMainRecording ? 'is-visible' : ''}`}>
                       Идёт запись… нажмите ещё раз, чтобы остановить
                     </div>
                   </div>
@@ -7806,6 +7900,7 @@ useEffect(() => {
                 type="button"
                 className="glass-cta paywall-card__cta"
                 onClick={() => {
+                  metrikaReachGoal(METRIKA_GOALS.paymentStart, { provider: 'paywall_bot' })
                   openTelegramUrl(BOT_PAYMENT_URL)
                 }}
               >

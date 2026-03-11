@@ -734,8 +734,8 @@ body,
 .glass-cta--primary-footer .glass-cta__icon {
   position: relative;
   z-index: 1;
-  width: 24px;
-  height: 24px;
+  width: 30px;
+  height: 30px;
   margin-right: 10px;
   display: inline-flex;
   align-items: center;
@@ -751,18 +751,18 @@ body,
 }
 
 .glass-cta--primary-footer .glass-cta__icon img {
-  width: 26px;
-  height: 26px;
+  width: 34px;
+  height: 34px;
   display: block;
-  opacity: 0.95;
-  filter: drop-shadow(0 3px 10px rgba(10, 28, 70, 0.35));
+  opacity: 1;
+  filter: none;
 }
 
 .glass-cta--primary-footer .glass-cta__text {
   position: relative;
   z-index: 1;
   color: rgba(246, 251, 255, 0.98);
-  font-size: 19px;
+  font-size: 21px;
   font-weight: 650;
   letter-spacing: -0.01em;
   text-shadow: 0 10px 22px rgba(7, 21, 56, 0.28);

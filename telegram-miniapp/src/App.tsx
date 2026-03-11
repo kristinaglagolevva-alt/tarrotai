@@ -825,9 +825,20 @@ const METRIKA_GOALS = {
 } as const
 const LEGAL_CONSENT_VERSION = '2026-02-25-v1'
 const HOME_TOUR_VERSION = '2026-03-08-v3'
-const BOT_BOOTSTRAP_DM_VERSION = '2026-03-11-v1'
+const BOT_BOOTSTRAP_DM_VERSION = '2026-03-11-v2'
+const BOT_BOOTSTRAP_RETRY_MS = 12 * 60 * 60 * 1000
+const BOT_BOOTSTRAP_PROMPT_COOLDOWN_MS = 6 * 60 * 60 * 1000
 const TERMS_PDF_URL = '/docs/ai_taro_user_agreement_draft.pdf'
 const PRIVACY_PDF_URL = '/docs/ai_taro_privacy_policy_draft.pdf'
+
+const getBotBootstrapStorageKeys = (tgId: number) => {
+  const base = `ai_taro_bot_bootstrap_dm:${BOT_BOOTSTRAP_DM_VERSION}:${tgId}`
+  return {
+    base,
+    retryAt: `${base}:retry_at`,
+    promptAt: `${base}:prompt_at`,
+  }
+}
 
 type HomeTourStepId = 'card_day' | 'photo' | 'question_zone' | 'cta'
 type HomeTourSpotlight = {
@@ -1096,6 +1107,8 @@ const [showPersonalizationModal, setShowPersonalizationModal] = useState(false)
 const [memoryOptIn, setMemoryOptIn] = useState<boolean>(true)
 const [prefsSaving, setPrefsSaving] = useState(false)
 const [prefsError, setPrefsError] = useState('')
+const [showBotChatPinPrompt, setShowBotChatPinPrompt] = useState(false)
+const [botChatPinBusy, setBotChatPinBusy] = useState(false)
 
 const [question, setQuestion] = useState('')
 
@@ -1227,31 +1240,20 @@ useEffect(() => {
 
   useEffect(() => {
     if (authStatus !== 'ready' || !token) return
+    if (showLegalConsent) return
     const tgId = Number(user?.telegram_id || 0)
     if (!tgId) return
 
-    const successKey = `ai_taro_bot_bootstrap_dm:${BOT_BOOTSTRAP_DM_VERSION}:${tgId}`
-    const retryKey = `${successKey}:retry_at`
+    const keys = getBotBootstrapStorageKeys(tgId)
     const nowTs = Date.now()
 
     try {
-      if (localStorage.getItem(successKey) === '1') return
-      const retryUntil = Number(localStorage.getItem(retryKey) || '0')
+      const retryUntil = Number(localStorage.getItem(keys.retryAt) || '0')
       if (Number.isFinite(retryUntil) && retryUntil > nowTs) return
     } catch {}
 
     let cancelled = false
     ;(async () => {
-      const canWrite = await requestTelegramWriteAccess()
-      if (cancelled) return
-
-      if (!canWrite) {
-        try {
-          localStorage.setItem(retryKey, String(Date.now() + 24 * 60 * 60 * 1000))
-        } catch {}
-        return
-      }
-
       try {
         const result = await bootstrapBotChat(token)
         if (cancelled) return
@@ -1259,18 +1261,34 @@ useEffect(() => {
         const status = String(result?.status || '').toLowerCase()
         if (status === 'sent' || status === 'already_sent') {
           try {
-            localStorage.setItem(successKey, '1')
-            localStorage.removeItem(retryKey)
+            localStorage.removeItem(keys.retryAt)
+            if (status === 'sent') {
+              localStorage.removeItem(keys.promptAt)
+            }
           } catch {}
+          setShowBotChatPinPrompt(false)
+          return
+        }
+
+        if (status === 'forbidden') {
+          try {
+            const lastPromptAt = Number(localStorage.getItem(keys.promptAt) || '0')
+            if (!Number.isFinite(lastPromptAt) || nowTs - lastPromptAt > BOT_BOOTSTRAP_PROMPT_COOLDOWN_MS) {
+              localStorage.setItem(keys.promptAt, String(nowTs))
+              setShowBotChatPinPrompt(true)
+            }
+          } catch {
+            setShowBotChatPinPrompt(true)
+          }
           return
         }
 
         try {
-          localStorage.setItem(retryKey, String(Date.now() + 12 * 60 * 60 * 1000))
+          localStorage.setItem(keys.retryAt, String(Date.now() + BOT_BOOTSTRAP_RETRY_MS))
         } catch {}
       } catch {
         try {
-          localStorage.setItem(retryKey, String(Date.now() + 12 * 60 * 60 * 1000))
+          localStorage.setItem(keys.retryAt, String(Date.now() + BOT_BOOTSTRAP_RETRY_MS))
         } catch {}
       }
     })()
@@ -1278,7 +1296,40 @@ useEffect(() => {
     return () => {
       cancelled = true
     }
-  }, [authStatus, token, user?.telegram_id])
+  }, [authStatus, token, user?.telegram_id, showLegalConsent])
+
+  const confirmBotChatPin = async () => {
+    if (!token || botChatPinBusy) return
+    const tgId = Number(user?.telegram_id || 0)
+    if (!tgId) return
+    const keys = getBotBootstrapStorageKeys(tgId)
+
+    setBotChatPinBusy(true)
+    try {
+      await requestTelegramWriteAccess()
+      const result = await bootstrapBotChat(token, { force: true })
+      const status = String(result?.status || '').toLowerCase()
+      if (status === 'sent' || status === 'already_sent') {
+        try {
+          localStorage.removeItem(keys.retryAt)
+          localStorage.removeItem(keys.promptAt)
+        } catch {}
+        setShowBotChatPinPrompt(false)
+        return
+      }
+      try {
+        localStorage.setItem(keys.retryAt, String(Date.now() + BOT_BOOTSTRAP_RETRY_MS))
+      } catch {}
+      setShowBotChatPinPrompt(false)
+    } catch {
+      try {
+        localStorage.setItem(keys.retryAt, String(Date.now() + BOT_BOOTSTRAP_RETRY_MS))
+      } catch {}
+      setShowBotChatPinPrompt(false)
+    } finally {
+      setBotChatPinBusy(false)
+    }
+  }
 
   useEffect(() => {
     setMemoryOptIn(Boolean(user?.memory_opt_in ?? true))
@@ -5989,6 +6040,31 @@ useEffect(() => {
         <span className="glass-cta__inner">
           <span className="glass-cta__rim" aria-hidden="true" />
           <span className="glass-cta__text">Согласиться и продолжить</span>
+          <span className="glass-cta__spark" aria-hidden="true" />
+        </span>
+      </button>
+    </div>
+  </div>
+)}
+
+{authStatus === 'ready' && !showLegalConsent && showBotChatPinPrompt && (
+  <div className="auth-overlay bot-chat-pin" role="dialog" aria-modal="true" aria-label="Сохранить чат AI Taro">
+    <div className="auth-overlay__card bot-chat-pin__card">
+      <div className="bot-chat-pin__title">Добро пожаловать</div>
+      <div className="bot-chat-pin__text">
+        Отправим одно сообщение в чат AI Taro, чтобы он сохранился в Telegram и вы могли быстро вернуться в приложение.
+      </div>
+      <button
+        type="button"
+        className="glass-cta bot-chat-pin__cta"
+        onClick={() => {
+          void confirmBotChatPin()
+        }}
+        disabled={botChatPinBusy}
+      >
+        <span className="glass-cta__inner">
+          <span className="glass-cta__rim" aria-hidden="true" />
+          <span className="glass-cta__text">{botChatPinBusy ? 'Подключаем…' : 'Хорошо'}</span>
           <span className="glass-cta__spark" aria-hidden="true" />
         </span>
       </button>

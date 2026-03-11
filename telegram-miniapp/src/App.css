@@ -2807,6 +2807,43 @@ body,
   filter: grayscale(0.14);
 }
 
+.bot-chat-pin__card {
+  width: min(94vw, 420px);
+  text-align: left;
+  padding: 18px 16px 16px;
+}
+
+.bot-chat-pin__title {
+  font-size: 22px;
+  font-weight: 760;
+  line-height: 1.1;
+  color: rgba(246, 251, 255, 0.98);
+}
+
+.bot-chat-pin__text {
+  margin-top: 10px;
+  font-size: 15px;
+  line-height: 1.42;
+  color: rgba(220, 236, 255, 0.92);
+}
+
+.bot-chat-pin__cta {
+  width: 100%;
+  max-width: none;
+  --block-w: 100%;
+  display: block;
+  margin: 14px auto 0;
+}
+
+.bot-chat-pin__cta .glass-cta__inner {
+  width: 100%;
+  justify-content: center;
+}
+
+.bot-chat-pin__cta .glass-cta__text {
+  font-size: 19px;
+}
+
 .legal-doc-overlay {
   position: fixed;
   inset: 0;

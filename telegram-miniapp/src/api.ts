@@ -238,8 +238,13 @@ export type BotBootstrapOutDto = {
   message?: string
 }
 
-export async function bootstrapBotChat(token: string): Promise<BotBootstrapOutDto> {
-  return apiJson(`${API_BASE}/bot/bootstrap-chat`, {
+export async function bootstrapBotChat(
+  token: string,
+  options?: { force?: boolean }
+): Promise<BotBootstrapOutDto> {
+  const force = Boolean(options?.force)
+  const query = force ? '?force=1' : ''
+  return apiJson(`${API_BASE}/bot/bootstrap-chat${query}`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${token}` },
     timeoutMs: 12000,

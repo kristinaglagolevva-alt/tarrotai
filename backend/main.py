@@ -1850,6 +1850,19 @@ class BillingStatusOut(BaseModel):
     can_create_reading: bool = False
 
 
+class BillingPlanPublicOut(BaseModel):
+    code: str
+    title: str
+    days: int
+    amount: int
+    currency: str
+
+
+class BillingPlansOut(BaseModel):
+    sbp: List[BillingPlanPublicOut]
+    click: List[BillingPlanPublicOut]
+
+
 class SbpCreateIn(BaseModel):
     plan_code: Literal["sub_2weeks", "sub_month", "sub_year"] = "sub_2weeks"
 
@@ -2785,6 +2798,36 @@ async def billing_status(
         "subscription_until": sub_until,
         "has_active_subscription": has_sub,
         "can_create_reading": bool(has_sub or free_left > 0 or balance > 0),
+    }
+
+
+@app.get("/billing/plans", response_model=BillingPlansOut)
+async def billing_plans():
+    def _serialize(plans: Dict[str, Dict[str, Any]], *, default_currency: str) -> List[Dict[str, Any]]:
+        out: List[Dict[str, Any]] = []
+        for raw_code, raw_plan in plans.items():
+            plan = dict(raw_plan or {})
+            code = str(plan.get("code") or raw_code or "").strip().lower()
+            if not code:
+                continue
+            amount = int(plan.get("amount") or 0)
+            if amount <= 0:
+                continue
+            out.append(
+                {
+                    "code": code,
+                    "title": str(plan.get("title") or code),
+                    "days": int(plan.get("days") or 0),
+                    "amount": amount,
+                    "currency": str(plan.get("currency") or default_currency).strip().upper(),
+                }
+            )
+        out.sort(key=lambda item: (int(item.get("days") or 0), str(item.get("code") or "")))
+        return out
+
+    return {
+        "sbp": _serialize(SBP_PLANS, default_currency="RUB"),
+        "click": _serialize(CLICK_PLANS, default_currency=str(CLICK_CURRENCY or "UZS")),
     }
 
 

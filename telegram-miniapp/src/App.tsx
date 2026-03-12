@@ -10,6 +10,7 @@ import {
   getMe,
   updateMePreferences,
   getBillingStatus,
+  getBillingPlans,
   createSbpPayment,
   getSbpPaymentStatus,
   createClickPayment,
@@ -803,18 +804,28 @@ type BillingStatus = {
   can_create_reading?: boolean
 }
 
-type BillingCountryCode = 'ru' | 'uz' | 'kz' | 'by' | 'kg' | 'other'
+type BillingCountryCode = 'ru' | 'uz'
 type BillingPlanKey = ClickPlanCode
 type BillingFlowStep = 'country' | 'plan' | 'method'
 type BillingFlowSource = 'paywall' | 'profile'
+type BillingPlanPriceInfo = { amount: number; currency: string }
+type BillingPlanPricesByProvider = {
+  sbp: Partial<Record<BillingPlanKey, BillingPlanPriceInfo>>
+  click: Partial<Record<BillingPlanKey, BillingPlanPriceInfo>>
+}
+
+const BILLING_PLAN_PRICES_FALLBACK: BillingPlanPricesByProvider = {
+  sbp: {
+    sub_2weeks: { amount: 12400, currency: 'RUB' },
+    sub_month: { amount: 22400, currency: 'RUB' },
+    sub_year: { amount: 174700, currency: 'RUB' },
+  },
+  click: {},
+}
 
 const BILLING_COUNTRIES: Array<{ code: BillingCountryCode; label: string; methodsHint: string }> = [
   { code: 'ru', label: '🇷🇺 Россия', methodsHint: 'Оплата через СБП' },
   { code: 'uz', label: '🇺🇿 Узбекистан', methodsHint: 'Оплата через CLICK' },
-  { code: 'kz', label: '🇰🇿 Казахстан', methodsHint: 'Оплата банковской картой' },
-  { code: 'by', label: '🇧🇾 Беларусь', methodsHint: 'Оплата банковской картой' },
-  { code: 'kg', label: '🇰🇬 Кыргызстан', methodsHint: 'Оплата банковской картой' },
-  { code: 'other', label: '🌍 Другая страна', methodsHint: 'Оплата банковской картой' },
 ]
 
 const BILLING_PLAN_META: Record<BillingPlanKey, { title: string; caption: string }> = {
@@ -827,10 +838,6 @@ const BILLING_PLAN_META: Record<BillingPlanKey, { title: string; caption: string
 const BILLING_PLAN_KEYS_BY_COUNTRY: Record<BillingCountryCode, BillingPlanKey[]> = {
   ru: ['sub_2weeks', 'sub_month', 'sub_year'],
   uz: ['sub_week', 'sub_2weeks', 'sub_month', 'sub_year'],
-  kz: ['sub_2weeks', 'sub_month', 'sub_year'],
-  by: ['sub_2weeks', 'sub_month', 'sub_year'],
-  kg: ['sub_2weeks', 'sub_month', 'sub_year'],
-  other: ['sub_2weeks', 'sub_month', 'sub_year'],
 }
 
 const BOT_USERNAME = 'Ttaarrroobot'
@@ -1131,6 +1138,11 @@ const [billingFlowSource, setBillingFlowSource] = useState<BillingFlowSource>('p
 const [billingFlowStep, setBillingFlowStep] = useState<BillingFlowStep>('country')
 const [billingFlowCountry, setBillingFlowCountry] = useState<BillingCountryCode>('uz')
 const [billingFlowPlan, setBillingFlowPlan] = useState<BillingPlanKey | null>(null)
+const [billingPlanPrices, setBillingPlanPrices] = useState<BillingPlanPricesByProvider>(BILLING_PLAN_PRICES_FALLBACK)
+const [showProfilePaymentHelp, setShowProfilePaymentHelp] = useState(false)
+const [showBillingPaymentHelp, setShowBillingPaymentHelp] = useState(false)
+const [showPaymentSuccessModal, setShowPaymentSuccessModal] = useState(false)
+const [paymentSuccessText, setPaymentSuccessText] = useState('Оплата прошла успешно. Подписка активирована.')
 const [showAccessPaywall, setShowAccessPaywall] = useState(false)
 const [showLegalConsent, setShowLegalConsent] = useState(false)
 const [legalConsentChecked, setLegalConsentChecked] = useState(false)
@@ -1426,10 +1438,12 @@ useEffect(() => {
     setBillingFlowSource(source)
     setBillingFlowStep('country')
     setBillingFlowPlan(null)
+    setShowBillingPaymentHelp(false)
     setShowBillingFlow(true)
   }
 
   const closeBillingFlow = () => {
+    setShowBillingPaymentHelp(false)
     setShowBillingFlow(false)
   }
 
@@ -1444,9 +1458,98 @@ useEffect(() => {
     }
   }
 
+  const onPaymentSucceeded = (orderId: string, provider: 'sbp' | 'click', planCode: string) => {
+    const cleanOrderId = String(orderId || '').trim()
+    if (!cleanOrderId) return
+
+    if (!paidOrdersTrackedRef.current.has(cleanOrderId)) {
+      paidOrdersTrackedRef.current.add(cleanOrderId)
+      metrikaReachGoal(METRIKA_GOALS.paymentSuccess, {
+        provider,
+        plan: String(planCode || ''),
+      })
+    }
+
+    if (!paymentSuccessNotifiedRef.current.has(cleanOrderId)) {
+      paymentSuccessNotifiedRef.current.add(cleanOrderId)
+      setPaymentSuccessText(
+        provider === 'click'
+          ? 'Оплата через CLICK подтверждена. Подписка активирована.'
+          : 'Оплата через СБП подтверждена. Подписка активирована.'
+      )
+      setShowPaymentSuccessModal(true)
+    }
+
+    setShowAccessPaywall(false)
+    setShowBillingPaymentHelp(false)
+    setShowProfilePaymentHelp(false)
+    setShowBillingFlow(false)
+  }
+
   const mapPlanToSbpPlan = (planKey: BillingPlanKey): SbpPlanCode | null => {
     if (planKey === 'sub_2weeks' || planKey === 'sub_month' || planKey === 'sub_year') return planKey
     return null
+  }
+
+  useEffect(() => {
+    let cancelled = false
+
+    const run = async () => {
+      try {
+        const out = await getBillingPlans()
+        if (cancelled) return
+
+        const next: BillingPlanPricesByProvider = {
+          sbp: { ...(BILLING_PLAN_PRICES_FALLBACK.sbp || {}) },
+          click: { ...(BILLING_PLAN_PRICES_FALLBACK.click || {}) },
+        }
+        for (const item of out.sbp || []) {
+          const code = String(item?.code || '').trim() as BillingPlanKey
+          if (!code) continue
+          next.sbp[code] = {
+            amount: Math.max(0, Number(item?.amount || 0)),
+            currency: String(item?.currency || 'RUB').trim().toUpperCase(),
+          }
+        }
+        for (const item of out.click || []) {
+          const code = String(item?.code || '').trim() as BillingPlanKey
+          if (!code) continue
+          next.click[code] = {
+            amount: Math.max(0, Number(item?.amount || 0)),
+            currency: String(item?.currency || 'UZS').trim().toUpperCase(),
+          }
+        }
+        setBillingPlanPrices(next)
+      } catch {
+        // Keep fallback captions from static metadata.
+      }
+    }
+
+    void run()
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  const formatPlanAmount = (amount: number, currency: string) => {
+    const value = Math.max(0, Number(amount || 0))
+    const cur = String(currency || '').toUpperCase()
+    if (cur === 'RUB') {
+      const rub = Math.round(value / 100)
+      return `${rub.toLocaleString('ru-RU')} ₽`
+    }
+    if (cur === 'UZS') {
+      return `${Math.round(value).toLocaleString('ru-RU')} сум`
+    }
+    return `${Math.round(value).toLocaleString('ru-RU')} ${cur || ''}`.trim()
+  }
+
+  const getPlanCaption = (country: BillingCountryCode, planKey: BillingPlanKey) => {
+    const base = BILLING_PLAN_META[planKey]?.caption || ''
+    const provider = country === 'uz' ? 'click' : 'sbp'
+    const priceInfo = provider === 'click' ? billingPlanPrices.click[planKey] : billingPlanPrices.sbp[planKey]
+    if (!priceInfo) return base
+    return `${base} • ${formatPlanAmount(priceInfo.amount, priceInfo.currency)}`
   }
 
   useEffect(() => {
@@ -1490,13 +1593,7 @@ useEffect(() => {
       const msg = String(out?.message || '').trim()
 
       if (status === 'succeeded') {
-        if (!paidOrdersTrackedRef.current.has(orderId)) {
-          paidOrdersTrackedRef.current.add(orderId)
-          metrikaReachGoal(METRIKA_GOALS.paymentSuccess, {
-            provider: 'sbp',
-            plan: String(out?.plan_code || ''),
-          })
-        }
+        onPaymentSucceeded(orderId, 'sbp', String(out?.plan_code || ''))
         setPendingSbpOrder(null)
         void refreshBilling(jwt)
       } else if (status === 'canceled' || status === 'cancelled') {
@@ -1531,6 +1628,8 @@ useEffect(() => {
       metrikaReachGoal(METRIKA_GOALS.paymentStart, { provider: 'sbp', plan: planCode })
       setSbpBusyPlan(planCode)
       setSbpStatusText('')
+      setShowBillingPaymentHelp(false)
+      setShowProfilePaymentHelp(false)
 
       const out = await createSbpPayment(jwt, planCode)
       const orderId = String(out?.order_id || '').trim()
@@ -1541,6 +1640,9 @@ useEffect(() => {
       }
 
       setPendingSbpOrder(orderId)
+      if (showBillingFlow) {
+        setBillingFlowStep('country')
+      }
       setSbpStatusText('Счёт СБП открыт. Завершите оплату и вернитесь в приложение.')
       openTelegramUrl(link)
       window.setTimeout(() => {
@@ -1575,13 +1677,7 @@ useEffect(() => {
       const msg = String(out?.message || '').trim()
 
       if (status === 'succeeded') {
-        if (!paidOrdersTrackedRef.current.has(orderId)) {
-          paidOrdersTrackedRef.current.add(orderId)
-          metrikaReachGoal(METRIKA_GOALS.paymentSuccess, {
-            provider: 'click',
-            plan: String(out?.plan_code || ''),
-          })
-        }
+        onPaymentSucceeded(orderId, 'click', String(out?.plan_code || ''))
         setPendingClickOrder(null)
         void refreshBilling(jwt)
       } else if (status === 'canceled' || status === 'cancelled') {
@@ -1616,6 +1712,8 @@ useEffect(() => {
       metrikaReachGoal(METRIKA_GOALS.paymentStart, { provider: 'click', plan: planCode })
       setClickBusyPlan(planCode)
       setClickStatusText('')
+      setShowBillingPaymentHelp(false)
+      setShowProfilePaymentHelp(false)
 
       const out = await createClickPayment(jwt, planCode)
       const orderId = String(out?.order_id || '').trim()
@@ -1626,6 +1724,9 @@ useEffect(() => {
       }
 
       setPendingClickOrder(orderId)
+      if (showBillingFlow) {
+        setBillingFlowStep('country')
+      }
       setClickStatusText('Счёт CLICK открыт. Завершите оплату и вернитесь в приложение.')
       openTelegramUrl(link)
       window.setTimeout(() => {
@@ -1959,7 +2060,11 @@ useEffect(() => {
   }
 
   const blockIfNoReadingAccess = () => {
-    if (billing?.can_create_reading === false) {
+    const hasSub = Boolean(billing?.has_active_subscription)
+    const freeLeft = Math.max(0, Number(billing?.free_left ?? 0))
+    const paidBalance = Math.max(0, Number(billing?.paid_readings_balance ?? 0))
+    const noAccessBySnapshot = !!billing && !hasSub && freeLeft <= 0 && paidBalance <= 0
+    if (billing?.can_create_reading === false || noAccessBySnapshot) {
       setShowAccessPaywall(true)
       return true
     }
@@ -2514,6 +2619,7 @@ useEffect(() => {
   const lastMetrikaPathRef = useRef('')
   const paywallShownRef = useRef(false)
   const paidOrdersTrackedRef = useRef<Set<string>>(new Set())
+  const paymentSuccessNotifiedRef = useRef<Set<string>>(new Set())
 
   /* =============================================================================================
      [20.1] NAV (HOME): Главная / История / Профиль — слайд влево/вправо
@@ -6069,14 +6175,16 @@ useEffect(() => {
         paddingBottom: `calc(${92 + Math.max(0, keyboardInset)}px + env(safe-area-inset-bottom, 0px))`,
       }
     : undefined
-  const billingCountryLabel = BILLING_COUNTRIES.find((item) => item.code === billingFlowCountry)?.label || '🌍 Другая страна'
-  const billingPlans = BILLING_PLAN_KEYS_BY_COUNTRY[billingFlowCountry] || BILLING_PLAN_KEYS_BY_COUNTRY.other
+  const billingCountryLabel = BILLING_COUNTRIES.find((item) => item.code === billingFlowCountry)?.label || '—'
+  const billingPlans = BILLING_PLAN_KEYS_BY_COUNTRY[billingFlowCountry] || BILLING_PLAN_KEYS_BY_COUNTRY.ru
   const billingSelectedPlan = billingFlowPlan ? BILLING_PLAN_META[billingFlowPlan] : null
   const billingStepNumber = billingFlowStep === 'country' ? 1 : billingFlowStep === 'plan' ? 2 : 3
   const inAppBillingEnabled = true
   const combinedPaymentStatus = clickStatusText || sbpStatusText
   const hasSbpMethod = !!billingFlowPlan && billingFlowCountry === 'ru' && !!mapPlanToSbpPlan(billingFlowPlan)
   const hasClickMethod = !!billingFlowPlan && billingFlowCountry === 'uz'
+  const hasPendingPayment = !!(sbpOrderId || clickOrderId)
+  const showBillingStatusArea = billingFlowStep === 'country' && (hasPendingPayment || !!combinedPaymentStatus)
 
   return (
     <div className="app" ref={appRef}>
@@ -6734,29 +6842,40 @@ useEffect(() => {
 
                             {(sbpOrderId || clickOrderId) && (
                               <div className="profile-piece__checks">
-                                {sbpOrderId && (
-                                  <button
-                                    type="button"
-                                    className="profile-piece__check"
-                                    disabled={sbpPolling}
-                                    onClick={() => {
-                                      void checkSbpStatus()
-                                    }}
-                                  >
-                                    {sbpPolling ? 'Проверяю…' : 'Проверить оплату СБП'}
-                                  </button>
-                                )}
-                                {clickOrderId && (
-                                  <button
-                                    type="button"
-                                    className="profile-piece__check"
-                                    disabled={clickPolling}
-                                    onClick={() => {
-                                      void checkClickStatus()
-                                    }}
-                                  >
-                                    {clickPolling ? 'Проверяю…' : 'Проверить оплату CLICK'}
-                                  </button>
+                                <button
+                                  type="button"
+                                  className="profile-piece__check"
+                                  onClick={() => setShowProfilePaymentHelp((prev) => !prev)}
+                                >
+                                  {showProfilePaymentHelp ? 'Скрыть' : 'Оплатили, но ошибка?'}
+                                </button>
+                                {showProfilePaymentHelp && (
+                                  <>
+                                    {sbpOrderId && (
+                                      <button
+                                        type="button"
+                                        className="profile-piece__check"
+                                        disabled={sbpPolling}
+                                        onClick={() => {
+                                          void checkSbpStatus()
+                                        }}
+                                      >
+                                        {sbpPolling ? 'Проверяю…' : 'Проверить оплату СБП'}
+                                      </button>
+                                    )}
+                                    {clickOrderId && (
+                                      <button
+                                        type="button"
+                                        className="profile-piece__check"
+                                        disabled={clickPolling}
+                                        onClick={() => {
+                                          void checkClickStatus()
+                                        }}
+                                      >
+                                        {clickPolling ? 'Проверяю…' : 'Проверить оплату CLICK'}
+                                      </button>
+                                    )}
+                                  </>
                                 )}
                               </div>
                             )}
@@ -8241,11 +8360,12 @@ useEffect(() => {
                       key={country.code}
                       type="button"
                       className="billing-flow-option"
-                      onClick={() => {
-                        setBillingFlowCountry(country.code)
-                        setBillingFlowPlan(null)
-                        setBillingFlowStep('plan')
-                      }}
+                        onClick={() => {
+                          setBillingFlowCountry(country.code)
+                          setBillingFlowPlan(null)
+                          setShowBillingPaymentHelp(false)
+                          setBillingFlowStep('plan')
+                        }}
                     >
                       <span className="billing-flow-option__title">{country.label}</span>
                       <span className="billing-flow-option__meta">{country.methodsHint}</span>
@@ -8270,12 +8390,13 @@ useEffect(() => {
                         onClick={() => {
                           setBillingFlowPlan(planKey)
                           setBillingFlowStep('method')
+                          setShowBillingPaymentHelp(false)
                           setSbpStatusText('')
                           setClickStatusText('')
                         }}
                       >
                         <span className="billing-flow-option__title">{plan.title}</span>
-                        <span className="billing-flow-option__meta">{plan.caption}</span>
+                        <span className="billing-flow-option__meta">{getPlanCaption(billingFlowCountry, planKey)}</span>
                       </button>
                     )
                   })}
@@ -8327,34 +8448,45 @@ useEffect(() => {
               </>
             )}
 
-            {(sbpOrderId || clickOrderId || combinedPaymentStatus) && (
+            {showBillingStatusArea && (
               <div className="billing-flow-status">
-                <div className="billing-flow-status__actions">
-                  {sbpOrderId && (
-                    <button
-                      type="button"
-                      className="billing-flow-status__check"
-                      disabled={sbpPolling}
-                      onClick={() => {
-                        void checkSbpStatus()
-                      }}
-                    >
-                      {sbpPolling ? 'Проверяю СБП…' : 'Проверить оплату СБП'}
-                    </button>
-                  )}
-                  {clickOrderId && (
-                    <button
-                      type="button"
-                      className="billing-flow-status__check"
-                      disabled={clickPolling}
-                      onClick={() => {
-                        void checkClickStatus()
-                      }}
-                    >
-                      {clickPolling ? 'Проверяю CLICK…' : 'Проверить оплату CLICK'}
-                    </button>
-                  )}
-                </div>
+                {hasPendingPayment && (
+                  <button
+                    type="button"
+                    className="billing-flow-status__check"
+                    onClick={() => setShowBillingPaymentHelp((prev) => !prev)}
+                  >
+                    {showBillingPaymentHelp ? 'Скрыть' : 'Оплатили, но ошибка?'}
+                  </button>
+                )}
+                {showBillingPaymentHelp && (
+                  <div className="billing-flow-status__actions">
+                    {sbpOrderId && (
+                      <button
+                        type="button"
+                        className="billing-flow-status__check"
+                        disabled={sbpPolling}
+                        onClick={() => {
+                          void checkSbpStatus()
+                        }}
+                      >
+                        {sbpPolling ? 'Проверяю СБП…' : 'Проверить оплату СБП'}
+                      </button>
+                    )}
+                    {clickOrderId && (
+                      <button
+                        type="button"
+                        className="billing-flow-status__check"
+                        disabled={clickPolling}
+                        onClick={() => {
+                          void checkClickStatus()
+                        }}
+                      >
+                        {clickPolling ? 'Проверяю CLICK…' : 'Проверить оплату CLICK'}
+                      </button>
+                    )}
+                  </div>
+                )}
                 {!!combinedPaymentStatus && <div className="billing-flow-status__text">{combinedPaymentStatus}</div>}
               </div>
             )}
@@ -8428,6 +8560,28 @@ useEffect(() => {
             <button type="button" className="paywall-card__close" onClick={() => setShowAccessPaywall(false)}>
               Позже
             </button>
+          </div>
+        </div>
+      )}
+
+      {showPaymentSuccessModal && (
+        <div className="paywall-overlay" role="dialog" aria-modal="true" aria-label="Оплата успешна">
+          <div className="paywall-card">
+            <div className="paywall-card__title">Оплата успешна</div>
+            <div className="paywall-card__text">{paymentSuccessText}</div>
+            <div className="paywall-card__actions">
+              <button
+                type="button"
+                className="glass-cta paywall-card__cta"
+                onClick={() => setShowPaymentSuccessModal(false)}
+              >
+                <span className="glass-cta__inner">
+                  <span className="glass-cta__rim" aria-hidden="true" />
+                  <span className="glass-cta__text">Закрыть</span>
+                  <span className="glass-cta__spark" aria-hidden="true" />
+                </span>
+              </button>
+            </div>
           </div>
         </div>
       )}

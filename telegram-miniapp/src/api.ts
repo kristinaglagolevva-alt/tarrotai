@@ -153,10 +153,30 @@ export type BillingStatusDto = {
   can_create_reading?: boolean
 }
 
+export type BillingPlanPublicDto = {
+  code: string
+  title: string
+  days: number
+  amount: number
+  currency: string
+}
+
+export type BillingPlansOutDto = {
+  sbp: BillingPlanPublicDto[]
+  click: BillingPlanPublicDto[]
+}
+
 export async function getBillingStatus(token: string): Promise<BillingStatusDto> {
   return apiJson(`${API_BASE}/billing/status`, {
     method: 'GET',
     headers: { Authorization: `Bearer ${token}` },
+    timeoutMs: 10000,
+  })
+}
+
+export async function getBillingPlans(): Promise<BillingPlansOutDto> {
+  return apiJson(`${API_BASE}/billing/plans`, {
+    method: 'GET',
     timeoutMs: 10000,
   })
 }

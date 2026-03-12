@@ -1070,6 +1070,22 @@ const resolveTelegramInitDataWithRetry = async (attempts = 8, stepMs = 250): Pro
   return ''
 }
 
+const isTransientAuthError = (raw: string): boolean => {
+  const text = String(raw || '').toLowerCase()
+  if (!text) return false
+  return (
+    text.includes('network timeout') ||
+    text.includes('failed to fetch') ||
+    text.includes('load failed') ||
+    text.includes('networkerror') ||
+    text.includes('gateway timeout') ||
+    text.includes('502') ||
+    text.includes('503') ||
+    text.includes('504') ||
+    text.includes('timeout')
+  )
+}
+
 const requestTelegramWriteAccess = async (): Promise<boolean> => {
   const tg = (window as any)?.Telegram?.WebApp
   if (!tg || typeof tg?.requestWriteAccess !== 'function') return false
@@ -1177,6 +1193,7 @@ useEffect(() => {
     const tg = (window as any)?.Telegram?.WebApp
     try {
       tg?.ready?.()
+      tg?.expand?.()
     } catch {}
 
     // 1) Если jwt есть — проверяем /me
@@ -1205,19 +1222,15 @@ useEffect(() => {
             setBilling(null)
           })
         } else {
-          // Временная сеть/таймаут: не сбрасываем сессию, чтобы не деавторизовать пользователя.
-          safe(() => {
-            setAuthStatus('error')
-            setAuthError('Проблема сети при проверке сессии. Нажмите «Повторить» или перезапустите мини‑приложение.')
-          })
-          return
+          // Временный сетевой сбой на /me: пробуем Telegram auth вместо немедленного фейла.
+          console.warn('getMe failed, fallback to Telegram auth', meErr)
         }
       }
     }
 
     // 2) Телеграм‑авторизация
     try {
-      const initData = await resolveTelegramInitDataWithRetry(8, 250)
+      let initData = await resolveTelegramInitDataWithRetry(24, 250)
       if (!initData) {
         safe(() => {
           setAuthStatus('error')
@@ -1226,17 +1239,30 @@ useEffect(() => {
         return
       }
 
-      let res: Awaited<ReturnType<typeof telegramAuth>>
-      try {
-        res = await telegramAuth(initData)
-      } catch (firstErr: any) {
-        const msg = String(firstErr?.message || firstErr || '')
-        const retryable = /Invalid Telegram initData|initData expired|Invalid initData timestamp/i.test(msg)
-        if (!retryable) throw firstErr
-        await delayMs(350)
-        const refreshed = await resolveTelegramInitDataWithRetry(6, 250)
-        if (!refreshed) throw firstErr
-        res = await telegramAuth(refreshed)
+      let res: Awaited<ReturnType<typeof telegramAuth>> | null = null
+      let lastAuthErr: any = null
+      for (let attempt = 0; attempt < 3; attempt++) {
+        try {
+          res = await telegramAuth(initData)
+          lastAuthErr = null
+          break
+        } catch (authErr: any) {
+          lastAuthErr = authErr
+          const msg = String(authErr?.message || authErr || '')
+          const retryableInitData = /Invalid Telegram initData|initData expired|Invalid initData timestamp|Telegram initData is empty/i.test(msg)
+          const retryableNetwork = isTransientAuthError(msg)
+          if (attempt >= 2 || (!retryableInitData && !retryableNetwork)) {
+            break
+          }
+          await delayMs(350 + attempt * 300)
+          const refreshed = await resolveTelegramInitDataWithRetry(12, 250)
+          if (refreshed) {
+            initData = refreshed
+          }
+        }
+      }
+      if (lastAuthErr || !res) {
+        throw lastAuthErr || new Error('Telegram auth failed')
       }
       let billingOut: BillingStatus | null = null
       try {

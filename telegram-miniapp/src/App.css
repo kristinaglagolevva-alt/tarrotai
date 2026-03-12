@@ -2344,59 +2344,138 @@ body,
 ================================================================================================= */
 
 .cardday-loader-stage {
-  margin-top: 44px;
+  margin-top: 36px;
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
   min-height: 300px;
 }
 
 .cardday-loader-orb {
-  width: 84px;
-  height: 84px;
+  width: 98px;
+  height: 98px;
   border-radius: 999px;
   border: 1px solid rgba(201, 221, 255, 0.28);
   background: radial-gradient(circle at 30% 30%, rgba(163, 129, 255, 0.34), rgba(28, 47, 92, 0.34) 62%);
   display: flex;
   align-items: center;
   justify-content: center;
+  position: relative;
   box-shadow:
     0 16px 36px rgba(8, 12, 38, 0.5),
     0 0 0 1px rgba(255, 255, 255, 0.08) inset;
-  backdrop-filter: blur(8px) saturate(1.2);
-  -webkit-backdrop-filter: blur(8px) saturate(1.2);
+  backdrop-filter: blur(12px) saturate(1.2);
+  -webkit-backdrop-filter: blur(12px) saturate(1.2);
   animation: cardday-loader-float 1700ms ease-in-out infinite;
+  overflow: hidden;
 }
 
-.cardday-loader-spin {
-  width: 16px;
-  height: 16px;
+.cardday-loader-halo {
+  position: absolute;
+  inset: 8px;
   border-radius: 999px;
-  border: 2px solid rgba(232, 241, 255, 0.36);
-  border-top-color: rgba(247, 251, 255, 0.98);
-  animation: spin 900ms linear infinite;
+  border: 1px solid rgba(213, 230, 255, 0.26);
+  box-shadow:
+    0 0 24px rgba(124, 154, 255, 0.34),
+    0 0 0 1px rgba(255, 255, 255, 0.08) inset;
+  animation: cardday-loader-halo 2000ms ease-in-out infinite;
 }
 
-.cardday-loader-spin--lg {
-  width: 34px;
-  height: 34px;
-  border-width: 3px;
-  border-color: rgba(230, 241, 255, 0.34);
-  border-top-color: rgba(255, 255, 255, 0.96);
+.cardday-loader-ring {
+  position: absolute;
+  border-radius: 999px;
+  border: 2px solid transparent;
+  border-top-color: rgba(255, 255, 255, 0.92);
+  border-right-color: rgba(187, 214, 255, 0.74);
+  will-change: transform;
+}
+
+.cardday-loader-ring--a {
+  inset: 23px;
+  animation: cardday-loader-spin 1000ms linear infinite;
+}
+
+.cardday-loader-ring--b {
+  inset: 16px;
+  opacity: 0.62;
+  border-top-color: rgba(173, 205, 255, 0.86);
+  border-right-color: rgba(118, 161, 255, 0.72);
+  animation: cardday-loader-spin-rev 1450ms linear infinite;
+}
+
+.cardday-loader-core {
+  position: relative;
+  z-index: 2;
+  color: rgba(245, 250, 255, 0.96);
+  font-size: 24px;
+  font-weight: 500;
+  text-shadow:
+    0 0 16px rgba(157, 190, 255, 0.64),
+    0 0 28px rgba(157, 190, 255, 0.42);
+  animation: cardday-loader-core 1200ms ease-in-out infinite;
 }
 
 .cardday-loader-caption {
-  font-size: 15px;
+  font-size: 16px;
   font-weight: 620;
   color: rgba(224, 236, 255, 0.9);
   letter-spacing: 0.01em;
+  min-height: 24px;
+}
+
+.cardday-loader-dots {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-top: 2px;
+}
+
+.cardday-loader-dots span {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: rgba(228, 239, 255, 0.6);
+  animation: cardday-loader-dot 1100ms ease-in-out infinite;
+}
+
+.cardday-loader-dots span:nth-child(2) {
+  animation-delay: 150ms;
+}
+
+.cardday-loader-dots span:nth-child(3) {
+  animation-delay: 300ms;
 }
 
 @keyframes cardday-loader-float {
   0% { transform: translateY(0) scale(1); }
   50% { transform: translateY(-5px) scale(1.02); }
   100% { transform: translateY(0) scale(1); }
+}
+
+@keyframes cardday-loader-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+@keyframes cardday-loader-spin-rev {
+  from { transform: rotate(360deg); }
+  to { transform: rotate(0deg); }
+}
+
+@keyframes cardday-loader-core {
+  0%, 100% { transform: scale(0.95); opacity: 0.82; }
+  50% { transform: scale(1.08); opacity: 1; }
+}
+
+@keyframes cardday-loader-halo {
+  0%, 100% { transform: scale(0.96); opacity: 0.66; }
+  50% { transform: scale(1.04); opacity: 1; }
+}
+
+@keyframes cardday-loader-dot {
+  0%, 100% { transform: translateY(0); opacity: 0.35; }
+  50% { transform: translateY(-4px); opacity: 1; }
 }
 
 /* =================================================================================================

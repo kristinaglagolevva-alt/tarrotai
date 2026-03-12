@@ -15,7 +15,6 @@ import {
   getSbpPaymentStatus,
   createClickPayment,
   getClickPaymentStatus,
-  getCardOfDayToday,
   createCardOfDay,
   getUnifiedHistory,
   analyzeSpreadPhoto,
@@ -23,6 +22,7 @@ import {
   createReading,
 } from './api'
 import type {
+  CardOfDayDto,
   MeDto,
   SbpPlanCode,
   ClickPlanCode,
@@ -868,6 +868,12 @@ const METRIKA_GOALS = {
   paymentStart: 'payment_start',
   paymentSuccess: 'payment_success',
 } as const
+
+const CARD_DAY_LOADING_STEPS = [
+  'Ищем вашу карту дня…',
+  'Собираем интерпретацию…',
+  'Почти готово…',
+] as const
 const LEGAL_CONSENT_VERSION = '2026-02-25-v1'
 const HOME_TOUR_VERSION = '2026-03-08-v3'
 const TERMS_PDF_URL = '/docs/ai_taro_user_agreement_draft.pdf'
@@ -3192,6 +3198,7 @@ useEffect(() => {
 
   // ✅ NEW: чтобы повторно не дергать бекенд лишний раз при возврате
   const [cardDayLoading, setCardDayLoading] = useState(false)
+  const [cardDayLoaderStep, setCardDayLoaderStep] = useState(0)
   // ✅ NEW: форсим ремоунт PremiumFlipCard при каждом открытии экрана
   const [pflipMountKey, setPflipMountKey] = useState(0)
 
@@ -3217,6 +3224,17 @@ useEffect(() => {
     if (stepId === 'question_zone') return homeQuestionZoneRef.current
     return btnRef.current || homePrimaryFooterRef.current
   }
+
+  useEffect(() => {
+    if (!cardDayLoading) {
+      setCardDayLoaderStep(0)
+      return
+    }
+    const timer = window.setInterval(() => {
+      setCardDayLoaderStep((idx) => (idx + 1) % CARD_DAY_LOADING_STEPS.length)
+    }, 1200)
+    return () => window.clearInterval(timer)
+  }, [cardDayLoading])
 
   const markHomeTourSeen = () => {
     const tgId = Number(user?.telegram_id || 0)
@@ -3507,6 +3525,7 @@ useEffect(() => {
     setDailyQuestion('')
 
     // сразу открываем шейк-сценарий без экрана вопроса/категории
+    setCardDayLoaderStep(0)
     setCardDayLoading(true)
     setView('card_day_prep')
     let shouldOpenReadyResult = false
@@ -3551,22 +3570,15 @@ useEffect(() => {
       if (!token) {
         applyLocalFallback()
       } else {
-        try {
-          const dto = await getCardOfDayToday(token)
-          applyDailyDto(dto)
-          // Уже есть карта дня: повторный вход сразу в результат, без шейка.
-          shouldOpenReadyResult = true
-        } catch {
-          const dto = await createCardOfDay(token, {
-            question: '',
-            topic: 'other',
-            deck_size: 78,
-            consider_reversed: true,
-          })
-          applyDailyDto(dto)
-          // Свежесозданная карта дня: первый вход, нужен шаг перемешивания.
-          shouldOpenReadyResult = false
-        }
+        const dto = await createCardOfDay(token, {
+          question: '',
+          topic: 'other',
+          deck_size: 78,
+          consider_reversed: true,
+        })
+        applyDailyDto(dto)
+        // create_or_get: если карта уже была — сразу результат; если новая — оставляем шаг перемешивания.
+        shouldOpenReadyResult = !Boolean((dto as CardOfDayDto).is_new)
       }
     } catch {
       applyLocalFallback()
@@ -7375,9 +7387,17 @@ useEffect(() => {
             {cardDayLoading && (
               <div className="cardday-loader-stage" aria-live="polite">
                 <div className="cardday-loader-orb" aria-hidden="true">
-                  <div className="cardday-loader-spin cardday-loader-spin--lg" />
+                  <span className="cardday-loader-halo" />
+                  <span className="cardday-loader-ring cardday-loader-ring--a" />
+                  <span className="cardday-loader-ring cardday-loader-ring--b" />
+                  <span className="cardday-loader-core">✦</span>
                 </div>
-                <div className="cardday-loader-caption">Подготавливаем расклад…</div>
+                <div className="cardday-loader-caption">{CARD_DAY_LOADING_STEPS[cardDayLoaderStep]}</div>
+                <div className="cardday-loader-dots" aria-hidden="true">
+                  <span />
+                  <span />
+                  <span />
+                </div>
               </div>
             )}
             {/* активный spread-card */}

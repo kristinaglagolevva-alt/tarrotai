@@ -52,6 +52,7 @@ from jwt import create_jwt, decode_jwt
 
 from tarot_deck import get_card_by_index, DECK_SIZE
 from llm_card_of_day import (
+    fallback_text,
     generate_card_text_llm,
     generate_spread_text_llm,
     generate_photo_analysis_llm,
@@ -1959,6 +1960,7 @@ class CardOfDayOut(BaseModel):
     card_index: int
     card_name: str
     is_reversed: bool = False
+    is_new: bool = False
     description: str
 
 
@@ -5441,6 +5443,7 @@ async def create_or_get_card_of_day(
             "card_index": existing.card_index,
             "card_name": existing.card_name,
             "is_reversed": bool(getattr(existing, "is_reversed", False)),
+            "is_new": False,
             "description": decorated_description,
         }
 
@@ -5452,14 +5455,31 @@ async def create_or_get_card_of_day(
     rnd = random.Random(seed)
     is_reversed = bool(payload.consider_reversed and rnd.choice([True, False]))
 
+    llm_timeout_raw = str(os.getenv("CARD_OF_DAY_LLM_TIMEOUT_SECONDS") or "10").strip()
     try:
-        description = await generate_card_text_llm(
-            topic=payload.topic,
-            question=payload.question,
-            card=card,
-            is_reversed=is_reversed,
-            require_llm=payload.force_llm,
+        llm_timeout = max(4.0, min(25.0, float(llm_timeout_raw)))
+    except Exception:
+        llm_timeout = 10.0
+
+    try:
+        description = await asyncio.wait_for(
+            generate_card_text_llm(
+                topic=payload.topic,
+                question=payload.question,
+                card=card,
+                is_reversed=is_reversed,
+                require_llm=payload.force_llm,
+            ),
+            timeout=llm_timeout,
         )
+    except asyncio.TimeoutError:
+        log.warning("card-of-day LLM timed out after %.1fs (user_id=%s)", llm_timeout, int(current_user.id))
+        if payload.force_llm:
+            raise HTTPException(
+                status_code=503,
+                detail="LLM отвечает слишком долго. Попробуйте ещё раз через несколько секунд.",
+            )
+        description = fallback_text(payload.topic, payload.question, card, is_reversed)
     except Exception as e:
         log.exception("LLM card-of-day failed: %s", repr(e))
         raise HTTPException(
@@ -5506,6 +5526,7 @@ async def create_or_get_card_of_day(
         "card_index": row.card_index,
         "card_name": row.card_name,
         "is_reversed": bool(getattr(row, "is_reversed", False)),
+        "is_new": True,
         "description": row.description,
     }
 
@@ -5550,6 +5571,7 @@ async def get_card_of_day_today(
         "card_index": existing.card_index,
         "card_name": existing.card_name,
         "is_reversed": bool(getattr(existing, "is_reversed", False)),
+        "is_new": False,
         "description": decorated_description,
     }
 

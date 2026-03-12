@@ -321,6 +321,7 @@ export type CardOfDayDto = {
   card_index: number
   card_name: string
   is_reversed?: boolean
+  is_new?: boolean
   description: string
 }
 
@@ -351,6 +352,7 @@ export async function createCardOfDay(token: string, params: CardOfDayCreatePara
       Authorization: `Bearer ${token}`,
     },
     body: JSON.stringify(params),
+    timeoutMs: 16000,
   })
 }
 

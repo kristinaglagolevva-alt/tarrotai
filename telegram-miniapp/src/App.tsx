@@ -6201,8 +6201,8 @@ useEffect(() => {
   <div className="auth-overlay" role="status" aria-live="polite">
     <div className="auth-overlay__card">
       <div className="auth-overlay__ring" aria-hidden="true" />
-      <div className="auth-overlay__title">Авторизация…</div>
-      <div className="auth-overlay__sub">Проверяем Telegram и загружаем профиль</div>
+      <div className="auth-overlay__title">Загрузка приложения…</div>
+      <div className="auth-overlay__sub">Пожалуйста, подождите пару секунд</div>
     </div>
   </div>
 )}

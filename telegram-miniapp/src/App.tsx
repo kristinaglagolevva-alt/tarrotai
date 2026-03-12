@@ -1605,7 +1605,7 @@ useEffect(() => {
         setPendingSbpOrder(null)
       }
 
-      if (!silent || msg) {
+      if (!silent) {
         setSbpStatusText(msg || 'Статус платежа обновлён.')
       }
     } catch (err: any) {
@@ -1689,7 +1689,7 @@ useEffect(() => {
         setPendingClickOrder(null)
       }
 
-      if (!silent || msg) {
+      if (!silent) {
         setClickStatusText(msg || 'Статус оплаты CLICK обновлён.')
       }
     } catch (err: any) {

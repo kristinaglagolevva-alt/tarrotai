@@ -162,6 +162,7 @@ export async function getBillingStatus(token: string): Promise<BillingStatusDto>
 }
 
 export type SbpPlanCode = 'sub_2weeks' | 'sub_month' | 'sub_year'
+export type ClickPlanCode = 'sub_week' | 'sub_2weeks' | 'sub_month' | 'sub_year'
 
 export type SbpCreateOutDto = {
   order_id: string
@@ -185,6 +186,27 @@ export type SbpStatusOutDto = {
   message?: string
 }
 
+export type ClickCreateOutDto = {
+  order_id: string
+  plan_code: ClickPlanCode | string
+  amount: number
+  currency: string
+  status: string
+  payment_url: string
+}
+
+export type ClickStatusOutDto = {
+  order_id: string
+  plan_code: ClickPlanCode | string
+  status: string
+  amount: number
+  currency: string
+  paid_at?: string | null
+  has_active_subscription?: boolean
+  subscription_until?: string | null
+  message?: string
+}
+
 export async function createSbpPayment(token: string, planCode: SbpPlanCode): Promise<SbpCreateOutDto> {
   return apiJson(`${API_BASE}/billing/sbp/create`, {
     method: 'POST',
@@ -199,6 +221,25 @@ export async function createSbpPayment(token: string, planCode: SbpPlanCode): Pr
 export async function getSbpPaymentStatus(token: string, orderId: string): Promise<SbpStatusOutDto> {
   const q = new URLSearchParams({ order_id: String(orderId || '') }).toString()
   return apiJson(`${API_BASE}/billing/sbp/status?${q}`, {
+    method: 'GET',
+    headers: { Authorization: `Bearer ${token}` },
+  })
+}
+
+export async function createClickPayment(token: string, planCode: ClickPlanCode): Promise<ClickCreateOutDto> {
+  return apiJson(`${API_BASE}/billing/click/create`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({ plan_code: planCode }),
+  })
+}
+
+export async function getClickPaymentStatus(token: string, orderId: string): Promise<ClickStatusOutDto> {
+  const q = new URLSearchParams({ order_id: String(orderId || '') }).toString()
+  return apiJson(`${API_BASE}/billing/click/status?${q}`, {
     method: 'GET',
     headers: { Authorization: `Bearer ${token}` },
   })

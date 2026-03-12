@@ -12,6 +12,8 @@ import {
   getBillingStatus,
   createSbpPayment,
   getSbpPaymentStatus,
+  createClickPayment,
+  getClickPaymentStatus,
   getCardOfDayToday,
   createCardOfDay,
   getUnifiedHistory,
@@ -21,6 +23,8 @@ import {
 } from './api'
 import type {
   MeDto,
+  SbpPlanCode,
+  ClickPlanCode,
 } from './api'
 import SubscriptionManageCard from './features/profile/SubscriptionManageCard'
 import { metrikaHit, metrikaReachGoal } from './metrika'
@@ -799,12 +803,39 @@ type BillingStatus = {
   can_create_reading?: boolean
 }
 
-type SbpPlanCode = 'sub_2weeks' | 'sub_month' | 'sub_year'
+type BillingCountryCode = 'ru' | 'uz' | 'kz' | 'by' | 'kg' | 'other'
+type BillingPlanKey = ClickPlanCode
+type BillingFlowStep = 'country' | 'plan' | 'method'
+type BillingFlowSource = 'paywall' | 'profile'
+
+const BILLING_COUNTRIES: Array<{ code: BillingCountryCode; label: string }> = [
+  { code: 'ru', label: '🇷🇺 Россия' },
+  { code: 'uz', label: '🇺🇿 Узбекистан' },
+  { code: 'kz', label: '🇰🇿 Казахстан' },
+  { code: 'by', label: '🇧🇾 Беларусь' },
+  { code: 'kg', label: '🇰🇬 Кыргызстан' },
+  { code: 'other', label: '🌍 Другая страна' },
+]
+
+const BILLING_PLAN_META: Record<BillingPlanKey, { title: string; caption: string }> = {
+  sub_week: { title: 'Пробная неделя', caption: '7 дней' },
+  sub_2weeks: { title: 'Безлимит на 2 недели', caption: '14 дней' },
+  sub_month: { title: 'Безлимит на месяц', caption: '30 дней' },
+  sub_year: { title: 'Безлимит на год', caption: '365 дней' },
+}
+
+const BILLING_PLAN_KEYS_BY_COUNTRY: Record<BillingCountryCode, BillingPlanKey[]> = {
+  ru: ['sub_2weeks', 'sub_month', 'sub_year'],
+  uz: ['sub_week', 'sub_2weeks', 'sub_month', 'sub_year'],
+  kz: ['sub_2weeks', 'sub_month', 'sub_year'],
+  by: ['sub_2weeks', 'sub_month', 'sub_year'],
+  kg: ['sub_2weeks', 'sub_month', 'sub_year'],
+  other: ['sub_2weeks', 'sub_month', 'sub_year'],
+}
 
 const BOT_USERNAME = 'Ttaarrroobot'
 const BOT_PAYMENT_URL = `https://t.me/${BOT_USERNAME}?start=menu`
 const BOT_CARD_URL = `https://t.me/${BOT_USERNAME}?start=card`
-const BOT_CLICK_URL = `https://t.me/${BOT_USERNAME}?start=click`
 const BOT_CLICK_CARD_URL = `https://t.me/${BOT_USERNAME}?start=click_card`
 const BOT_SUB_MANAGE_URL = `https://t.me/${BOT_USERNAME}?start=sub_manage`
 const SUPPORT_URL = `https://t.me/${BOT_USERNAME}?start=support`
@@ -1083,6 +1114,22 @@ const [sbpOrderId, setSbpOrderId] = useState<string | null>(() => {
 const [sbpBusyPlan, setSbpBusyPlan] = useState<SbpPlanCode | null>(null)
 const [sbpStatusText, setSbpStatusText] = useState('')
 const [sbpPolling, setSbpPolling] = useState(false)
+const [clickOrderId, setClickOrderId] = useState<string | null>(() => {
+  try {
+    const v = localStorage.getItem('click_pending_order_id')
+    return v && v.trim() ? v.trim() : null
+  } catch {
+    return null
+  }
+})
+const [clickBusyPlan, setClickBusyPlan] = useState<ClickPlanCode | null>(null)
+const [clickStatusText, setClickStatusText] = useState('')
+const [clickPolling, setClickPolling] = useState(false)
+const [showBillingFlow, setShowBillingFlow] = useState(false)
+const [billingFlowSource, setBillingFlowSource] = useState<BillingFlowSource>('profile')
+const [billingFlowStep, setBillingFlowStep] = useState<BillingFlowStep>('country')
+const [billingFlowCountry, setBillingFlowCountry] = useState<BillingCountryCode>('uz')
+const [billingFlowPlan, setBillingFlowPlan] = useState<BillingPlanKey | null>(null)
 const [showAccessPaywall, setShowAccessPaywall] = useState(false)
 const [showLegalConsent, setShowLegalConsent] = useState(false)
 const [legalConsentChecked, setLegalConsentChecked] = useState(false)
@@ -1364,6 +1411,43 @@ useEffect(() => {
     } catch {}
   }
 
+  const setPendingClickOrder = (orderId: string | null) => {
+    const clean = String(orderId || '').trim()
+    const next = clean || null
+    setClickOrderId(next)
+    try {
+      if (next) localStorage.setItem('click_pending_order_id', next)
+      else localStorage.removeItem('click_pending_order_id')
+    } catch {}
+  }
+
+  const openBillingFlow = (source: BillingFlowSource) => {
+    setBillingFlowSource(source)
+    setBillingFlowStep('country')
+    setBillingFlowPlan(null)
+    setShowBillingFlow(true)
+  }
+
+  const closeBillingFlow = () => {
+    setShowBillingFlow(false)
+  }
+
+  const backBillingFlowStep = () => {
+    if (billingFlowStep === 'method') {
+      setBillingFlowStep('plan')
+      return
+    }
+    if (billingFlowStep === 'plan') {
+      setBillingFlowPlan(null)
+      setBillingFlowStep('country')
+    }
+  }
+
+  const mapPlanToSbpPlan = (planKey: BillingPlanKey): SbpPlanCode | null => {
+    if (planKey === 'sub_2weeks' || planKey === 'sub_month' || planKey === 'sub_year') return planKey
+    return null
+  }
+
   useEffect(() => {
     if (!showAccessPaywall) return
     if (billing?.can_create_reading) {
@@ -1375,9 +1459,16 @@ useEffect(() => {
     try {
       const qs = new URLSearchParams(window.location.search || '')
       const fromQuery = String(qs.get('sbp_order_id') || '').trim()
+      const fromClickQuery = String(qs.get('click_order_id') || '').trim()
       if (fromQuery) {
         setPendingSbpOrder(fromQuery)
         qs.delete('sbp_order_id')
+      }
+      if (fromClickQuery) {
+        setPendingClickOrder(fromClickQuery)
+        qs.delete('click_order_id')
+      }
+      if (fromQuery || fromClickQuery) {
         const queryLeft = qs.toString()
         const nextUrl = `${window.location.pathname}${queryLeft ? `?${queryLeft}` : ''}${window.location.hash || ''}`
         window.history.replaceState({}, '', nextUrl)
@@ -1471,6 +1562,93 @@ useEffect(() => {
     }
   }
 
+  const checkClickStatus = async (orderIdArg?: string | null, silent = false) => {
+    const jwt = token
+    const orderId = String(orderIdArg ?? clickOrderId ?? '').trim()
+    if (!jwt || !orderId) return
+
+    try {
+      if (!silent) setClickPolling(true)
+      const out = await getClickPaymentStatus(jwt, orderId)
+      const status = String(out?.status || '').toLowerCase()
+      const msg = String(out?.message || '').trim()
+
+      if (status === 'succeeded') {
+        if (!paidOrdersTrackedRef.current.has(orderId)) {
+          paidOrdersTrackedRef.current.add(orderId)
+          metrikaReachGoal(METRIKA_GOALS.paymentSuccess, {
+            provider: 'click',
+            plan: String(out?.plan_code || ''),
+          })
+        }
+        setPendingClickOrder(null)
+        void refreshBilling(jwt)
+      } else if (status === 'canceled' || status === 'cancelled') {
+        setPendingClickOrder(null)
+      }
+
+      if (!silent || msg) {
+        setClickStatusText(msg || 'Статус оплаты CLICK обновлён.')
+      }
+    } catch (err: any) {
+      if (!silent) {
+        const text = String(err?.message || '')
+        const parsed = readBackendErrorDetail(text)
+        const detail = parsed?.detail
+        if (detail?.code === 'CLICK_ORDER_NOT_FOUND') {
+          setPendingClickOrder(null)
+          setClickStatusText('Счёт CLICK не найден или уже закрыт. Создайте новый платёж.')
+        } else {
+          setClickStatusText('Не удалось проверить статус CLICK. Попробуйте ещё раз.')
+        }
+      }
+    } finally {
+      if (!silent) setClickPolling(false)
+    }
+  }
+
+  const startClickPayment = async (planCode: ClickPlanCode) => {
+    const jwt = token
+    if (!jwt) return
+
+    try {
+      metrikaReachGoal(METRIKA_GOALS.paymentStart, { provider: 'click', plan: planCode })
+      setClickBusyPlan(planCode)
+      setClickStatusText('')
+
+      const out = await createClickPayment(jwt, planCode)
+      const orderId = String(out?.order_id || '').trim()
+      const link = String(out?.payment_url || '').trim()
+
+      if (!orderId || !link) {
+        throw new Error('Провайдер CLICK не вернул ссылку оплаты.')
+      }
+
+      setPendingClickOrder(orderId)
+      setClickStatusText('Счёт CLICK открыт. Завершите оплату и вернитесь в приложение.')
+      openTelegramUrl(link)
+      window.setTimeout(() => {
+        void checkClickStatus(orderId, true)
+      }, 3500)
+    } catch (err: any) {
+      const text = String(err?.message || '')
+      const parsed = readBackendErrorDetail(text)
+      const detail = parsed?.detail
+
+      if (detail?.code === 'CLICK_NOT_CONFIGURED') {
+        setClickStatusText('CLICK ещё не настроен на сервере. Проверьте интеграцию и повторите.')
+      } else if (detail?.code === 'CLICK_INTRO_ALREADY_USED') {
+        setClickStatusText('Пробная неделя уже была использована. Выберите другой тариф.')
+      } else if (detail?.message) {
+        setClickStatusText(String(detail.message))
+      } else {
+        setClickStatusText('Не удалось создать счёт CLICK. Попробуйте ещё раз.')
+      }
+    } finally {
+      setClickBusyPlan(null)
+    }
+  }
+
   useEffect(() => {
     if (!token || !sbpOrderId) return
 
@@ -1491,9 +1669,29 @@ useEffect(() => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token, sbpOrderId])
 
+  useEffect(() => {
+    if (!token || !clickOrderId) return
+
+    let stopped = false
+    const tick = async () => {
+      if (stopped) return
+      await checkClickStatus(clickOrderId, true)
+    }
+    void tick()
+    const t = window.setInterval(() => {
+      void tick()
+    }, 10000)
+
+    return () => {
+      stopped = true
+      window.clearInterval(t)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token, clickOrderId])
+
   const readingLimitMessage =
     `Бесплатный лимит раскладов за месяц исчерпан.\n\n` +
-    `Оплатите подписку в профиле (СБП) или в боте: ${BOT_PAYMENT_URL}`
+    `Откройте оплату в приложении (профиль или paywall) или через бота: ${BOT_PAYMENT_URL}`
 
   const isReadingLimitExceeded = (raw: string) => {
     const msg = String(raw || '').trim()
@@ -5854,6 +6052,14 @@ useEffect(() => {
         paddingBottom: `calc(${92 + Math.max(0, keyboardInset)}px + env(safe-area-inset-bottom, 0px))`,
       }
     : undefined
+  const billingCountryLabel = BILLING_COUNTRIES.find((item) => item.code === billingFlowCountry)?.label || '🌍 Другая страна'
+  const billingPlans = BILLING_PLAN_KEYS_BY_COUNTRY[billingFlowCountry] || BILLING_PLAN_KEYS_BY_COUNTRY.other
+  const billingSelectedPlan = billingFlowPlan ? BILLING_PLAN_META[billingFlowPlan] : null
+  const billingStepNumber = billingFlowStep === 'country' ? 1 : billingFlowStep === 'plan' ? 2 : 3
+  const combinedPaymentStatus = clickStatusText || sbpStatusText
+  const hasSbpMethod = !!billingFlowPlan && billingFlowCountry === 'ru' && !!mapPlanToSbpPlan(billingFlowPlan)
+  const hasClickMethod = !!billingFlowPlan && billingFlowCountry === 'uz'
+  const hasCardMethod = !!billingFlowPlan
 
   return (
     <div className="app" ref={appRef}>
@@ -6494,97 +6700,62 @@ useEffect(() => {
                           <div className="profile-piece__submeta">Выберите удобный способ оплаты</div>
                         </div>
 
-                        <div className="profile-piece__actions">
+                        <div className="profile-piece__actions profile-piece__actions--single">
                           <button
                             type="button"
-                            className="profile-piece__cta profile-piece__cta--sbp"
-                            disabled={sbpBusyPlan === 'sub_2weeks'}
+                            className="profile-piece__cta profile-piece__cta--click profile-piece__cta--wide"
                             onClick={() => {
-                              void startSbpPayment('sub_2weeks')
+                              metrikaReachGoal(METRIKA_GOALS.paymentStart, { provider: 'profile_inapp' })
+                              openBillingFlow('profile')
                             }}
                           >
-                            {sbpBusyPlan === 'sub_2weeks' ? 'Создаю…' : 'СБП • 2 недели • 124 ₽'}
+                            Выбрать страну и оплатить
                           </button>
-
-                          <button
-                            type="button"
-                            className="profile-piece__cta profile-piece__cta--sbp"
-                            disabled={sbpBusyPlan === 'sub_month'}
-                            onClick={() => {
-                              void startSbpPayment('sub_month')
-                            }}
-                          >
-                            {sbpBusyPlan === 'sub_month' ? 'Создаю…' : 'СБП • месяц • 224 ₽'}
-                          </button>
-
-                          <button
-                            type="button"
-                            className="profile-piece__cta profile-piece__cta--sbp"
-                            disabled={sbpBusyPlan === 'sub_year'}
-                            onClick={() => {
-                              void startSbpPayment('sub_year')
-                            }}
-                          >
-                            {sbpBusyPlan === 'sub_year' ? 'Создаю…' : 'СБП • год • 1 747 ₽'}
-                          </button>
-
                           <a
-                            href={BOT_CARD_URL}
+                            href={BOT_PAYMENT_URL}
                             target="_blank"
                             rel="noreferrer"
-                            className="profile-piece__cta profile-piece__cta--card"
+                            className="profile-piece__cta profile-piece__cta--card profile-piece__cta--wide"
                             onClick={(e) => {
                               e.preventDefault()
-                              metrikaReachGoal(METRIKA_GOALS.paymentStart, { provider: 'bot_card' })
-                              openTelegramUrl(BOT_CARD_URL)
+                              metrikaReachGoal(METRIKA_GOALS.paymentStart, { provider: 'profile_bot_menu' })
+                              openTelegramUrl(BOT_PAYMENT_URL)
                             }}
                           >
-                            По карте или SberPay
-                          </a>
-
-                          <a
-                            href={BOT_CLICK_URL}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="profile-piece__cta profile-piece__cta--click"
-                            onClick={(e) => {
-                              e.preventDefault()
-                              metrikaReachGoal(METRIKA_GOALS.paymentStart, { provider: 'click_app' })
-                              openTelegramUrl(BOT_CLICK_URL)
-                            }}
-                          >
-                            CLICK (Узбекистан)
-                          </a>
-
-                          <a
-                            href={BOT_CLICK_CARD_URL}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="profile-piece__cta profile-piece__cta--click"
-                            onClick={(e) => {
-                              e.preventDefault()
-                              metrikaReachGoal(METRIKA_GOALS.paymentStart, { provider: 'click_card' })
-                              openTelegramUrl(BOT_CLICK_CARD_URL)
-                            }}
-                          >
-                            Карта через CLICK (UZ)
+                            Открыть оплату в боте
                           </a>
                         </div>
 
-                        {sbpOrderId && (
-                          <button
-                            type="button"
-                            className="profile-piece__check"
-                            disabled={sbpPolling}
-                            onClick={() => {
-                              void checkSbpStatus()
-                            }}
-                          >
-                            {sbpPolling ? 'Проверяю…' : 'Проверить оплату СБП'}
-                          </button>
+                        {(sbpOrderId || clickOrderId) && (
+                          <div className="profile-piece__checks">
+                            {sbpOrderId && (
+                              <button
+                                type="button"
+                                className="profile-piece__check"
+                                disabled={sbpPolling}
+                                onClick={() => {
+                                  void checkSbpStatus()
+                                }}
+                              >
+                                {sbpPolling ? 'Проверяю…' : 'Проверить оплату СБП'}
+                              </button>
+                            )}
+                            {clickOrderId && (
+                              <button
+                                type="button"
+                                className="profile-piece__check"
+                                disabled={clickPolling}
+                                onClick={() => {
+                                  void checkClickStatus()
+                                }}
+                              >
+                                {clickPolling ? 'Проверяю…' : 'Проверить оплату CLICK'}
+                              </button>
+                            )}
+                          </div>
                         )}
 
-                        {!!sbpStatusText && <div className="profile-piece__status">{sbpStatusText}</div>}
+                        {!!combinedPaymentStatus && <div className="profile-piece__status">{combinedPaymentStatus}</div>}
                       </section>
                     )}
 
@@ -7946,6 +8117,184 @@ useEffect(() => {
         </div>
       )}
 
+      {showBillingFlow && (
+        <div className="billing-flow-overlay" role="dialog" aria-modal="true" aria-label="Оплата подписки">
+          <div className="billing-flow-card">
+            <div className="billing-flow-card__head">
+              <div className="billing-flow-card__step">Шаг {billingStepNumber} из 3</div>
+              <button type="button" className="billing-flow-card__close" onClick={closeBillingFlow} aria-label="Закрыть">
+                ×
+              </button>
+            </div>
+
+            {billingFlowStep === 'country' && (
+              <>
+                <div className="billing-flow-card__title">Выберите страну</div>
+                <div className="billing-flow-card__text">
+                  Покажем подходящие способы оплаты и валюту для вашего региона.
+                </div>
+                <div className="billing-flow-list">
+                  {BILLING_COUNTRIES.map((country) => (
+                    <button
+                      key={country.code}
+                      type="button"
+                      className="billing-flow-option"
+                      onClick={() => {
+                        setBillingFlowCountry(country.code)
+                        setBillingFlowPlan(null)
+                        setBillingFlowStep('plan')
+                      }}
+                    >
+                      <span className="billing-flow-option__title">{country.label}</span>
+                      <span className="billing-flow-option__meta">Открыть тарифы</span>
+                    </button>
+                  ))}
+                </div>
+              </>
+            )}
+
+            {billingFlowStep === 'plan' && (
+              <>
+                <div className="billing-flow-card__title">Выберите тариф</div>
+                <div className="billing-flow-card__text">Страна: {billingCountryLabel}</div>
+                <div className="billing-flow-list">
+                  {billingPlans.map((planKey) => {
+                    const plan = BILLING_PLAN_META[planKey]
+                    return (
+                      <button
+                        key={planKey}
+                        type="button"
+                        className="billing-flow-option"
+                        onClick={() => {
+                          setBillingFlowPlan(planKey)
+                          setBillingFlowStep('method')
+                          setSbpStatusText('')
+                          setClickStatusText('')
+                        }}
+                      >
+                        <span className="billing-flow-option__title">{plan.title}</span>
+                        <span className="billing-flow-option__meta">{plan.caption}</span>
+                      </button>
+                    )
+                  })}
+                </div>
+              </>
+            )}
+
+            {billingFlowStep === 'method' && billingFlowPlan && (
+              <>
+                <div className="billing-flow-card__title">Выберите способ оплаты</div>
+                <div className="billing-flow-card__text">
+                  {billingSelectedPlan?.title || 'Подписка'} • {billingCountryLabel}
+                </div>
+                <div className="billing-flow-list">
+                  {hasSbpMethod && (
+                    <button
+                      type="button"
+                      className="billing-flow-option billing-flow-option--sbp"
+                      disabled={sbpBusyPlan === mapPlanToSbpPlan(billingFlowPlan)}
+                      onClick={() => {
+                        const sbpPlan = mapPlanToSbpPlan(billingFlowPlan)
+                        if (!sbpPlan) return
+                        void startSbpPayment(sbpPlan)
+                      }}
+                    >
+                      <span className="billing-flow-option__title">
+                        {sbpBusyPlan === mapPlanToSbpPlan(billingFlowPlan) ? 'Создаю счёт СБП…' : 'СБП (внутри приложения)'}
+                      </span>
+                      <span className="billing-flow-option__meta">Оплатите и вернитесь в mini app</span>
+                    </button>
+                  )}
+
+                  {hasClickMethod && (
+                    <button
+                      type="button"
+                      className="billing-flow-option billing-flow-option--click"
+                      disabled={clickBusyPlan === billingFlowPlan}
+                      onClick={() => {
+                        void startClickPayment(billingFlowPlan)
+                      }}
+                    >
+                      <span className="billing-flow-option__title">
+                        {clickBusyPlan === billingFlowPlan ? 'Создаю счёт CLICK…' : 'CLICK / карта через CLICK'}
+                      </span>
+                      <span className="billing-flow-option__meta">Откроется страница оплаты CLICK</span>
+                    </button>
+                  )}
+
+                  {hasCardMethod && (
+                    <button
+                      type="button"
+                      className="billing-flow-option billing-flow-option--card"
+                      onClick={() => {
+                        const target = billingFlowCountry === 'uz' ? BOT_CLICK_CARD_URL : BOT_CARD_URL
+                        const provider = billingFlowCountry === 'uz' ? 'click_card_bot' : 'bot_card'
+                        metrikaReachGoal(METRIKA_GOALS.paymentStart, { provider, plan: billingFlowPlan })
+                        openTelegramUrl(target)
+                      }}
+                    >
+                      <span className="billing-flow-option__title">
+                        {billingFlowCountry === 'uz' ? 'Открыть оплату картой через CLICK (бот)' : 'Международная карта / SberPay (бот)'}
+                      </span>
+                      <span className="billing-flow-option__meta">Резервный сценарий оплаты через бота</span>
+                    </button>
+                  )}
+                </div>
+              </>
+            )}
+
+            {(sbpOrderId || clickOrderId || combinedPaymentStatus) && (
+              <div className="billing-flow-status">
+                <div className="billing-flow-status__actions">
+                  {sbpOrderId && (
+                    <button
+                      type="button"
+                      className="billing-flow-status__check"
+                      disabled={sbpPolling}
+                      onClick={() => {
+                        void checkSbpStatus()
+                      }}
+                    >
+                      {sbpPolling ? 'Проверяю СБП…' : 'Проверить оплату СБП'}
+                    </button>
+                  )}
+                  {clickOrderId && (
+                    <button
+                      type="button"
+                      className="billing-flow-status__check"
+                      disabled={clickPolling}
+                      onClick={() => {
+                        void checkClickStatus()
+                      }}
+                    >
+                      {clickPolling ? 'Проверяю CLICK…' : 'Проверить оплату CLICK'}
+                    </button>
+                  )}
+                </div>
+                {!!combinedPaymentStatus && <div className="billing-flow-status__text">{combinedPaymentStatus}</div>}
+              </div>
+            )}
+
+            <div className="billing-flow-card__foot">
+              {billingFlowStep !== 'country' ? (
+                <button type="button" className="billing-flow-back" onClick={backBillingFlowStep}>
+                  ← Назад
+                </button>
+              ) : (
+                <span />
+              )}
+              <button type="button" className="billing-flow-back" onClick={closeBillingFlow}>
+                Закрыть
+              </button>
+            </div>
+
+            {billingFlowSource === 'paywall' && (
+              <div className="billing-flow-card__hint">Этот экран открыт из лимита бесплатных раскладов.</div>
+            )}
+          </div>
+        </div>
+      )}
+
       {showAccessPaywall && (
         <div className="paywall-overlay" role="dialog" aria-modal="true" aria-label="Доступ к раскладам">
           <div className="paywall-card">
@@ -7962,8 +8311,9 @@ useEffect(() => {
                 type="button"
                 className="glass-cta paywall-card__cta"
                 onClick={() => {
-                  metrikaReachGoal(METRIKA_GOALS.paymentStart, { provider: 'paywall_bot' })
-                  openTelegramUrl(BOT_PAYMENT_URL)
+                  metrikaReachGoal(METRIKA_GOALS.paymentStart, { provider: 'paywall_inapp' })
+                  setShowAccessPaywall(false)
+                  openBillingFlow('paywall')
                 }}
               >
                 <span className="glass-cta__inner">

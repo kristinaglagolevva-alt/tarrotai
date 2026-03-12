@@ -181,7 +181,7 @@ export async function getBillingPlans(): Promise<BillingPlansOutDto> {
   })
 }
 
-export type SbpPlanCode = 'sub_2weeks' | 'sub_month' | 'sub_year'
+export type SbpPlanCode = 'sub_week' | 'sub_2weeks' | 'sub_month' | 'sub_year'
 export type ClickPlanCode = 'sub_week' | 'sub_2weeks' | 'sub_month' | 'sub_year'
 
 export type SbpCreateOutDto = {

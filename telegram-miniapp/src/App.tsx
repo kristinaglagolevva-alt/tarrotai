@@ -816,11 +816,17 @@ type BillingPlanPricesByProvider = {
 
 const BILLING_PLAN_PRICES_FALLBACK: BillingPlanPricesByProvider = {
   sbp: {
+    sub_week: { amount: 7900, currency: 'RUB' },
     sub_2weeks: { amount: 12400, currency: 'RUB' },
     sub_month: { amount: 22400, currency: 'RUB' },
     sub_year: { amount: 174700, currency: 'RUB' },
   },
-  click: {},
+  click: {
+    sub_week: { amount: 12000, currency: 'UZS' },
+    sub_2weeks: { amount: 18600, currency: 'UZS' },
+    sub_month: { amount: 34900, currency: 'UZS' },
+    sub_year: { amount: 219000, currency: 'UZS' },
+  },
 }
 
 const BILLING_COUNTRIES: Array<{ code: BillingCountryCode; label: string; methodsHint: string }> = [
@@ -836,7 +842,7 @@ const BILLING_PLAN_META: Record<BillingPlanKey, { title: string; caption: string
 }
 
 const BILLING_PLAN_KEYS_BY_COUNTRY: Record<BillingCountryCode, BillingPlanKey[]> = {
-  ru: ['sub_2weeks', 'sub_month', 'sub_year'],
+  ru: ['sub_week', 'sub_2weeks', 'sub_month', 'sub_year'],
   uz: ['sub_week', 'sub_2weeks', 'sub_month', 'sub_year'],
 }
 
@@ -1487,7 +1493,7 @@ useEffect(() => {
   }
 
   const mapPlanToSbpPlan = (planKey: BillingPlanKey): SbpPlanCode | null => {
-    if (planKey === 'sub_2weeks' || planKey === 'sub_month' || planKey === 'sub_year') return planKey
+    if (planKey === 'sub_week' || planKey === 'sub_2weeks' || planKey === 'sub_month' || planKey === 'sub_year') return planKey
     return null
   }
 
@@ -1521,7 +1527,7 @@ useEffect(() => {
         }
         setBillingPlanPrices(next)
       } catch {
-        // Keep fallback captions from static metadata.
+        // Keep fallback prices from local defaults.
       }
     }
 
@@ -1536,7 +1542,7 @@ useEffect(() => {
     const cur = String(currency || '').toUpperCase()
     if (cur === 'RUB') {
       const rub = Math.round(value / 100)
-      return `${rub.toLocaleString('ru-RU')} ₽`
+      return `₽ ${rub.toLocaleString('ru-RU')}`
     }
     if (cur === 'UZS') {
       return `${Math.round(value).toLocaleString('ru-RU')} сум`
@@ -1544,12 +1550,11 @@ useEffect(() => {
     return `${Math.round(value).toLocaleString('ru-RU')} ${cur || ''}`.trim()
   }
 
-  const getPlanCaption = (country: BillingCountryCode, planKey: BillingPlanKey) => {
-    const base = BILLING_PLAN_META[planKey]?.caption || ''
+  const getPlanPriceLabel = (country: BillingCountryCode, planKey: BillingPlanKey) => {
     const provider = country === 'uz' ? 'click' : 'sbp'
     const priceInfo = provider === 'click' ? billingPlanPrices.click[planKey] : billingPlanPrices.sbp[planKey]
-    if (!priceInfo) return base
-    return `${base} • ${formatPlanAmount(priceInfo.amount, priceInfo.currency)}`
+    if (!priceInfo) return ''
+    return formatPlanAmount(priceInfo.amount, priceInfo.currency)
   }
 
   useEffect(() => {
@@ -8340,7 +8345,7 @@ useEffect(() => {
 
       {inAppBillingEnabled && showBillingFlow && (
         <div className="billing-flow-overlay" role="dialog" aria-modal="true" aria-label="Оплата подписки">
-          <div className="billing-flow-card">
+          <div className="billing-flow-card" data-source={billingFlowSource}>
             <div className="billing-flow-card__head">
               <div className="billing-flow-card__step">Шаг {billingStepNumber} из 3</div>
               <button type="button" className="billing-flow-card__close" onClick={closeBillingFlow} aria-label="Закрыть">
@@ -8382,11 +8387,12 @@ useEffect(() => {
                 <div className="billing-flow-list">
                   {billingPlans.map((planKey) => {
                     const plan = BILLING_PLAN_META[planKey]
+                    const planPriceLabel = getPlanPriceLabel(billingFlowCountry, planKey)
                     return (
                       <button
                         key={planKey}
                         type="button"
-                        className="billing-flow-option"
+                        className="billing-flow-option billing-flow-option--plan"
                         onClick={() => {
                           setBillingFlowPlan(planKey)
                           setBillingFlowStep('method')
@@ -8395,8 +8401,11 @@ useEffect(() => {
                           setClickStatusText('')
                         }}
                       >
-                        <span className="billing-flow-option__title">{plan.title}</span>
-                        <span className="billing-flow-option__meta">{getPlanCaption(billingFlowCountry, planKey)}</span>
+                        <span className="billing-flow-option__line">
+                          <span className="billing-flow-option__title">{plan.title}</span>
+                          <span className="billing-flow-option__price">{planPriceLabel || '—'}</span>
+                        </span>
+                        <span className="billing-flow-option__meta">{plan.caption}</span>
                       </button>
                     )
                   })}
@@ -8453,7 +8462,7 @@ useEffect(() => {
                 {hasPendingPayment && (
                   <button
                     type="button"
-                    className="billing-flow-status__check"
+                    className="billing-flow-status__link"
                     onClick={() => setShowBillingPaymentHelp((prev) => !prev)}
                   >
                     {showBillingPaymentHelp ? 'Скрыть' : 'Оплатили, но ошибка?'}
@@ -8464,7 +8473,7 @@ useEffect(() => {
                     {sbpOrderId && (
                       <button
                         type="button"
-                        className="billing-flow-status__check"
+                        className="billing-flow-status__link billing-flow-status__link--action"
                         disabled={sbpPolling}
                         onClick={() => {
                           void checkSbpStatus()
@@ -8476,7 +8485,7 @@ useEffect(() => {
                     {clickOrderId && (
                       <button
                         type="button"
-                        className="billing-flow-status__check"
+                        className="billing-flow-status__link billing-flow-status__link--action"
                         disabled={clickPolling}
                         onClick={() => {
                           void checkClickStatus()
@@ -8503,10 +8512,6 @@ useEffect(() => {
                 Закрыть
               </button>
             </div>
-
-            {billingFlowSource === 'paywall' && (
-              <div className="billing-flow-card__hint">Этот экран открыт из лимита бесплатных раскладов.</div>
-            )}
           </div>
         </div>
       )}

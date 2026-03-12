@@ -125,6 +125,7 @@ def _apply_markup_minor(
 
 PRICING_MARKUP_PERCENT = _pricing_env_float("PRICING_MARKUP_PERCENT", 25.0)
 YEARLY_DISCOUNT_PERCENT = _pricing_env_float("YEARLY_DISCOUNT_PERCENT", 35.0)
+SBP_SUB_WEEK_AMOUNT = max(100, _pricing_env_int("RUB_SUB_WEEK_AMOUNT", 79 * 100))
 SBP_SUB_2WEEKS_AMOUNT_BASE = max(100, _pricing_env_int("RUB_SUB_2WEEKS_AMOUNT_BASE", 99 * 100))
 SBP_SUB_MONTH_AMOUNT_BASE = max(100, _pricing_env_int("RUB_SUB_MONTH_AMOUNT_BASE", 179 * 100))
 SBP_SUB_2WEEKS_AMOUNT = _apply_markup_minor(SBP_SUB_2WEEKS_AMOUNT_BASE, PRICING_MARKUP_PERCENT, step=100)
@@ -136,6 +137,14 @@ SBP_SUB_YEAR_AMOUNT = _apply_markup_minor(
 )
 
 SBP_PLANS: Dict[str, Dict[str, Any]] = {
+    "sub_week": {
+        "code": "sub_week",
+        "title": "Пробная неделя",
+        "description": "Пробный доступ AI Tarot на 7 дней",
+        "days": 7,
+        "amount": SBP_SUB_WEEK_AMOUNT,
+        "currency": "RUB",
+    },
     "sub_2weeks": {
         "code": "sub_2weeks",
         "title": "Безлимит на 2 недели",
@@ -197,6 +206,10 @@ SBP_AUTOPAY_PLAN_CODE = (os.getenv("SBP_AUTOPAY_PLAN_CODE") or "sub_month").stri
 SBP_AUTOPAY_INTERVAL_DAYS = max(1, int(os.getenv("SBP_AUTOPAY_INTERVAL_DAYS", "30")))
 SBP_AUTOPAY_MAX_FAILS = max(1, int(os.getenv("SBP_AUTOPAY_MAX_FAILS", "3")))
 SBP_AUTOPAY_WORKER_INTERVAL_SEC = max(60, int(os.getenv("SBP_AUTOPAY_WORKER_INTERVAL_SEC", "300")))
+SBP_INTRO_PLAN_CODE = (os.getenv("SBP_INTRO_PLAN_CODE") or "sub_week").strip().lower()
+SBP_INTRO_FIRST_PURCHASE_ONLY = str(
+    os.getenv("SBP_INTRO_FIRST_PURCHASE_ONLY", "1")
+).strip().lower() not in {"0", "false", "no"}
 CLICK_SERVICE_ID_RAW = (os.getenv("CLICK_SERVICE_ID") or "").strip()
 CLICK_MERCHANT_ID_RAW = (os.getenv("CLICK_MERCHANT_ID") or "").strip()
 CLICK_MERCHANT_USER_ID_RAW = (
@@ -760,6 +773,23 @@ def _yookassa_sbp_configured() -> bool:
 
 def _is_sbp_autopay_plan(plan_code: str) -> bool:
     return str(plan_code or "").strip().lower() == SBP_AUTOPAY_PLAN_CODE
+
+
+async def _sbp_intro_plan_already_used(db: AsyncSession, *, user_id: int) -> bool:
+    if not SBP_INTRO_FIRST_PURCHASE_ONLY:
+        return False
+    if not SBP_INTRO_PLAN_CODE:
+        return False
+    q = await db.execute(
+        select(PaymentTransaction.id)
+        .where(
+            PaymentTransaction.user_id == int(user_id),
+            PaymentTransaction.kind == "subscription",
+            PaymentTransaction.product_code == SBP_INTRO_PLAN_CODE,
+        )
+        .limit(1)
+    )
+    return q.scalar_one_or_none() is not None
 
 
 def _click_api_configured() -> bool:
@@ -1864,7 +1894,7 @@ class BillingPlansOut(BaseModel):
 
 
 class SbpCreateIn(BaseModel):
-    plan_code: Literal["sub_2weeks", "sub_month", "sub_year"] = "sub_2weeks"
+    plan_code: Literal["sub_week", "sub_2weeks", "sub_month", "sub_year"] = "sub_week"
 
 
 class SbpCreateOut(BaseModel):
@@ -2851,9 +2881,9 @@ def _sbp_status_message(status: str) -> str:
     if normalized in {"canceled", "cancelled"}:
         return "Платёж отменён."
     if normalized == "pending":
-        return "Ожидаем завершения оплаты в банке."
+        return "Платёж ещё обрабатывается банком."
     if normalized == "waiting_for_capture":
-        return "Платёж получен и подтверждается."
+        return "Платёж получен, подтверждаем оплату."
     return "Статус платежа обновляется."
 
 
@@ -2864,9 +2894,9 @@ def _click_status_message(status: str) -> str:
     if normalized in {"cancelled", "canceled"}:
         return "Платёж CLICK отменён."
     if normalized == "prepared":
-        return "Счёт в CLICK подготовлен, ожидаем завершения оплаты."
+        return "Счёт в CLICK создан. Завершите оплату в приложении банка."
     if normalized == "pending":
-        return "Счёт создан, ожидаем подтверждения от CLICK."
+        return "Платёж в CLICK ещё обрабатывается."
     return "Статус платежа обновляется."
 
 
@@ -4202,6 +4232,15 @@ async def billing_sbp_create(
     db: AsyncSession = Depends(get_db),
 ):
     plan = _get_sbp_plan(payload.plan_code)
+    if str(plan.get("code") or "").strip().lower() == SBP_INTRO_PLAN_CODE:
+        if await _sbp_intro_plan_already_used(db, user_id=int(current_user.id)):
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "SBP_INTRO_ALREADY_USED",
+                    "message": "Пробная неделя доступна только для первой покупки.",
+                },
+            )
 
     order_id = f"sbp_{current_user.id}_{secrets.token_hex(8)}"
     idempotence_key = uuid.uuid4().hex
@@ -4275,7 +4314,7 @@ async def billing_sbp_create(
 @app.get("/billing/sbp/bot-link")
 async def billing_sbp_bot_link(
     tg_user_id: int = Query(..., ge=1),
-    plan_code: Literal["sub_2weeks", "sub_month", "sub_year"] = Query(...),
+    plan_code: Literal["sub_week", "sub_2weeks", "sub_month", "sub_year"] = Query(...),
     exp: int = Query(..., ge=1),
     sig: str = Query(..., min_length=16, max_length=128),
     db: AsyncSession = Depends(get_db),
@@ -4313,6 +4352,16 @@ async def billing_sbp_bot_link(
         user = User(telegram_id=int(tg_user_id), paid_readings_balance=0)
         db.add(user)
         await db.flush()
+
+    if str(plan.get("code") or "").strip().lower() == SBP_INTRO_PLAN_CODE:
+        if await _sbp_intro_plan_already_used(db, user_id=int(user.id)):
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "SBP_INTRO_ALREADY_USED",
+                    "message": "Пробная неделя доступна только для первой покупки.",
+                },
+            )
 
     order_id = f"sbp_tg_{user.id}_{secrets.token_hex(8)}"
     idempotence_key = uuid.uuid4().hex

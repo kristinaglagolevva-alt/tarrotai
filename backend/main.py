@@ -192,7 +192,6 @@ SUPPORT_INBOX_WEBHOOK_URL = (
     os.getenv("SUPPORT_INBOX_WEBHOOK_URL")
     or "https://api.tarrotai.ru/support/inbox/webhook"
 ).strip()
-SUPPORT_TEST_APP_URL = (os.getenv("SUPPORT_TEST_APP_URL") or "").strip()
 SBP_AUTOPAY_ENABLED = str(os.getenv("SBP_AUTOPAY_ENABLED", "0")).strip().lower() not in {"0", "false", "no"}
 SBP_AUTOPAY_PLAN_CODE = (os.getenv("SBP_AUTOPAY_PLAN_CODE") or "sub_month").strip().lower()
 SBP_AUTOPAY_INTERVAL_DAYS = max(1, int(os.getenv("SBP_AUTOPAY_INTERVAL_DAYS", "30")))
@@ -3100,7 +3099,6 @@ async def _configure_support_inbox_bot() -> None:
         {"command": "reply", "description": "Ответить пользователю: /reply <id> <текст>"},
         {"command": "metrics", "description": "Рост: trial→month, CAC, payback"},
         {"command": "dashboard", "description": "Открыть мобильный growth dashboard"},
-        {"command": "testapp", "description": "Кнопки тест/прод mini app"},
     ]
     help_text = (
         "✅ Support inbox подключен.\n"
@@ -3474,7 +3472,6 @@ async def support_inbox_webhook(
             "• /reply <telegram_id> <текст>\n"
             "• /metrics [days] [ad_spend_uzs] [window] [ad_spend_rub]\n"
             "• /dashboard [days] [window] — открыть мобильный dashboard\n"
-            "• /testapp — кнопки для тест/прод mini app\n"
             "• /open, /pending, /closed — фильтры тикетов\n"
             "• /ticket <ID> — карточка тикета\n\n"
             "Ответ будет доставлен пользователю в @Ttaarrroobot."
@@ -3761,71 +3758,6 @@ async def support_inbox_webhook(
             reply_to_message_id=int(msg.get("message_id") or 0) or None,
         )
         return {"ok": True, "handled": "help"}
-
-    if lower.startswith("/testapp"):
-        mode = ""
-        parts = str(lower or "").split()
-        if len(parts) > 1:
-            mode = str(parts[1] or "").strip().lower()
-
-        app_url = str(SUPPORT_TEST_APP_URL or os.getenv("TELEGRAM_APP_URL") or "").strip()
-        if not app_url.startswith("https://"):
-            await _send_bot_message_with_token(
-                token=SUPPORT_INBOX_BOT_TOKEN,
-                chat_id=chat_id,
-                text="Не задан URL mini app. Укажите TELEGRAM_APP_URL (или SUPPORT_TEST_APP_URL) в .env.",
-                reply_to_message_id=int(msg.get("message_id") or 0) or None,
-            )
-            return {"ok": True, "handled": "testapp_url_missing"}
-
-        test_url = _append_query_param(app_url, "billing_test", "1")
-        prod_url = _append_query_param(app_url, "billing_test", "0")
-        base_reply_to = int(msg.get("message_id") or 0) or None
-
-        if mode in {"off", "prod", "0"}:
-            await _send_bot_message_with_token(
-                token=SUPPORT_INBOX_BOT_TOKEN,
-                chat_id=chat_id,
-                text=(
-                    "✅ Тестовый режим оплаты отключён для следующего открытия.\n"
-                    "Откройте mini app обычной кнопкой ниже."
-                ),
-                reply_to_message_id=base_reply_to,
-                reply_markup={"inline_keyboard": [[{"text": "🚀 Открыть обычную app", "url": prod_url}]]},
-            )
-            return {"ok": True, "handled": "testapp_off", "url": prod_url}
-
-        if mode in {"on", "test", "1"}:
-            await _send_bot_message_with_token(
-                token=SUPPORT_INBOX_BOT_TOKEN,
-                chat_id=chat_id,
-                text=(
-                    "🧪 Открывайте mini app в тестовом режиме оплаты.\n"
-                    "В этом режиме включится in-app flow оплаты."
-                ),
-                reply_to_message_id=base_reply_to,
-                reply_markup={"inline_keyboard": [[{"text": "🧪 Открыть тест оплаты", "url": test_url}]]},
-            )
-            return {"ok": True, "handled": "testapp_on", "url": test_url}
-
-        await _send_bot_message_with_token(
-            token=SUPPORT_INBOX_BOT_TOKEN,
-            chat_id=chat_id,
-            text=(
-                "Тест mini app по оплате:\n"
-                "• «Открыть тест оплаты» — включает тестовый режим\n"
-                "• «Открыть обычную app» — возвращает обычный режим\n\n"
-                "Команды: /testapp on и /testapp off"
-            ),
-            reply_to_message_id=base_reply_to,
-            reply_markup={
-                "inline_keyboard": [
-                    [{"text": "🧪 Открыть тест оплаты", "url": test_url}],
-                    [{"text": "🚀 Открыть обычную app", "url": prod_url}],
-                ]
-            },
-        )
-        return {"ok": True, "handled": "testapp_menu", "test_url": test_url, "prod_url": prod_url}
 
     if lower.startswith("/dashboard"):
         lookback_days = int(ANALYTICS_GROWTH_LOOKBACK_DAYS)

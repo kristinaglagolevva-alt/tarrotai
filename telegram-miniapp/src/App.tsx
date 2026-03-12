@@ -808,13 +808,13 @@ type BillingPlanKey = ClickPlanCode
 type BillingFlowStep = 'country' | 'plan' | 'method'
 type BillingFlowSource = 'paywall' | 'profile'
 
-const BILLING_COUNTRIES: Array<{ code: BillingCountryCode; label: string }> = [
-  { code: 'ru', label: '🇷🇺 Россия' },
-  { code: 'uz', label: '🇺🇿 Узбекистан' },
-  { code: 'kz', label: '🇰🇿 Казахстан' },
-  { code: 'by', label: '🇧🇾 Беларусь' },
-  { code: 'kg', label: '🇰🇬 Кыргызстан' },
-  { code: 'other', label: '🌍 Другая страна' },
+const BILLING_COUNTRIES: Array<{ code: BillingCountryCode; label: string; methodsHint: string }> = [
+  { code: 'ru', label: '🇷🇺 Россия', methodsHint: 'Оплата через СБП' },
+  { code: 'uz', label: '🇺🇿 Узбекистан', methodsHint: 'Оплата через CLICK' },
+  { code: 'kz', label: '🇰🇿 Казахстан', methodsHint: 'Оплата банковской картой' },
+  { code: 'by', label: '🇧🇾 Беларусь', methodsHint: 'Оплата банковской картой' },
+  { code: 'kg', label: '🇰🇬 Кыргызстан', methodsHint: 'Оплата банковской картой' },
+  { code: 'other', label: '🌍 Другая страна', methodsHint: 'Оплата банковской картой' },
 ]
 
 const BILLING_PLAN_META: Record<BillingPlanKey, { title: string; caption: string }> = {
@@ -842,7 +842,6 @@ const BOT_SUB_MANAGE_URL = `https://t.me/${BOT_USERNAME}?start=sub_manage`
 const SUPPORT_URL = `https://t.me/${BOT_USERNAME}?start=support`
 const TERMS_URL = `https://t.me/${BOT_USERNAME}?start=terms`
 const PRIVACY_URL = `https://t.me/${BOT_USERNAME}?start=privacy`
-const INAPP_BILLING_TEST_LS_KEY = 'inapp_billing_test_v1'
 
 const METRIKA_GOALS = {
   appOpen: 'app_open',
@@ -1127,13 +1126,6 @@ const [clickOrderId, setClickOrderId] = useState<string | null>(() => {
 const [clickBusyPlan, setClickBusyPlan] = useState<ClickPlanCode | null>(null)
 const [clickStatusText, setClickStatusText] = useState('')
 const [clickPolling, setClickPolling] = useState(false)
-const [inAppBillingTestEnabled, setInAppBillingTestEnabled] = useState<boolean>(() => {
-  try {
-    return localStorage.getItem(INAPP_BILLING_TEST_LS_KEY) === '1'
-  } catch {
-    return false
-  }
-})
 const [showBillingFlow, setShowBillingFlow] = useState(false)
 const [billingFlowSource, setBillingFlowSource] = useState<BillingFlowSource>('profile')
 const [billingFlowStep, setBillingFlowStep] = useState<BillingFlowStep>('country')
@@ -1456,36 +1448,6 @@ useEffect(() => {
     if (planKey === 'sub_2weeks' || planKey === 'sub_month' || planKey === 'sub_year') return planKey
     return null
   }
-
-  useEffect(() => {
-    try {
-      const qs = new URLSearchParams(window.location.search || '')
-      const raw = String(qs.get('billing_test') || qs.get('test_pay') || '').trim().toLowerCase()
-      if (!raw) return
-
-      let next: boolean | null = null
-      if (['1', 'true', 'on', 'yes'].includes(raw)) next = true
-      if (['0', 'false', 'off', 'no'].includes(raw)) next = false
-      if (next == null) return
-
-      setInAppBillingTestEnabled(next)
-      try {
-        if (next) localStorage.setItem(INAPP_BILLING_TEST_LS_KEY, '1')
-        else localStorage.removeItem(INAPP_BILLING_TEST_LS_KEY)
-      } catch {}
-
-      qs.delete('billing_test')
-      qs.delete('test_pay')
-      const queryLeft = qs.toString()
-      const nextUrl = `${window.location.pathname}${queryLeft ? `?${queryLeft}` : ''}${window.location.hash || ''}`
-      window.history.replaceState({}, '', nextUrl)
-    } catch {}
-  }, [])
-
-  useEffect(() => {
-    if (inAppBillingTestEnabled) return
-    if (showBillingFlow) setShowBillingFlow(false)
-  }, [inAppBillingTestEnabled, showBillingFlow])
 
   useEffect(() => {
     if (!showAccessPaywall) return
@@ -1996,12 +1958,24 @@ useEffect(() => {
     })
   }
 
+  const blockIfNoReadingAccess = () => {
+    if (billing?.can_create_reading === false) {
+      setShowAccessPaywall(true)
+      return true
+    }
+    return false
+  }
+
   const onBeginReading = () => {
     const spreadOk = !!spread
 
     if (!spreadOk) {
       pulseCtaRed()
       return flashStageBorder('spread')
+    }
+
+    if (spread !== 'card_of_day' && blockIfNoReadingAccess()) {
+      return
     }
 
     metrikaReachGoal(METRIKA_GOALS.readingStart, {
@@ -3605,6 +3579,7 @@ useEffect(() => {
   }
 
   const openPhotoAnalysis = () => {
+    if (blockIfNoReadingAccess()) return
     metrikaReachGoal(METRIKA_GOALS.openPhotoAnalysis, { source: 'home' })
     resetPhotoFlow()
     setView('photo_analysis')
@@ -4126,6 +4101,7 @@ useEffect(() => {
 
 
   const openThreeCards = () => {
+    if (blockIfNoReadingAccess()) return
     resetThreeCardsState()
 
     const seededQuestion = String(question || '').trim()
@@ -4406,6 +4382,7 @@ useEffect(() => {
   }
 
   const openPastPresentFuture = () => {
+    if (blockIfNoReadingAccess()) return
     resetPpfState()
 
     // подхватим вопрос с главной
@@ -5175,6 +5152,7 @@ useEffect(() => {
   }
 
   const openDecision = () => {
+    if (blockIfNoReadingAccess()) return
     resetDecisionState()
     const q = String(question || '').trim()
     const preview = buildDecisionCardsPreview()
@@ -6095,11 +6073,10 @@ useEffect(() => {
   const billingPlans = BILLING_PLAN_KEYS_BY_COUNTRY[billingFlowCountry] || BILLING_PLAN_KEYS_BY_COUNTRY.other
   const billingSelectedPlan = billingFlowPlan ? BILLING_PLAN_META[billingFlowPlan] : null
   const billingStepNumber = billingFlowStep === 'country' ? 1 : billingFlowStep === 'plan' ? 2 : 3
-  const inAppBillingEnabled = inAppBillingTestEnabled
+  const inAppBillingEnabled = true
   const combinedPaymentStatus = clickStatusText || sbpStatusText
   const hasSbpMethod = !!billingFlowPlan && billingFlowCountry === 'ru' && !!mapPlanToSbpPlan(billingFlowPlan)
   const hasClickMethod = !!billingFlowPlan && billingFlowCountry === 'uz'
-  const hasCardMethod = !!billingFlowPlan
 
   return (
     <div className="app" ref={appRef}>
@@ -6725,7 +6702,7 @@ useEffect(() => {
                     />
 
                     {!subActive && (
-                      <section className="profile-piece profile-piece--stack" aria-label="Подключить безлимит">
+                      <section className="profile-piece profile-piece--stack" aria-label="Купить подписку">
                         <div className="profile-piece__info">
                           <div className="profile-piece__title">
                             <span className="profile-icon profile-icon--piece" aria-hidden="true">
@@ -6734,10 +6711,10 @@ useEffect(() => {
                                 <path d="M12 4.8V3M12 21v-1.8M4.8 12H3M21 12h-1.8" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
                               </svg>
                             </span>
-                            <span>Подключить безлимит</span>
+                            <span>Купить подписку</span>
                           </div>
                           <div className="profile-piece__meta">Бесплатно в этом месяце: {freeLeft} из {freeLimit}</div>
-                          <div className="profile-piece__submeta">Выберите удобный способ оплаты</div>
+                          <div className="profile-piece__submeta">Выберите страну и удобный способ оплаты</div>
                         </div>
 
                         {inAppBillingEnabled ? (
@@ -6751,21 +6728,8 @@ useEffect(() => {
                                   openBillingFlow('profile')
                                 }}
                               >
-                                Выбрать страну и оплатить
+                                Купить подписку
                               </button>
-                              <a
-                                href={BOT_PAYMENT_URL}
-                                target="_blank"
-                                rel="noreferrer"
-                                className="profile-piece__cta profile-piece__cta--card profile-piece__cta--wide"
-                                onClick={(e) => {
-                                  e.preventDefault()
-                                  metrikaReachGoal(METRIKA_GOALS.paymentStart, { provider: 'profile_bot_menu' })
-                                  openTelegramUrl(BOT_PAYMENT_URL)
-                                }}
-                              >
-                                Открыть оплату в боте
-                              </a>
                             </div>
 
                             {(sbpOrderId || clickOrderId) && (
@@ -8267,9 +8231,9 @@ useEffect(() => {
 
             {billingFlowStep === 'country' && (
               <>
-                <div className="billing-flow-card__title">Выберите страну</div>
+                <div className="billing-flow-card__title">Из какой вы страны?</div>
                 <div className="billing-flow-card__text">
-                  Покажем подходящие способы оплаты и валюту для вашего региона.
+                  Покажем только подходящие способы оплаты.
                 </div>
                 <div className="billing-flow-list">
                   {BILLING_COUNTRIES.map((country) => (
@@ -8284,7 +8248,7 @@ useEffect(() => {
                       }}
                     >
                       <span className="billing-flow-option__title">{country.label}</span>
-                      <span className="billing-flow-option__meta">Открыть тарифы</span>
+                      <span className="billing-flow-option__meta">{country.methodsHint}</span>
                     </button>
                   ))}
                 </div>
@@ -8359,24 +8323,6 @@ useEffect(() => {
                       <span className="billing-flow-option__meta">Откроется страница оплаты CLICK</span>
                     </button>
                   )}
-
-                  {hasCardMethod && (
-                    <button
-                      type="button"
-                      className="billing-flow-option billing-flow-option--card"
-                      onClick={() => {
-                        const target = billingFlowCountry === 'uz' ? BOT_CLICK_CARD_URL : BOT_CARD_URL
-                        const provider = billingFlowCountry === 'uz' ? 'click_card_bot' : 'bot_card'
-                        metrikaReachGoal(METRIKA_GOALS.paymentStart, { provider, plan: billingFlowPlan })
-                        openTelegramUrl(target)
-                      }}
-                    >
-                      <span className="billing-flow-option__title">
-                        {billingFlowCountry === 'uz' ? 'Открыть оплату картой через CLICK (бот)' : 'Международная карта / SberPay (бот)'}
-                      </span>
-                      <span className="billing-flow-option__meta">Резервный сценарий оплаты через бота</span>
-                    </button>
-                  )}
                 </div>
               </>
             )}
@@ -8438,7 +8384,8 @@ useEffect(() => {
           <div className="paywall-card">
             <div className="paywall-card__title">Бесплатные расклады закончились</div>
             <div className="paywall-card__text">
-              Подключите подписку, чтобы продолжить пользоваться приложением без ограничений.
+              Извините, мы не можем показать новый расклад: бесплатные попытки закончились и подписка не активна.
+              Подключите подписку, чтобы продолжить пользоваться сервисом.
             </div>
             <div className="paywall-card__meta">
               В этом месяце: {Math.max(0, Number(billing?.free_left ?? 0))} бесплатных из {Math.max(1, Number(billing?.free_limit ?? 5))}
@@ -8449,19 +8396,14 @@ useEffect(() => {
                 type="button"
                 className="glass-cta paywall-card__cta"
                 onClick={() => {
-                  if (inAppBillingEnabled) {
-                    metrikaReachGoal(METRIKA_GOALS.paymentStart, { provider: 'paywall_inapp' })
-                    setShowAccessPaywall(false)
-                    openBillingFlow('paywall')
-                    return
-                  }
-                  metrikaReachGoal(METRIKA_GOALS.paymentStart, { provider: 'paywall_bot' })
-                  openTelegramUrl(BOT_PAYMENT_URL)
+                  metrikaReachGoal(METRIKA_GOALS.paymentStart, { provider: 'paywall_inapp' })
+                  setShowAccessPaywall(false)
+                  openBillingFlow('paywall')
                 }}
               >
                 <span className="glass-cta__inner">
                   <span className="glass-cta__rim" aria-hidden="true" />
-                  <span className="glass-cta__text">Купить подписку</span>
+                  <span className="glass-cta__text">Подключить подписку</span>
                   <span className="glass-cta__spark" aria-hidden="true" />
                 </span>
               </button>

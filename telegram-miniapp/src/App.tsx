@@ -1528,6 +1528,7 @@ const [showPersonalizationModal, setShowPersonalizationModal] = useState(false)
 const [showLanguageModal, setShowLanguageModal] = useState(false)
 const [memoryOptIn, setMemoryOptIn] = useState<boolean>(true)
 const [prefsSaving, setPrefsSaving] = useState(false)
+const [languageSaving, setLanguageSaving] = useState(false)
 const [prefsError, setPrefsError] = useState('')
 
 const [question, setQuestion] = useState('')
@@ -1821,14 +1822,13 @@ useEffect(() => {
     const normalized = normalizeAppLanguage(nextLanguage)
     setAppLanguage(normalized)
     setUser((prev) => (prev ? { ...prev, app_language: normalized } : prev))
+    setShowLanguageModal(false)
 
     if (!token) {
-      setShowLanguageModal(false)
       return
     }
 
-    setPrefsSaving(true)
-    setPrefsError('')
+    setLanguageSaving(true)
     try {
       const out = await updateMePreferences(token, {
         memory_opt_in: memoryOptIn,
@@ -1844,11 +1844,10 @@ useEffect(() => {
           ? { ...prev, memory_opt_in: Boolean(out.memory_opt_in ?? true), app_language: serverLang }
           : prev
       )
-      setShowLanguageModal(false)
     } catch {
-      setPrefsError(t('saveFailed'))
+      // Keep local language even if backend persistence fails.
     } finally {
-      setPrefsSaving(false)
+      setLanguageSaving(false)
     }
   }
 
@@ -9255,7 +9254,7 @@ useEffect(() => {
           aria-modal="true"
           aria-label={t('appLanguage')}
           onClick={() => {
-            if (!prefsSaving) setShowLanguageModal(false)
+            if (!languageSaving) setShowLanguageModal(false)
           }}
         >
           <div className="prefs-modal-card prefs-lang-card" onClick={(e) => e.stopPropagation()}>
@@ -9279,7 +9278,7 @@ useEffect(() => {
                     key={langCode}
                     type="button"
                     className={`prefs-lang-option ${active ? 'is-active' : ''}`}
-                    disabled={prefsSaving}
+                    disabled={languageSaving}
                     onClick={() => {
                       if (active) {
                         setShowLanguageModal(false)

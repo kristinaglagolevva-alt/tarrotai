@@ -50,6 +50,7 @@ async function apiJson<T>(url: string, init?: ApiRequestInit): Promise<T> {
 // =============================== AUTH / ME ===============================
 
 type AuthOut = { access_token: string; token_type?: string }
+export type AppLanguage = 'ru' | 'en' | 'uz'
 
 export type MeDto = {
   id: number
@@ -65,6 +66,7 @@ export type MeDto = {
   retention_nudges_opt_in?: boolean
   retention_nudge_hour_local?: number | null
   retention_nudge_tz?: string | null
+  app_language?: AppLanguage
 }
 
 export type MePreferencesInDto = {
@@ -72,6 +74,7 @@ export type MePreferencesInDto = {
   retention_nudges_opt_in: boolean
   retention_nudge_hour_local?: number | null
   retention_nudge_tz?: string | null
+  app_language?: AppLanguage | null
 }
 
 export type MePreferencesOutDto = {
@@ -79,6 +82,7 @@ export type MePreferencesOutDto = {
   retention_nudges_opt_in: boolean
   retention_nudge_hour_local?: number | null
   retention_nudge_tz?: string | null
+  app_language: AppLanguage
 }
 
 export type MemorySummaryDto = {
@@ -331,6 +335,7 @@ export type CardOfDayCreateParams = {
   deck_size: number
   consider_reversed?: boolean
   force_llm?: boolean
+  app_language?: AppLanguage
 }
 
 export type CardOfDayHistoryItem = CardOfDayDto & {
@@ -408,6 +413,7 @@ export type ReadingCreateParams = {
   extra_context?: string
 
   force_llm?: boolean
+  app_language?: AppLanguage
 }
 
 export async function createReading(token: string, params: ReadingCreateParams): Promise<ReadingOutDto> {
@@ -489,6 +495,7 @@ export type PhotoFollowupInDto = {
   cards?: PhotoFollowupCardDto[]
   base_interpretation?: string
   extra_context?: string
+  app_language?: AppLanguage
 }
 
 export type PhotoFollowupOutDto = {
@@ -505,6 +512,7 @@ export type PhotoAnalysisParams = {
   extra_context?: string
   force_llm?: boolean
   detect_only?: boolean
+  app_language?: AppLanguage
 }
 
 /**
@@ -527,6 +535,7 @@ export async function analyzeSpreadPhoto(
   if (params?.consider_reversed != null) form.append('consider_reversed', String(params.consider_reversed))
   if (params?.force_llm != null) form.append('force_llm', String(params.force_llm))
   if (params?.detect_only != null) form.append('detect_only', String(params.detect_only))
+  if (params?.app_language) form.append('app_language', params.app_language)
 
   const r = await fetch(`${API_BASE}/photo-analysis`, {
     method: 'POST',

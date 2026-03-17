@@ -480,6 +480,26 @@ const getRuntimeLocale = () => {
 
 const detectRuntimeAppLanguage = (): AppLanguage => normalizeAppLanguage(getRuntimeLocale())
 
+const APP_LANG_STORAGE_KEY = 'ai_taro_app_language'
+const APP_LANG_MANUAL_KEY = 'ai_taro_app_language_manual'
+
+const readStoredAppLanguage = (): AppLanguage | null => {
+  try {
+    const raw = localStorage.getItem(APP_LANG_STORAGE_KEY)
+    return raw ? normalizeAppLanguage(raw) : null
+  } catch {
+    return null
+  }
+}
+
+const readLanguageManualFlag = (): boolean => {
+  try {
+    return localStorage.getItem(APP_LANG_MANUAL_KEY) === '1'
+  } catch {
+    return false
+  }
+}
+
 const UI_TEXT: Record<AppLanguage, Record<string, string>> = {
   ru: {
     appSubtitle: 'Мудрость карт и искусственного интеллекта',
@@ -1470,11 +1490,12 @@ const [token, setToken] = useState<string | null>(() => {
   return readStoredJwt()
 })
 
+const [isLanguageManual, setIsLanguageManual] = useState<boolean>(() => readLanguageManualFlag())
+
 const [appLanguage, setAppLanguage] = useState<AppLanguage>(() => {
-  try {
-    const saved = localStorage.getItem('ai_taro_app_language')
-    if (saved) return normalizeAppLanguage(saved)
-  } catch {}
+  const saved = readStoredAppLanguage()
+  const manual = readLanguageManualFlag()
+  if (manual && saved) return saved
   return detectRuntimeAppLanguage()
 })
 
@@ -1553,12 +1574,18 @@ const legalDocs = useMemo(() => LEGAL_DOCS_BY_LANG[appLanguage] || LEGAL_DOCS_BY
 
 useEffect(() => {
   try {
-    localStorage.setItem('ai_taro_app_language', appLanguage)
+    localStorage.setItem(APP_LANG_STORAGE_KEY, appLanguage)
   } catch {}
   try {
     document.documentElement.setAttribute('lang', appLanguage)
   } catch {}
 }, [appLanguage])
+
+useEffect(() => {
+  try {
+    localStorage.setItem(APP_LANG_MANUAL_KEY, isLanguageManual ? '1' : '0')
+  } catch {}
+}, [isLanguageManual])
 
 useEffect(() => {
   if (showPaymentSuccessModal) return
@@ -1600,8 +1627,10 @@ useEffect(() => {
           billingOut = await getBillingStatus(token)
         } catch {}
         safe(() => {
+          const runtimeLang = detectRuntimeAppLanguage()
+          const serverLang = normalizeAppLanguage(me?.app_language || runtimeLang)
           setUser(me)
-          setAppLanguage(normalizeAppLanguage(me?.app_language || detectRuntimeAppLanguage()))
+          setAppLanguage(isLanguageManual ? serverLang : runtimeLang)
           setBilling(billingOut)
           setAuthStatus('ready')
         })
@@ -1674,9 +1703,11 @@ useEffect(() => {
       writeStoredJwt(res.token)
 
       safe(() => {
+        const runtimeLang = detectRuntimeAppLanguage()
+        const serverLang = normalizeAppLanguage(res.user?.app_language || runtimeLang)
         setToken(res.token)
         setUser(res.user)
-        setAppLanguage(normalizeAppLanguage(res.user?.app_language || detectRuntimeAppLanguage()))
+        setAppLanguage(isLanguageManual ? serverLang : runtimeLang)
         setBilling(billingOut)
         setAuthStatus('ready')
       })
@@ -1736,7 +1767,7 @@ useEffect(() => {
     mounted = false
   }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-}, [token, authRetryNonce])/* =============================================================================================
+}, [token, authRetryNonce, isLanguageManual])/* =============================================================================================
      [9] БАЗОВОЕ СОСТОЯНИЕ UI
   ============================================================================================= */
 
@@ -1780,11 +1811,12 @@ useEffect(() => {
     setMemoryOptIn(Boolean(user?.memory_opt_in ?? true))
   }, [user?.memory_opt_in])
 
-  useEffect(() => {
-    if (!user?.app_language) return
-    const next = normalizeAppLanguage(user.app_language)
-    setAppLanguage(next)
-  }, [user?.app_language])
+useEffect(() => {
+  if (!isLanguageManual) return
+  if (!user?.app_language) return
+  const next = normalizeAppLanguage(user.app_language)
+  setAppLanguage(next)
+}, [user?.app_language, isLanguageManual])
 
   const openLegalDoc = (kind: LegalDocKind) => {
     setActiveLegalDoc(kind)
@@ -1820,6 +1852,7 @@ useEffect(() => {
 
   const saveAppLanguage = async (nextLanguage: AppLanguage) => {
     const normalized = normalizeAppLanguage(nextLanguage)
+    setIsLanguageManual(true)
     setAppLanguage(normalized)
     setUser((prev) => (prev ? { ...prev, app_language: normalized } : prev))
     setShowLanguageModal(false)
@@ -4155,6 +4188,7 @@ useEffect(() => {
           topic: 'other',
           deck_size: 78,
           consider_reversed: true,
+          app_language: appLanguage,
         })
         applyDailyDto(dto)
         // create_or_get: если карта уже была — сразу результат; если новая — оставляем шаг перемешивания.
@@ -4658,6 +4692,7 @@ useEffect(() => {
             topic,
             question: '',
             detect_only: true,
+            app_language: appLanguage,
           })
           break
         } catch (err: any) {
@@ -4718,6 +4753,7 @@ useEffect(() => {
       const out = await analyzeSpreadPhoto(token, preparedFile, {
         topic,
         question: String(photoMainQuestion || '').trim(),
+        app_language: appLanguage,
       })
       if (photoReqSeqRef.current !== reqId) return
 
@@ -4776,6 +4812,7 @@ useEffect(() => {
         topic,
         main_question: mainQ,
         followup_question: followText,
+        app_language: appLanguage,
         cards: photoDetectedCards.map((card) => ({
           position: card.position || '',
           title: card.title || '',
@@ -4849,7 +4886,15 @@ useEffect(() => {
 
   const cardNameFromUrl = (url: string) => {
     const raw = (url.split('/').pop() || 'Card').replace(/\.(png|jpg|jpeg|webp)$/i, '')
-    return raw
+    const decoded = (() => {
+      try {
+        return decodeURIComponent(raw)
+      } catch {
+        return raw
+      }
+    })()
+    return decoded
+      .replace(/-[A-Za-z0-9_-]{6,}$/, '')
       .replace(/_/g, ' ')
       .replace(/-/g, ' ')
       .replace(/\s+/g, ' ')
@@ -5873,6 +5918,7 @@ useEffect(() => {
       question: effectiveQuestion,
       consider_reversed: true,
       forced_cards: toForcedCards(previewCards),
+      app_language: appLanguage,
     }
     const reading: any = await createReading(token, params)
     void refreshBilling(token)
@@ -5913,6 +5959,7 @@ useEffect(() => {
       question: effectiveQuestion,
       consider_reversed: true,
       forced_cards: toForcedCards(previewCards),
+      app_language: appLanguage,
     }
     const reading: any = await createReading(token, params)
     void refreshBilling(token)
@@ -5962,6 +6009,7 @@ useEffect(() => {
       question: effectiveQuestion,
       consider_reversed: true,
       forced_cards: toForcedCards(previewCards),
+      app_language: appLanguage,
     }
     const reading: any = await createReading(token, params)
     void refreshBilling(token)
@@ -8287,7 +8335,7 @@ useEffect(() => {
                     <>
                       {needsMotionPermission && (
                         <button type="button" className="motion-permission-cta motion-permission-cta--tech" onClick={requestMotion}>
-                          {lx('Ruxsat berish', 'Allow motion', "Silkitishga ruxsat berish")}
+                          {lx('Разрешить', 'Allow motion', "Silkitishga ruxsat berish")}
                         </button>
                       )}
 

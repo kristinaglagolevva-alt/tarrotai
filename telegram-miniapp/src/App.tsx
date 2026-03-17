@@ -629,6 +629,18 @@ const languageDisplayName = (lang: AppLanguage, locale: AppLanguage): string => 
   return labels[locale]?.[lang] || labels.ru[lang]
 }
 
+const languageAutoLabel = (locale: AppLanguage): string => {
+  if (locale === 'en') return 'Automatic (Telegram language)'
+  if (locale === 'uz') return "Avtomatik (Telegram tili)"
+  return 'Автоматически (язык Telegram)'
+}
+
+const languageCurrentLabel = (locale: AppLanguage, runtime: AppLanguage): string => {
+  if (locale === 'en') return `Current: ${languageDisplayName(runtime, locale)}`
+  if (locale === 'uz') return `Hozir: ${languageDisplayName(runtime, locale)}`
+  return `Сейчас: ${languageDisplayName(runtime, locale)}`
+}
+
 const getRuntimeTimeZone = () => {
   try {
     return String(Intl.DateTimeFormat().resolvedOptions().timeZone || '')
@@ -1588,6 +1600,26 @@ useEffect(() => {
 }, [isLanguageManual])
 
 useEffect(() => {
+  if (isLanguageManual) return
+  const syncLanguage = () => {
+    setAppLanguage((prev) => {
+      const runtime = detectRuntimeAppLanguage()
+      return prev === runtime ? prev : runtime
+    })
+  }
+  const onVisibility = () => {
+    if (!document.hidden) syncLanguage()
+  }
+  syncLanguage()
+  window.addEventListener('focus', syncLanguage)
+  document.addEventListener('visibilitychange', onVisibility)
+  return () => {
+    window.removeEventListener('focus', syncLanguage)
+    document.removeEventListener('visibilitychange', onVisibility)
+  }
+}, [isLanguageManual])
+
+useEffect(() => {
   if (showPaymentSuccessModal) return
   setPaymentSuccessText(
     lx(
@@ -1871,6 +1903,40 @@ useEffect(() => {
         app_language: normalized,
       })
       const serverLang = normalizeAppLanguage(out.app_language || normalized)
+      setAppLanguage(serverLang)
+      setUser((prev) =>
+        prev
+          ? { ...prev, memory_opt_in: Boolean(out.memory_opt_in ?? true), app_language: serverLang }
+          : prev
+      )
+    } catch {
+      // Keep local language even if backend persistence fails.
+    } finally {
+      setLanguageSaving(false)
+    }
+  }
+
+  const saveAutoLanguage = async () => {
+    const runtime = detectRuntimeAppLanguage()
+    setIsLanguageManual(false)
+    setAppLanguage(runtime)
+    setUser((prev) => (prev ? { ...prev, app_language: runtime } : prev))
+    setShowLanguageModal(false)
+
+    if (!token) {
+      return
+    }
+
+    setLanguageSaving(true)
+    try {
+      const out = await updateMePreferences(token, {
+        memory_opt_in: memoryOptIn,
+        retention_nudges_opt_in: false,
+        retention_nudge_hour_local: null,
+        retention_nudge_tz: null,
+        app_language: runtime,
+      })
+      const serverLang = normalizeAppLanguage(out.app_language || runtime)
       setAppLanguage(serverLang)
       setUser((prev) =>
         prev
@@ -9319,8 +9385,32 @@ useEffect(() => {
             </div>
 
             <div className="prefs-lang-list">
+              {(() => {
+                const autoActive = !isLanguageManual
+                const runtimeLang = detectRuntimeAppLanguage()
+                return (
+                  <button
+                    type="button"
+                    className={`prefs-lang-option ${autoActive ? 'is-active' : ''}`}
+                    disabled={languageSaving}
+                    onClick={() => {
+                      if (autoActive) {
+                        setShowLanguageModal(false)
+                        return
+                      }
+                      void saveAutoLanguage()
+                    }}
+                  >
+                    <span className="prefs-lang-option__body">
+                      <span className="prefs-lang-option__title">{languageAutoLabel(appLanguage)}</span>
+                      <span className="prefs-lang-option__meta">{languageCurrentLabel(appLanguage, runtimeLang)}</span>
+                    </span>
+                    {autoActive ? <span className="prefs-lang-option__mark">✓</span> : null}
+                  </button>
+                )
+              })()}
               {(['ru', 'uz', 'en'] as AppLanguage[]).map((langCode) => {
-                const active = appLanguage === langCode
+                const active = isLanguageManual && appLanguage === langCode
                 return (
                   <button
                     key={langCode}

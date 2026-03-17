@@ -3276,6 +3276,24 @@ body,
   text-align: left;
 }
 
+.prefs-lang-option__body {
+  display: grid;
+  gap: 3px;
+}
+
+.prefs-lang-option__title {
+  font-size: 16px;
+  font-weight: 620;
+  line-height: 1.2;
+}
+
+.prefs-lang-option__meta {
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.2;
+  color: rgba(198, 218, 252, 0.86);
+}
+
 .prefs-lang-option.is-active {
   border-color: rgba(191, 217, 255, 0.82);
   box-shadow: 0 0 0 1px rgba(214, 232, 255, 0.28) inset;

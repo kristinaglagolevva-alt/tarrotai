@@ -83,6 +83,27 @@ _autopay_lock = asyncio.Lock()
 _autopay_last_run_ts = 0.0
 
 FREE_READINGS_PER_MONTH = int(os.getenv("FREE_READINGS_PER_MONTH", "5"))
+APP_LANG_VALUES = ("ru", "en", "uz")
+
+
+def _normalize_app_language(raw: Any) -> str:
+    text = str(raw or "").strip().lower()
+    if not text:
+        return "ru"
+    text = text.replace("_", "-")
+    if text in APP_LANG_VALUES:
+        return text
+    if text.startswith("ru"):
+        return "ru"
+    if text.startswith("en"):
+        return "en"
+    if text.startswith("uz"):
+        return "uz"
+    return "ru"
+
+
+def _language_from_telegram_code(raw: Any) -> str:
+    return _normalize_app_language(raw)
 
 
 def _pricing_env_float(name: str, default: float) -> float:
@@ -1328,6 +1349,10 @@ async def _ensure_runtime_schema(conn) -> None:
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS retention_nudges_opt_in BOOLEAN NOT NULL DEFAULT FALSE;",
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS retention_nudge_hour_local INTEGER NULL;",
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS retention_nudge_tz VARCHAR(64) NULL;",
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS app_language VARCHAR(8) NOT NULL DEFAULT 'ru';",
+        "UPDATE users SET app_language = 'ru' WHERE app_language IS NULL OR trim(app_language) = '';",
+        "ALTER TABLE users ALTER COLUMN app_language SET DEFAULT 'ru';",
+        "ALTER TABLE users ALTER COLUMN app_language SET NOT NULL;",
         "ALTER TABLE sbp_orders ADD COLUMN IF NOT EXISTS success_notified BOOLEAN NOT NULL DEFAULT FALSE;",
         "ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS refunded_at TIMESTAMPTZ NULL;",
         "ALTER TABLE support_tickets ADD COLUMN IF NOT EXISTS support_inbox_message_id BIGINT NULL;",
@@ -1696,8 +1721,33 @@ def _ru_days_ago(days: int) -> str:
     return f"{d} {suffix} назад"
 
 
-def _topic_focus_label(topic: str) -> str:
+def _days_ago_text(days: int, language: str) -> str:
+    lang = _normalize_app_language(language)
+    d = max(1, int(days))
+    if lang == "en":
+        return f"{d} day{'s' if d != 1 else ''} ago"
+    if lang == "uz":
+        return f"{d} kun oldin"
+    return _ru_days_ago(d)
+
+
+def _topic_focus_label(topic: str, language: str = "ru") -> str:
     code = str(topic or "").strip().lower()
+    lang = _normalize_app_language(language)
+    if lang == "en":
+        return {
+            "relations": "relationships and personal boundaries",
+            "career": "work, decisions, and role balance",
+            "finance": "money and stability",
+            "other": "inner state and choosing the next step",
+        }.get(code, "inner state and choosing the next step")
+    if lang == "uz":
+        return {
+            "relations": "munosabatlar va shaxsiy chegaralar",
+            "career": "ish, qarorlar va roldagi muvozanat",
+            "finance": "pul va barqarorlik",
+            "other": "ichki holat va keyingi qadam tanlovi",
+        }.get(code, "ichki holat va keyingi qadam tanlovi")
     return {
         "relations": "отношениях и личных границах",
         "career": "работе, решениях и ролях",
@@ -1715,7 +1765,9 @@ async def _build_card_day_repeat_note(
     is_reversed: bool,
     topic: str,
     question: str,
+    language: str = "ru",
 ) -> str:
+    lang = _normalize_app_language(language)
     name = str(card_name or "").strip()
     if not name:
         return ""
@@ -1739,25 +1791,71 @@ async def _build_card_day_repeat_note(
         curr_date = date.fromisoformat(str(day_key))
         prev_date = date.fromisoformat(str(prev.day_key))
         delta_days = max(1, int((curr_date - prev_date).days))
-        days_ago_text = _ru_days_ago(delta_days)
+        days_ago_text = _days_ago_text(delta_days, lang)
     except Exception:
         pass
 
     prev_excerpt = _md_excerpt(str(getattr(prev, "description", "") or ""))
     if not prev_excerpt:
-        prev_excerpt = f"фокус был на теме о { _topic_focus_label(str(getattr(prev, 'topic', 'other') or 'other')) }"
+        if lang == "en":
+            prev_excerpt = f"the focus was on { _topic_focus_label(str(getattr(prev, 'topic', 'other') or 'other'), lang) }"
+        elif lang == "uz":
+            prev_excerpt = f"fokus { _topic_focus_label(str(getattr(prev, 'topic', 'other') or 'other'), lang) } haqida edi"
+        else:
+            prev_excerpt = f"фокус был на теме о { _topic_focus_label(str(getattr(prev, 'topic', 'other') or 'other'), lang) }"
 
     q = str(question or "").strip()
     if q:
-        now_line = f"фокус смещён к вопросу: «{q}»"
+        if lang == "en":
+            now_line = f"the focus shifted to the question: “{q}”"
+        elif lang == "uz":
+            now_line = f"fokus savolga o'tdi: «{q}»"
+        else:
+            now_line = f"фокус смещён к вопросу: «{q}»"
     else:
-        now_line = f"фокус на теме о { _topic_focus_label(topic) }"
+        if lang == "en":
+            now_line = f"the focus is on { _topic_focus_label(topic, lang) }"
+        elif lang == "uz":
+            now_line = f"fokus { _topic_focus_label(topic, lang) } mavzusida"
+        else:
+            now_line = f"фокус на теме о { _topic_focus_label(topic, lang) }"
 
-    prev_orient = "перевёрнутая" if bool(getattr(prev, "is_reversed", False)) else "прямая"
-    curr_orient = "перевёрнутая" if bool(is_reversed) else "прямая"
+    if lang == "en":
+        prev_orient = "reversed" if bool(getattr(prev, "is_reversed", False)) else "upright"
+        curr_orient = "reversed" if bool(is_reversed) else "upright"
+    elif lang == "uz":
+        prev_orient = "teskari" if bool(getattr(prev, "is_reversed", False)) else "to'g'ri"
+        curr_orient = "teskari" if bool(is_reversed) else "to'g'ri"
+    else:
+        prev_orient = "перевёрнутая" if bool(getattr(prev, "is_reversed", False)) else "прямая"
+        curr_orient = "перевёрнутая" if bool(is_reversed) else "прямая"
     orient_line = ""
     if prev_orient != curr_orient:
-        orient_line = f"Ориентация изменилась: тогда карта была {prev_orient}, сейчас {curr_orient}.\n"
+        if lang == "en":
+            orient_line = f"Orientation changed: previously the card was {prev_orient}, now it is {curr_orient}.\n"
+        elif lang == "uz":
+            orient_line = f"Yo'nalish o'zgardi: avval karta {prev_orient}, hozir esa {curr_orient}.\n"
+        else:
+            orient_line = f"Ориентация изменилась: тогда карта была {prev_orient}, сейчас {curr_orient}.\n"
+
+    if lang == "en":
+        return (
+            "## Repeated card of the day\n"
+            f"You got the card “{name}” again — it already appeared {days_ago_text} ({str(prev.day_key)}).\n"
+            f"{orient_line}"
+            f"Then: {prev_excerpt}.\n"
+            f"Now: {now_line}.\n"
+            "Compare what is repeating in your state and what has already shifted."
+        ).strip()
+    if lang == "uz":
+        return (
+            "## Kunning takrorlangan kartasi\n"
+            f"«{name}» kartasi yana tushdi — u allaqachon {days_ago_text} ({str(prev.day_key)}) chiqqan.\n"
+            f"{orient_line}"
+            f"O'shanda: {prev_excerpt}.\n"
+            f"Hozir: {now_line}.\n"
+            "Holatingizda nima takrorlanayotganini va nima o'zgarganini solishtirib ko'ring."
+        ).strip()
 
     return (
         "## Повтор карты дня\n"
@@ -1779,11 +1877,12 @@ async def _decorate_card_day_description_with_repeat(
     topic: str,
     question: str,
     description: str,
+    language: str = "ru",
 ) -> str:
     src = str(description or "").strip()
     if not src:
         return src
-    if re.search(r"(?im)^\s*##\s*Повтор\s+карты\s+дня\b", src):
+    if re.search(r"(?im)^\s*##\s*(Повтор\s+карты\s+дня|Repeated\s+card\s+of\s+the\s+day|Kunning\s+takrorlangan\s+kartasi)\b", src):
         return src
     note = await _build_card_day_repeat_note(
         db,
@@ -1793,6 +1892,7 @@ async def _decorate_card_day_description_with_repeat(
         is_reversed=bool(is_reversed),
         topic=str(topic or "other"),
         question=str(question or ""),
+        language=language,
     )
     if not note:
         return src
@@ -1855,6 +1955,7 @@ class MeOut(BaseModel):
     retention_nudges_opt_in: bool = False
     retention_nudge_hour_local: Optional[int] = None
     retention_nudge_tz: Optional[str] = None
+    app_language: Literal["ru", "en", "uz"] = "ru"
 
 
 class MePreferencesIn(BaseModel):
@@ -1862,6 +1963,7 @@ class MePreferencesIn(BaseModel):
     retention_nudges_opt_in: bool = False
     retention_nudge_hour_local: Optional[int] = Field(default=None, ge=0, le=23)
     retention_nudge_tz: Optional[str] = None
+    app_language: Optional[Literal["ru", "en", "uz"]] = None
 
 
 class MePreferencesOut(BaseModel):
@@ -1869,6 +1971,7 @@ class MePreferencesOut(BaseModel):
     retention_nudges_opt_in: bool = False
     retention_nudge_hour_local: Optional[int] = None
     retention_nudge_tz: Optional[str] = None
+    app_language: Literal["ru", "en", "uz"] = "ru"
 
 
 class BillingStatusOut(BaseModel):
@@ -1951,6 +2054,7 @@ class CardOfDayCreateIn(BaseModel):
     consider_reversed: bool = True
     deck_size: int = 78
     force_llm: bool = False
+    app_language: Optional[Literal["ru", "en", "uz"]] = None
 
 
 class CardOfDayOut(BaseModel):
@@ -1988,6 +2092,7 @@ class ReadingCreateIn(BaseModel):
     question: str = ""
     consider_reversed: bool = True
     deck_size: int = 78
+    app_language: Optional[Literal["ru", "en", "uz"]] = None
 
     # decision
     option_a: str = ""
@@ -2041,6 +2146,7 @@ class PhotoFollowupIn(BaseModel):
     cards: List[ReadingCard] = Field(default_factory=list)
     base_interpretation: str = ""
     extra_context: str = ""
+    app_language: Optional[Literal["ru", "en", "uz"]] = None
 
 
 class PhotoFollowupOut(BaseModel):
@@ -2053,11 +2159,12 @@ class PhotoFollowupOut(BaseModel):
 # ================================== AUTH ==================================
 @app.post("/auth/telegram", response_model=AuthOut)
 async def auth_telegram(payload: dict, db: AsyncSession = Depends(get_db)):
-    if "init_data" not in payload:
+    init_data = (payload or {}).get("init_data") or (payload or {}).get("initData")
+    if not init_data:
         raise HTTPException(status_code=400, detail="init_data required")
 
     try:
-        tg_user = validate_init_data(payload["init_data"])
+        tg_user = validate_init_data(init_data)
     except Exception:
         raise HTTPException(status_code=401, detail="Invalid Telegram initData")
 
@@ -2065,21 +2172,52 @@ async def auth_telegram(payload: dict, db: AsyncSession = Depends(get_db)):
     if not telegram_id:
         raise HTTPException(status_code=400, detail="Invalid telegram user")
 
-    result = await db.execute(select(User).where(User.telegram_id == telegram_id))
-    user = result.scalar_one_or_none()
+    detected_lang = _language_from_telegram_code(tg_user.get("language_code"))
+    user: Optional[User] = None
+    last_exc: Optional[Exception] = None
 
-    if not user:
-        user = User(
-            telegram_id=telegram_id,
-            username=tg_user.get("username"),
-            first_name=tg_user.get("first_name"),
-            last_name=tg_user.get("last_name"),
-            photo_url=tg_user.get("photo_url"),
-            memory_opt_in=True,
-        )
-        db.add(user)
-        await db.commit()
-        await db.refresh(user)
+    for attempt in range(2):
+        try:
+            result = await db.execute(select(User).where(User.telegram_id == telegram_id))
+            user = result.scalar_one_or_none()
+            if not user:
+                user = User(
+                    telegram_id=telegram_id,
+                    username=tg_user.get("username"),
+                    first_name=tg_user.get("first_name"),
+                    last_name=tg_user.get("last_name"),
+                    photo_url=tg_user.get("photo_url"),
+                    memory_opt_in=True,
+                    app_language=detected_lang,
+                )
+                db.add(user)
+                await db.commit()
+                await db.refresh(user)
+            elif not str(getattr(user, "app_language", "") or "").strip():
+                user.app_language = detected_lang
+                await db.commit()
+                await db.refresh(user)
+            break
+        except Exception as exc:
+            last_exc = exc
+            try:
+                await db.rollback()
+            except Exception:
+                pass
+            if attempt == 0:
+                # Self-heal path: in case runtime schema migrations were skipped, retry auth once after schema ensure.
+                try:
+                    async with engine.begin() as conn:
+                        await _ensure_runtime_schema(conn)
+                    continue
+                except Exception as migrate_exc:
+                    log.exception("auth_telegram schema self-heal failed: %s", repr(migrate_exc))
+            log.exception("auth_telegram failed after retry: %s", repr(exc))
+            raise HTTPException(status_code=503, detail="Auth temporarily unavailable. Try again in 10-20 seconds.")
+
+    if user is None:
+        log.exception("auth_telegram user is None after retry; last_exc=%r", last_exc)
+        raise HTTPException(status_code=503, detail="Auth temporarily unavailable. Try again in 10-20 seconds.")
 
     token = create_jwt(user.id, user.telegram_id)
     return {"access_token": token}
@@ -2091,6 +2229,7 @@ async def bot_bootstrap_chat(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    app_lang = _normalize_app_language(getattr(current_user, "app_language", "ru"))
     existing_q = await db.execute(
         select(BotPmBootstrap).where(BotPmBootstrap.user_id == int(current_user.id))
     )
@@ -2105,17 +2244,28 @@ async def bot_bootstrap_chat(
 
     app_url = str(os.getenv("TELEGRAM_APP_URL") or "").strip()
     reply_markup: Optional[Dict[str, Any]] = None
+    app_button_text = (
+        "🚀 Open app"
+        if app_lang == "en"
+        else ("🚀 Ilovani ochish" if app_lang == "uz" else "🚀 Открыть приложение")
+    )
     if app_url.startswith("https://"):
         reply_markup = {
-            "inline_keyboard": [[{"text": "🚀 Открыть приложение", "url": app_url}]]
+            "inline_keyboard": [[{"text": app_button_text, "url": app_url}]]
         }
 
+    bootstrap_text = (
+        "✅ App AI Taro is launched.\n\nThis chat is saved in Telegram history so you can quickly return."
+        if app_lang == "en"
+        else (
+            "✅ AI Taro ilovasi ishga tushdi.\n\nSuhbat Telegram tarixida saqlandi, shunda tez qayta kirishingiz mumkin."
+            if app_lang == "uz"
+            else "✅ Приложение AI Taro запущено.\n\nЭтот чат сохранён в истории Telegram, чтобы вы могли быстро вернуться."
+        )
+    )
     send_result = await _send_bot_message_with_result(
         int(current_user.telegram_id),
-        (
-            "✅ Приложение AI Taro запущено.\n\n"
-            "Этот чат сохранён в истории Telegram, чтобы вы могли быстро вернуться."
-        ),
+        bootstrap_text,
         reply_markup=reply_markup,
     )
     status = str(send_result.get("status") or "error").strip().lower()
@@ -2179,6 +2329,7 @@ async def me(current_user: User = Depends(get_current_user)):
             else None
         ),
         "retention_nudge_tz": (str(current_user.retention_nudge_tz or "").strip() or None),
+        "app_language": _normalize_app_language(getattr(current_user, "app_language", "ru")),
     }
 
 
@@ -2205,6 +2356,8 @@ async def update_me_preferences(
         else None
     )
     current_user.retention_nudge_tz = tz_name
+    if payload.app_language is not None:
+        current_user.app_language = _normalize_app_language(payload.app_language)
 
     if not current_user.memory_opt_in:
         current_user.retention_nudges_opt_in = False
@@ -2245,6 +2398,7 @@ async def update_me_preferences(
             else None
         ),
         "retention_nudge_tz": (str(current_user.retention_nudge_tz or "").strip() or None),
+        "app_language": _normalize_app_language(getattr(current_user, "app_language", "ru")),
     }
 
 
@@ -5410,6 +5564,7 @@ async def create_or_get_card_of_day(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    app_lang = _normalize_app_language(payload.app_language or getattr(current_user, "app_language", "ru"))
     day_key = _today_key()
 
     result = await db.execute(
@@ -5435,6 +5590,7 @@ async def create_or_get_card_of_day(
             topic=str(existing.topic or "other"),
             question=str(existing.question or ""),
             description=str(existing.description or ""),
+            language=app_lang,
         )
         return {
             "day_key": existing.day_key,
@@ -5468,6 +5624,7 @@ async def create_or_get_card_of_day(
                 question=payload.question,
                 card=card,
                 is_reversed=is_reversed,
+                language=app_lang,
                 require_llm=payload.force_llm,
             ),
             timeout=llm_timeout,
@@ -5479,7 +5636,7 @@ async def create_or_get_card_of_day(
                 status_code=503,
                 detail="LLM отвечает слишком долго. Попробуйте ещё раз через несколько секунд.",
             )
-        description = fallback_text(payload.topic, payload.question, card, is_reversed)
+        description = fallback_text(payload.topic, payload.question, card, is_reversed, language=app_lang)
     except Exception as e:
         log.exception("LLM card-of-day failed: %s", repr(e))
         raise HTTPException(
@@ -5497,6 +5654,7 @@ async def create_or_get_card_of_day(
         topic=str(payload.topic or "other"),
         question=str(payload.question or ""),
         description=str(description or ""),
+        language=app_lang,
     )
 
     row = CardOfDay(
@@ -5536,6 +5694,7 @@ async def get_card_of_day_today(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    app_lang = _normalize_app_language(getattr(current_user, "app_language", "ru"))
     day_key = _today_key()
     result = await db.execute(
         select(CardOfDay).where(
@@ -5562,6 +5721,7 @@ async def get_card_of_day_today(
         topic=str(existing.topic or "other"),
         question=str(existing.question or ""),
         description=str(existing.description or ""),
+        language=app_lang,
     )
 
     return {
@@ -5639,6 +5799,7 @@ async def create_reading(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    app_lang = _normalize_app_language(payload.app_language or getattr(current_user, "app_language", "ru"))
     await _consume_reading_quota_or_raise(db, current_user.id)
 
     effective_deck = min(max(int(payload.deck_size), 1), DECK_SIZE)
@@ -5726,6 +5887,7 @@ async def create_reading(
             spread_type=payload.spread_type,
             cards=cards_for_store,
             extra_context=extra_context,
+            language=app_lang,
             require_llm=payload.force_llm,
         )
     except Exception as e:
@@ -5822,7 +5984,9 @@ async def photo_analysis(
     consider_reversed: bool = Form(default=True),
     force_llm: bool = Form(default=False),
     detect_only: bool = Form(default=False),
+    app_language: Optional[str] = Form(default=None),
 ):
+    app_lang = _normalize_app_language(app_language or getattr(current_user, "app_language", "ru"))
     up = image or file
     if not up:
         raise HTTPException(status_code=400, detail="image/file is required")
@@ -5853,7 +6017,13 @@ async def photo_analysis(
     try:
         context = (extra_context or "").strip()
         if not consider_reversed:
-            context = f"{context}\nИгнорируй перевёрнутые позиции, считай карты прямыми.".strip()
+            if app_lang == "en":
+                orientation_note = "Ignore reversed orientations, treat cards as upright."
+            elif app_lang == "uz":
+                orientation_note = "Teskari holatlarni inobatga olmang, kartalarni to'g'ri deb hisoblang."
+            else:
+                orientation_note = "Игнорируй перевёрнутые позиции, считай карты прямыми."
+            context = f"{context}\n{orientation_note}".strip()
         # 1) Сначала только детекция карт (без интерпретации).
         _, cards = await generate_photo_analysis_llm(
             topic=topic,
@@ -5861,6 +6031,7 @@ async def photo_analysis(
             image_bytes=data,
             image_mime=content_type,
             extra_context=context,
+            language=app_lang,
             require_llm=force_llm,
             skip_interpretation=True,
             quota_register=_vision_register_request_global,
@@ -5889,6 +6060,7 @@ async def photo_analysis(
                 spread_type="photo_analysis",
                 cards=list(cards or []),
                 extra_context=interpret_context,
+                language=app_lang,
                 require_llm=force_llm,
             )
     except Exception as e:
@@ -5904,11 +6076,26 @@ async def photo_analysis(
     description = (description or "").strip()
     if detect_only:
         if cards:
-            description = "Карты распознаны."
+            if app_lang == "en":
+                description = "Cards recognized."
+            elif app_lang == "uz":
+                description = "Kartalar aniqlandi."
+            else:
+                description = "Карты распознаны."
         elif not description:
-            description = "Не удалось распознать карты на фото. Попробуй сделать фото ближе, без бликов и с хорошим светом."
+            if app_lang == "en":
+                description = "Could not recognize cards in the photo. Try a closer shot without glare and with good light."
+            elif app_lang == "uz":
+                description = "Rasmda kartalarni aniqlab bo'lmadi. Suratni yaqinroq, yaltirashsiz va yaxshi yorug'likda oling."
+            else:
+                description = "Не удалось распознать карты на фото. Попробуй сделать фото ближе, без бликов и с хорошим светом."
     elif not description:
-        description = "Не удалось распознать карты на фото. Попробуй сделать фото ближе, без бликов и с хорошим светом."
+        if app_lang == "en":
+            description = "Could not recognize cards in the photo. Try a closer shot without glare and with good light."
+        elif app_lang == "uz":
+            description = "Rasmda kartalarni aniqlab bo'lmadi. Suratni yaqinroq, yaltirashsiz va yaxshi yorug'likda oling."
+        else:
+            description = "Не удалось распознать карты на фото. Попробуй сделать фото ближе, без бликов и с хорошим светом."
 
     if not detect_only:
         try:
@@ -5954,6 +6141,7 @@ async def photo_analysis_followup(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    app_lang = _normalize_app_language(payload.app_language or getattr(current_user, "app_language", "ru"))
     followup_question = str(payload.followup_question or "").strip()
     if not followup_question:
         raise HTTPException(status_code=400, detail="followup_question is required")
@@ -5975,14 +6163,24 @@ async def photo_analysis_followup(
 
     main_q = str(payload.main_question or "").strip()
     if main_q:
-        context_parts.append(f"Первичный вопрос: {main_q}")
+        if app_lang == "en":
+            context_parts.append(f"Primary question: {main_q}")
+        elif app_lang == "uz":
+            context_parts.append(f"Asosiy savol: {main_q}")
+        else:
+            context_parts.append(f"Первичный вопрос: {main_q}")
 
     base_interp = str(payload.base_interpretation or "").strip()
     if base_interp:
         base_excerpt = base_interp[:1400].rstrip()
         if len(base_interp) > 1400:
             base_excerpt += "..."
-        context_parts.append(f"Первичный ответ: {base_excerpt}")
+        if app_lang == "en":
+            context_parts.append(f"Primary answer: {base_excerpt}")
+        elif app_lang == "uz":
+            context_parts.append(f"Asosiy javob: {base_excerpt}")
+        else:
+            context_parts.append(f"Первичный ответ: {base_excerpt}")
 
     _, memory_prompt_context, _ = await _memory_context_for_user(
         db,
@@ -6002,6 +6200,7 @@ async def photo_analysis_followup(
             cards=cards_for_prompt,
             base_interpretation=base_interp,
             extra_context="\n\n".join([p for p in context_parts if str(p).strip()]),
+            language=app_lang,
             require_llm=False,
         )
     except Exception as exc:
@@ -6011,19 +6210,51 @@ async def photo_analysis_followup(
     if not description:
         card_hints: List[str] = []
         for idx, c in enumerate(cards_for_prompt[:3], start=1):
-            name = str(c.get("card_name") or c.get("title") or f"Карта {idx}").strip()
-            orient = "перевёрнутая" if bool(c.get("is_reversed")) else "прямая"
+            if app_lang == "en":
+                fallback_name = f"Card {idx}"
+            elif app_lang == "uz":
+                fallback_name = f"Karta {idx}"
+            else:
+                fallback_name = f"Карта {idx}"
+            name = str(c.get("card_name") or c.get("title") or fallback_name).strip()
+            if app_lang == "en":
+                orient = "reversed" if bool(c.get("is_reversed")) else "upright"
+            elif app_lang == "uz":
+                orient = "teskari" if bool(c.get("is_reversed")) else "to'g'ri"
+            else:
+                orient = "перевёрнутая" if bool(c.get("is_reversed")) else "прямая"
             if name:
                 card_hints.append(f"- {name} ({orient})")
-        cards_block = "\n".join(card_hints) if card_hints else "- Карты в этом уточнении не удалось извлечь"
-        description = (
-            "## Ответ на ваш вопрос\n"
-            "По этому раскладу ответ на уточнение лучше читать через текущий контекст карт, а не как новый расклад.\n\n"
-            "## Почему так по картам\n"
-            f"{cards_block}\n\n"
-            "## Что сделать сейчас\n"
-            "Сделайте один конкретный шаг по вашему вопросу в ближайшие 24 часа и сверяйтесь с этим раскладом как с ориентиром."
-        )
+        if app_lang == "en":
+            cards_block = "\n".join(card_hints) if card_hints else "- Could not extract cards for this follow-up"
+            description = (
+                "## Answer to your question\n"
+                "For this spread, the follow-up is best interpreted through the current card context, not as a new spread.\n\n"
+                "## Why this follows from the cards\n"
+                f"{cards_block}\n\n"
+                "## What to do now\n"
+                "Take one concrete step on your question in the next 24 hours and use this spread as your checkpoint."
+            )
+        elif app_lang == "uz":
+            cards_block = "\n".join(card_hints) if card_hints else "- Bu aniqlashtirish uchun kartalarni ajratib bo'lmadi"
+            description = (
+                "## Savolingizga javob\n"
+                "Bu yoyilmada aniqlashtirishni yangi yoyilma sifatida emas, hozirgi karta konteksti orqali talqin qilish to'g'riroq.\n\n"
+                "## Nima uchun bu kartalardan kelib chiqadi\n"
+                f"{cards_block}\n\n"
+                "## Hozir nima qilish kerak\n"
+                "Keyingi 24 soatda savolingiz bo'yicha bitta aniq qadam qo'ying va shu yoyilmani orientir sifatida tekshirib boring."
+            )
+        else:
+            cards_block = "\n".join(card_hints) if card_hints else "- Карты в этом уточнении не удалось извлечь"
+            description = (
+                "## Ответ на ваш вопрос\n"
+                "По этому раскладу ответ на уточнение лучше читать через текущий контекст карт, а не как новый расклад.\n\n"
+                "## Почему так по картам\n"
+                f"{cards_block}\n\n"
+                "## Что сделать сейчас\n"
+                "Сделайте один конкретный шаг по вашему вопросу в ближайшие 24 часа и сверяйтесь с этим раскладом как с ориентиром."
+            )
 
     return {
         "description": description,

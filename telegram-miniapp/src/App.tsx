@@ -26,6 +26,7 @@ import type {
   MeDto,
   SbpPlanCode,
   ClickPlanCode,
+  AppLanguage,
 } from './api'
 import SubscriptionManageCard from './features/profile/SubscriptionManageCard'
 import { metrikaHit, metrikaReachGoal } from './metrika'
@@ -373,6 +374,33 @@ function InterpretationLoader({ text = 'Получаем интерпретац�
   )
 }
 
+function CardDayMysticLoader({
+  caption,
+  compact = false,
+  className = '',
+}: {
+  caption: string
+  compact?: boolean
+  className?: string
+}) {
+  return (
+    <div className={`cardday-loader-stage ${compact ? 'cardday-loader-stage--compact' : ''} ${className}`.trim()} aria-live="polite">
+      <div className="cardday-loader-orb" aria-hidden="true">
+        <span className="cardday-loader-halo" />
+        <span className="cardday-loader-ring cardday-loader-ring--a" />
+        <span className="cardday-loader-ring cardday-loader-ring--b" />
+        <span className="cardday-loader-core">✦</span>
+      </div>
+      <div className="cardday-loader-caption">{caption}</div>
+      <div className="cardday-loader-dots" aria-hidden="true">
+        <span />
+        <span />
+        <span />
+      </div>
+    </div>
+  )
+}
+
 function stripDailyQuestionContextSection(text: string, question: string) {
   if (String(question || '').trim()) return String(text || '')
   let out = String(text || '')
@@ -395,12 +423,31 @@ function stripDailyQuestionContextSection(text: string, question: string) {
 
 type Topic = 'relations' | 'career' | 'finance' | 'other'
 
-const TOPICS: { id: Topic; label: string }[] = [
-  { id: 'other', label: 'Другое' },
-  { id: 'relations', label: 'Отношения' },
-  { id: 'career', label: 'Карьера' },
-  { id: 'finance', label: 'Финансы' },
-]
+const TOPIC_LABELS: Record<AppLanguage, Record<Topic, string>> = {
+  ru: {
+    other: 'Другое',
+    relations: 'Отношения',
+    career: 'Карьера',
+    finance: 'Финансы',
+  },
+  en: {
+    other: 'Other',
+    relations: 'Relationships',
+    career: 'Career',
+    finance: 'Finance',
+  },
+  uz: {
+    other: 'Boshqa',
+    relations: 'Munosabatlar',
+    career: 'Karyera',
+    finance: 'Moliya',
+  },
+}
+
+const TOPIC_ORDER: Topic[] = ['other', 'relations', 'career', 'finance']
+
+const buildTopics = (lang: AppLanguage): { id: Topic; label: string }[] =>
+  TOPIC_ORDER.map((id) => ({ id, label: TOPIC_LABELS[lang]?.[id] || TOPIC_LABELS.ru[id] }))
 
 type SafetyKind = 'medical' | 'crisis'
 
@@ -414,13 +461,152 @@ type SafetyNoticeData = {
 const SELF_HARM_RE = /суицид|самоубий|поконч(ить|у)\s+с\s+собой|не\s+хочу\s+жить|убить\s+себя|самоповреж|self[-\s]?harm|suicid|kill\s+myself|end\s+my\s+life/i
 const MEDICAL_RE = /болезн|заболев|симптом|диагноз|лечени|лекарств|температур|боль|депресси|тревог|паник|врач|doctor|symptom|diagnos|disease|illness|medicine|panic|anxiety/i
 
-const RUSSIA_TZ_RE = /Europe\/(Moscow|Kaliningrad|Kirov|Samara|Volgograd|Astrakhan|Ulyanovsk)|Asia\/(Yekaterinburg|Omsk|Novosibirsk|Barnaul|Tomsk|Krasnoyarsk|Irkutsk|Yakutsk|Vladivostok|Magadan|Sakhalin|Kamchatka|Anadyr)/i
 const US_TZ_RE = /America\/(New_York|Chicago|Denver|Los_Angeles|Anchorage|Phoenix|Detroit|Indiana|Adak|Boise|Juneau|Sitka|Metlakatla|Yakutat|Nome)/i
+
+const normalizeAppLanguage = (raw: string | null | undefined): AppLanguage => {
+  const val = String(raw || '').trim().toLowerCase().replace('_', '-')
+  if (!val) return 'ru'
+  if (val === 'ru' || val.startsWith('ru')) return 'ru'
+  if (val === 'uz' || val.startsWith('uz')) return 'uz'
+  if (val === 'en' || val.startsWith('en')) return 'en'
+  return 'ru'
+}
 
 const getRuntimeLocale = () => {
   const tgLang = String((window as any)?.Telegram?.WebApp?.initDataUnsafe?.user?.language_code || '').trim().toLowerCase()
   if (tgLang) return tgLang
   return String(navigator.language || '').trim().toLowerCase()
+}
+
+const detectRuntimeAppLanguage = (): AppLanguage => normalizeAppLanguage(getRuntimeLocale())
+
+const UI_TEXT: Record<AppLanguage, Record<string, string>> = {
+  ru: {
+    appSubtitle: 'Мудрость карт и искусственного интеллекта',
+    cardOfDay: 'Карта дня',
+    dailyGuideLine1: 'Ежедневное руководство',
+    dailyGuideLine2: 'от Вселенной',
+    photoSpread: 'Фото расклада',
+    photoSpreadLine1: 'Загрузите снимок расклада',
+    photoSpreadLine2: 'и получите AI-разбор',
+    askQuestion: 'Задайте ваш вопрос',
+    questionPlaceholder: 'Что вас беспокоит? О чем хотели бы узнать?',
+    chooseTopic: 'Выберите категорию вопроса',
+    chooseSpread: 'Выберите тип расклада',
+    pickSpreadFirst: 'Сначала выберите тип расклада',
+    startReading: 'Начать расклад',
+    profile: 'Профиль',
+    history: 'История',
+    settings: 'Настройки',
+    personalization: 'Персонализация AI',
+    appLanguage: 'Язык приложения',
+    telegramBinding: 'Привязка Telegram',
+    connected: 'Подключен',
+    disconnected: 'Не подключен',
+    infoSupport: 'Информация и поддержка',
+    writeSupport: 'Написать в поддержку',
+    terms: 'Пользовательское соглашение',
+    privacy: 'Политика конфиденциальности',
+    saveFailed: 'Не удалось сохранить. Попробуйте ещё раз.',
+    authRequired: 'Нужна авторизация',
+    authErrorDefault: 'Ошибка авторизации.',
+    retry: 'Повторить',
+    close: 'Закрыть',
+    beforeStart: 'Перед началом использования',
+    acceptDocsToContinue: 'Подтвердите согласие с документами, чтобы продолжить работу в AI Taro.',
+    consentLine: 'Соглашаюсь с Пользовательским соглашением и Политикой конфиденциальности',
+    continue: 'Продолжить',
+    agreeContinue: 'Согласиться и продолжить',
+    loadingApp: 'Загрузка приложения…',
+    waitSeconds: 'Пожалуйста, подождите пару секунд',
+  },
+  en: {
+    appSubtitle: 'Wisdom of cards and artificial intelligence',
+    cardOfDay: 'Card of the Day',
+    dailyGuideLine1: 'Daily guidance',
+    dailyGuideLine2: 'from the Universe',
+    photoSpread: 'Photo spread',
+    photoSpreadLine1: 'Upload a photo of your spread',
+    photoSpreadLine2: 'and get an AI interpretation',
+    askQuestion: 'Ask your question',
+    questionPlaceholder: 'What worries you? What would you like to know?',
+    chooseTopic: 'Choose question category',
+    chooseSpread: 'Choose spread type',
+    pickSpreadFirst: 'Select a spread type first',
+    startReading: 'Start reading',
+    profile: 'Profile',
+    history: 'History',
+    settings: 'Settings',
+    personalization: 'AI personalization',
+    appLanguage: 'App language',
+    telegramBinding: 'Telegram binding',
+    connected: 'Connected',
+    disconnected: 'Not connected',
+    infoSupport: 'Info and support',
+    writeSupport: 'Contact support',
+    terms: 'Terms of service',
+    privacy: 'Privacy policy',
+    saveFailed: 'Could not save. Please try again.',
+    authRequired: 'Authorization required',
+    authErrorDefault: 'Authorization error.',
+    retry: 'Retry',
+    close: 'Close',
+    beforeStart: 'Before you start',
+    acceptDocsToContinue: 'Please accept the documents to continue using AI Taro.',
+    consentLine: 'I agree with the Terms of service and Privacy policy',
+    continue: 'Continue',
+    agreeContinue: 'Agree and continue',
+    loadingApp: 'Loading app…',
+    waitSeconds: 'Please wait a few seconds',
+  },
+  uz: {
+    appSubtitle: "Kartalar donoligi va sun'iy intellekt",
+    cardOfDay: 'Kun kartasi',
+    dailyGuideLine1: "Har kunlik yo'riqnoma",
+    dailyGuideLine2: 'Koinotdan',
+    photoSpread: 'Foto yoyilma',
+    photoSpreadLine1: 'Yoyilma rasmini yuklang',
+    photoSpreadLine2: 'va AI tahlilini oling',
+    askQuestion: 'Savolingizni kiriting',
+    questionPlaceholder: "Sizni nima bezovta qiladi? Nima bilmoqchisiz?",
+    chooseTopic: 'Savol toifasini tanlang',
+    chooseSpread: 'Yoyilma turini tanlang',
+    pickSpreadFirst: 'Avval yoyilma turini tanlang',
+    startReading: 'Yoyilmani boshlash',
+    profile: 'Profil',
+    history: 'Tarix',
+    settings: 'Sozlamalar',
+    personalization: 'AI shaxsiylashtirish',
+    appLanguage: 'Ilova tili',
+    telegramBinding: 'Telegram bog‘lanishi',
+    connected: 'Ulangan',
+    disconnected: 'Ulanmagan',
+    infoSupport: "Ma'lumot va yordam",
+    writeSupport: 'Yordamga yozish',
+    terms: 'Foydalanuvchi kelishuvi',
+    privacy: 'Maxfiylik siyosati',
+    saveFailed: "Saqlab bo'lmadi. Qayta urinib ko'ring.",
+    authRequired: 'Avtorizatsiya kerak',
+    authErrorDefault: 'Avtorizatsiya xatosi.',
+    retry: 'Qayta urinish',
+    close: 'Yopish',
+    beforeStart: 'Ishni boshlashdan oldin',
+    acceptDocsToContinue: "AI Taro ishlashini davom ettirish uchun hujjatlarga rozilik bering.",
+    consentLine: "Foydalanuvchi kelishuvi va Maxfiylik siyosatiga roziman",
+    continue: 'Davom etish',
+    agreeContinue: 'Roziman va davom etish',
+    loadingApp: 'Ilova yuklanmoqda…',
+    waitSeconds: 'Iltimos, bir necha soniya kuting',
+  },
+}
+
+const languageDisplayName = (lang: AppLanguage, locale: AppLanguage): string => {
+  const labels: Record<AppLanguage, Record<AppLanguage, string>> = {
+    ru: { ru: 'Русский', en: 'English', uz: 'Oʻzbekcha' },
+    en: { ru: 'Russian', en: 'English', uz: 'Uzbek' },
+    uz: { ru: 'Ruscha', en: 'Inglizcha', uz: "O'zbekcha" },
+  }
+  return labels[locale]?.[lang] || labels.ru[lang]
 }
 
 const getRuntimeTimeZone = () => {
@@ -431,7 +617,7 @@ const getRuntimeTimeZone = () => {
   }
 }
 
-const buildSafetyNotice = (questionRaw: string): SafetyNoticeData | null => {
+const buildSafetyNotice = (questionRaw: string, language: AppLanguage): SafetyNoticeData | null => {
   const question = String(questionRaw || '').trim()
   if (!question) return null
 
@@ -439,12 +625,10 @@ const buildSafetyNotice = (questionRaw: string): SafetyNoticeData | null => {
   const isMedical = isCrisis || MEDICAL_RE.test(question)
   if (!isMedical) return null
 
+  const lang = normalizeAppLanguage(language)
   const locale = getRuntimeLocale()
   const tz = getRuntimeTimeZone()
-  const isRuRegion = locale.startsWith('ru') || RUSSIA_TZ_RE.test(tz)
-  const isUzRegion = locale.startsWith('uz') || /Asia\/Tashkent/i.test(tz)
   const isUsRegion = locale.startsWith('en-us') || US_TZ_RE.test(tz)
-  const isEnglish = locale.startsWith('en')
 
   if (isCrisis) {
     if (isUsRegion) {
@@ -455,20 +639,20 @@ const buildSafetyNotice = (questionRaw: string): SafetyNoticeData | null => {
         contacts: ['US/Canada Suicide & Crisis Lifeline: 988', 'Emergency services: 911'],
       }
     }
-    if (isUzRegion) {
+    if (lang === 'uz') {
       return {
         kind: 'crisis',
-        title: 'Важно',
-        message: 'Похоже на кризисный вопрос. Пожалуйста, срочно обратитесь за живой помощью к специалисту.',
-        contacts: ['Экстренные службы: 112', 'Скорая медицинская помощь: 103'],
+        title: "Muhim",
+        message: "Bu inqirozga o'xshash savol. Iltimos, zudlik bilan tirik mutaxassis yordamiga murojaat qiling.",
+        contacts: isUsRegion ? ['US/Canada Suicide & Crisis Lifeline: 988', 'Emergency services: 911'] : ["Shoshilinch xizmatlar: 112", "Tez tibbiy yordam: 103"],
       }
     }
-    if (isRuRegion || !isEnglish) {
+    if (lang === 'ru') {
       return {
         kind: 'crisis',
         title: 'Важно',
         message: 'Похоже на кризисный вопрос. Пожалуйста, срочно обратитесь за живой помощью к специалисту.',
-        contacts: ['Экстренные службы: 112', 'Скорая медицинская помощь: 103'],
+        contacts: isUsRegion ? ['US/Canada Suicide & Crisis Lifeline: 988', 'Emergency services: 911'] : ['Экстренные службы: 112', 'Скорая медицинская помощь: 103'],
       }
     }
     return {
@@ -487,20 +671,20 @@ const buildSafetyNotice = (questionRaw: string): SafetyNoticeData | null => {
       contacts: ['Urgent emergency: 911'],
     }
   }
-  if (isUzRegion) {
+  if (lang === 'uz') {
     return {
       kind: 'medical',
-      title: 'Медицинская памятка',
-      message: 'Вопрос может требовать медицинской оценки. Пожалуйста, обратитесь к врачу для точной диагностики.',
-      contacts: ['Скорая медицинская помощь: 103', 'Экстренные службы: 112'],
+      title: "Tibbiy eslatma",
+      message: "Savol tibbiy baholashni talab qilishi mumkin. Aniqlashtirish uchun shifokorga murojaat qiling.",
+      contacts: isUsRegion ? ['Urgent emergency: 911'] : ["Tez tibbiy yordam: 103", "Shoshilinch xizmatlar: 112"],
     }
   }
-  if (isRuRegion || !isEnglish) {
+  if (lang === 'ru') {
     return {
       kind: 'medical',
       title: 'Медицинская памятка',
       message: 'Вопрос может требовать медицинской оценки. Пожалуйста, обратитесь к врачу для точной диагностики.',
-      contacts: ['Скорая медицинская помощь: 103', 'Экстренные службы: 112'],
+      contacts: isUsRegion ? ['Urgent emergency: 911'] : ['Скорая медицинская помощь: 103', 'Экстренные службы: 112'],
     }
   }
   return {
@@ -513,24 +697,52 @@ const buildSafetyNotice = (questionRaw: string): SafetyNoticeData | null => {
 
 type SpreadId = 'card_of_day' | 'past_present_future' | 'three_cards' | 'decision'
 
-const SPREADS: {
+type SpreadUi = {
   id: SpreadId
   title: string
   subtitle: string
   cards: string
   icon: 'sun' | 'clock' | 'cards' | 'branch'
-}[] = [
-  { id: 'card_of_day', title: 'Карта Дня', subtitle: 'Ежедневное руководство', cards: '1 карта', icon: 'sun' },
-  {
-    id: 'past_present_future',
-    title: 'Прошлое • Настоящее • Будущее',
-    subtitle: 'Временная линия событий',
-    cards: '3 карт',
-    icon: 'clock',
-  },
-  { id: 'three_cards', title: 'Расклад по 3 картам', subtitle: 'Универсальный расклад', cards: '3 карт', icon: 'cards' },
-  { id: 'decision', title: 'Принятие Решения', subtitle: 'Выбор между вариантами', cards: '2 карт', icon: 'branch' },
-]
+}
+
+const SPREADS_BY_LANG: Record<AppLanguage, SpreadUi[]> = {
+  ru: [
+    { id: 'card_of_day', title: 'Карта Дня', subtitle: 'Ежедневное руководство', cards: '1 карта', icon: 'sun' },
+    {
+      id: 'past_present_future',
+      title: 'Прошлое • Настоящее • Будущее',
+      subtitle: 'Временная линия событий',
+      cards: '3 карты',
+      icon: 'clock',
+    },
+    { id: 'three_cards', title: 'Расклад по 3 картам', subtitle: 'Универсальный расклад', cards: '3 карты', icon: 'cards' },
+    { id: 'decision', title: 'Принятие решения', subtitle: 'Выбор между вариантами', cards: '2 карты', icon: 'branch' },
+  ],
+  en: [
+    { id: 'card_of_day', title: 'Card of the Day', subtitle: 'Daily guidance', cards: '1 card', icon: 'sun' },
+    {
+      id: 'past_present_future',
+      title: 'Past • Present • Future',
+      subtitle: 'Timeline of events',
+      cards: '3 cards',
+      icon: 'clock',
+    },
+    { id: 'three_cards', title: '3-card spread', subtitle: 'Universal spread', cards: '3 cards', icon: 'cards' },
+    { id: 'decision', title: 'Decision spread', subtitle: 'Choice between options', cards: '2 cards', icon: 'branch' },
+  ],
+  uz: [
+    { id: 'card_of_day', title: 'Kun kartasi', subtitle: 'Har kunlik yo‘riqnoma', cards: '1 karta', icon: 'sun' },
+    {
+      id: 'past_present_future',
+      title: "O'tmish • Hozir • Kelajak",
+      subtitle: 'Vaqt chizig‘i',
+      cards: '3 karta',
+      icon: 'clock',
+    },
+    { id: 'three_cards', title: '3 kartalik yoyilma', subtitle: 'Universal yoyilma', cards: '3 karta', icon: 'cards' },
+    { id: 'decision', title: 'Qaror yoyilmasi', subtitle: 'Variantlar orasida tanlov', cards: '2 karta', icon: 'branch' },
+  ],
+}
 
 /* =================================================================================================
    [5] ИКОНКИ (INLINE SVG)
@@ -829,16 +1041,40 @@ const BILLING_PLAN_PRICES_FALLBACK: BillingPlanPricesByProvider = {
   },
 }
 
-const BILLING_COUNTRIES: Array<{ code: BillingCountryCode; label: string; methodsHint: string }> = [
-  { code: 'ru', label: '🇷🇺 Россия', methodsHint: 'Оплата через СБП' },
-  { code: 'uz', label: '🇺🇿 Узбекистан', methodsHint: 'Оплата через CLICK' },
-]
+const BILLING_COUNTRIES_BY_LANG: Record<AppLanguage, Array<{ code: BillingCountryCode; label: string; methodsHint: string }>> = {
+  ru: [
+    { code: 'ru', label: '🇷🇺 Россия', methodsHint: 'Оплата через СБП' },
+    { code: 'uz', label: '🇺🇿 Узбекистан', methodsHint: 'Оплата через CLICK' },
+  ],
+  en: [
+    { code: 'ru', label: '🇷🇺 Russia', methodsHint: 'Pay via SBP' },
+    { code: 'uz', label: '🇺🇿 Uzbekistan', methodsHint: 'Pay via CLICK' },
+  ],
+  uz: [
+    { code: 'ru', label: '🇷🇺 Rossiya', methodsHint: "SBP orqali to'lov" },
+    { code: 'uz', label: "🇺🇿 O'zbekiston", methodsHint: "CLICK orqali to'lov" },
+  ],
+}
 
-const BILLING_PLAN_META: Record<BillingPlanKey, { title: string; caption: string }> = {
-  sub_week: { title: 'Пробная неделя', caption: '7 дней' },
-  sub_2weeks: { title: 'Безлимит на 2 недели', caption: '14 дней' },
-  sub_month: { title: 'Безлимит на месяц', caption: '30 дней' },
-  sub_year: { title: 'Безлимит на год', caption: '365 дней' },
+const BILLING_PLAN_META_BY_LANG: Record<AppLanguage, Record<BillingPlanKey, { title: string; caption: string }>> = {
+  ru: {
+    sub_week: { title: 'Пробная неделя', caption: '7 дней' },
+    sub_2weeks: { title: 'Безлимит на 2 недели', caption: '14 дней' },
+    sub_month: { title: 'Безлимит на месяц', caption: '30 дней' },
+    sub_year: { title: 'Безлимит на год', caption: '365 дней' },
+  },
+  en: {
+    sub_week: { title: 'Trial week', caption: '7 days' },
+    sub_2weeks: { title: 'Unlimited for 2 weeks', caption: '14 days' },
+    sub_month: { title: 'Unlimited for a month', caption: '30 days' },
+    sub_year: { title: 'Unlimited for a year', caption: '365 days' },
+  },
+  uz: {
+    sub_week: { title: 'Sinov haftasi', caption: '7 kun' },
+    sub_2weeks: { title: '2 haftaga cheksiz', caption: '14 kun' },
+    sub_month: { title: 'Bir oyga cheksiz', caption: '30 kun' },
+    sub_year: { title: 'Bir yilga cheksiz', caption: '365 kun' },
+  },
 }
 
 const BILLING_PLAN_KEYS_BY_COUNTRY: Record<BillingCountryCode, BillingPlanKey[]> = {
@@ -869,12 +1105,11 @@ const METRIKA_GOALS = {
   paymentSuccess: 'payment_success',
 } as const
 
-const CARD_DAY_LOADING_STEPS = [
-  'Ищем вашу карту дня…',
-  'Собираем интерпретацию…',
-  'Почти готово…',
-] as const
-const LEGAL_CONSENT_VERSION = '2026-02-25-v1'
+const CARD_DAY_LOADING_STEPS_BY_LANG: Record<AppLanguage, readonly string[]> = {
+  ru: ['Ищем вашу карту дня…', 'Собираем интерпретацию…', 'Почти готово…'],
+  en: ['Looking for your card of the day…', 'Building interpretation…', 'Almost done…'],
+  uz: ["Kun kartangiz topilmoqda…", 'Talqin tayyorlanmoqda…', 'Deyarli tayyor…'],
+}
 const HOME_TOUR_VERSION = '2026-03-08-v3'
 const TERMS_PDF_URL = '/docs/ai_taro_user_agreement_draft.pdf'
 const PRIVACY_PDF_URL = '/docs/ai_taro_privacy_policy_draft.pdf'
@@ -893,57 +1128,161 @@ type HomeTourSpotlight = {
   bubbleArrowLeft: number
 }
 
-const HOME_TOUR_STEPS: Array<{ id: HomeTourStepId; title: string; text: string }> = [
-  {
-    id: 'card_day',
-    title: 'Карта дня',
-    text: 'Нажмите здесь, чтобы открыть вашу карту дня и получить короткий AI-разбор на сегодня.',
-  },
-  {
-    id: 'photo',
-    title: 'Фото расклада',
-    text: 'Разложите обычные карты Таро перед собой, сфотографируйте их сверху (или выберите фото из галереи) — приложение распознает именно эти карты и даст разбор.',
-  },
-  {
-    id: 'question_zone',
-    title: 'Вопрос и тип расклада',
-    text: 'Сначала напишите, что вас волнует, затем выберите категорию и формат расклада ниже.',
-  },
-  {
-    id: 'cta',
-    title: 'Запуск расклада',
-    text: 'Когда тип расклада выбран, нажмите кнопку «Начать расклад» внизу экрана.',
-  },
-]
+const HOME_TOUR_STEPS_BY_LANG: Record<AppLanguage, Array<{ id: HomeTourStepId; title: string; text: string }>> = {
+  ru: [
+    {
+      id: 'card_day',
+      title: 'Карта дня',
+      text: 'Нажмите здесь, чтобы открыть вашу карту дня и получить короткий AI-разбор на сегодня.',
+    },
+    {
+      id: 'photo',
+      title: 'Фото расклада',
+      text: 'Разложите обычные карты Таро перед собой, сфотографируйте их сверху (или выберите фото из галереи) — приложение распознает именно эти карты и даст разбор.',
+    },
+    {
+      id: 'question_zone',
+      title: 'Вопрос и тип расклада',
+      text: 'Сначала напишите, что вас волнует, затем выберите категорию и формат расклада ниже.',
+    },
+    {
+      id: 'cta',
+      title: 'Запуск расклада',
+      text: 'Когда тип расклада выбран, нажмите кнопку «Начать расклад» внизу экрана.',
+    },
+  ],
+  en: [
+    {
+      id: 'card_day',
+      title: 'Card of the day',
+      text: "Tap here to open your card of the day and get a short AI interpretation for today.",
+    },
+    {
+      id: 'photo',
+      title: 'Photo spread',
+      text: 'Lay out real Tarot cards, take a top-down photo (or pick one from gallery), and the app will recognize those exact cards.',
+    },
+    {
+      id: 'question_zone',
+      title: 'Question and spread type',
+      text: 'First enter what worries you, then choose a category and spread format below.',
+    },
+    {
+      id: 'cta',
+      title: 'Start reading',
+      text: 'After selecting a spread type, tap “Start reading” at the bottom.',
+    },
+  ],
+  uz: [
+    {
+      id: 'card_day',
+      title: 'Kun kartasi',
+      text: "Bu yerga bosib bugungi kun kartasini oching va qisqa AI talqinini oling.",
+    },
+    {
+      id: 'photo',
+      title: 'Foto yoyilma',
+      text: "Tarot kartalarini yoying, yuqoridan suratga oling (yoki galereyadan tanlang) — ilova aynan shu kartalarni aniqlab beradi.",
+    },
+    {
+      id: 'question_zone',
+      title: "Savol va yoyilma turi",
+      text: "Avval sizni nima bezovta qilayotganini yozing, so'ng pastdan toifa va yoyilma turini tanlang.",
+    },
+    {
+      id: 'cta',
+      title: 'Yoyilmani boshlash',
+      text: 'Yoyilma turi tanlangach, pastdagi “Yoyilmani boshlash” tugmasini bosing.',
+    },
+  ],
+}
 
 type LegalDocKind = 'terms' | 'privacy'
 
-const LEGAL_DOCS: Record<LegalDocKind, { title: string; intro: string; body: string[]; pdf: string }> = {
-  terms: {
-    title: 'Пользовательское соглашение',
-    intro: 'Черновая версия документа. Финальная юридическая редакция будет добавлена позже без изменения структуры экрана.',
-    body: [
-      '1. AI Taro предоставляет информационные интерпретации раскладов и не является медицинской, юридической или финансовой консультацией.',
-      '2. Пользователь самостоятельно принимает решения на основе полученной информации.',
-      '3. При первом входе пользователь подтверждает согласие с документами и отдельное согласие на персональную память раскладов (хранение до 90 дней).',
-      '4. Память используется только для персонализации интерпретаций. Для удаления персональных данных используйте /forgetme.',
-      '5. Пользователь может запросить полное удаление персональных данных командой /forgetme в боте @Ttaarrroobot.',
-      '6. Для вопросов поддержки используйте кнопку «Написать в поддержку» в профиле или команду /support в боте.',
-    ],
-    pdf: TERMS_PDF_URL,
+const LEGAL_DOCS_BY_LANG: Record<AppLanguage, Record<LegalDocKind, { title: string; intro: string; body: string[]; pdf: string }>> = {
+  ru: {
+    terms: {
+      title: 'Пользовательское соглашение',
+      intro: 'Черновая версия документа. Финальная юридическая редакция будет добавлена позже без изменения структуры экрана.',
+      body: [
+        '1. AI Taro предоставляет информационные интерпретации раскладов и не является медицинской, юридической или финансовой консультацией.',
+        '2. Пользователь самостоятельно принимает решения на основе полученной информации.',
+        '3. При первом входе пользователь подтверждает согласие с документами и отдельное согласие на персональную память раскладов (хранение до 90 дней).',
+        '4. Память используется только для персонализации интерпретаций. Для удаления персональных данных используйте /forgetme.',
+        '5. Пользователь может запросить полное удаление персональных данных командой /forgetme в боте @Ttaarrroobot.',
+        '6. Для вопросов поддержки используйте кнопку «Написать в поддержку» в профиле или команду /support в боте.',
+      ],
+      pdf: TERMS_PDF_URL,
+    },
+    privacy: {
+      title: 'Политика конфиденциальности',
+      intro: 'Черновая версия документа. Финальная редакция будет обновлена позже без изменения пользовательского пути.',
+      body: [
+        '1. Для работы сервиса обрабатываются данные Telegram-профиля (id, username, имя) и введённые пользователем запросы.',
+        '2. Данные используются только для авторизации, расчёта лимитов, оплаты и генерации ответов.',
+        '3. При включённой персональной памяти сохраняются структурированные данные раскладов (тема, тип, карты, выводы) со сроком хранения до 90 дней.',
+        '4. Сервис не продаёт персональные данные третьим лицам и использует их только для работы AI Taro.',
+        '5. Для удаления персональных данных используйте команду /forgetme в боте @Ttaarrroobot.',
+        '6. Для медико-кризисных вопросов сервис показывает мягкое предупреждение и контакты экстренной помощи по региону, без постановки диагнозов.',
+      ],
+      pdf: PRIVACY_PDF_URL,
+    },
   },
-  privacy: {
-    title: 'Политика конфиденциальности',
-    intro: 'Черновая версия документа. Финальная редакция будет обновлена позже без изменения пользовательского пути.',
-    body: [
-      '1. Для работы сервиса обрабатываются данные Telegram-профиля (id, username, имя) и введённые пользователем запросы.',
-      '2. Данные используются только для авторизации, расчёта лимитов, оплаты и генерации ответов.',
-      '3. При включённой персональной памяти сохраняются структурированные данные раскладов (тема, тип, карты, выводы) со сроком хранения до 90 дней.',
-      '4. Сервис не продаёт персональные данные третьим лицам и использует их только для работы AI Taro.',
-      '5. Для удаления персональных данных используйте команду /forgetme в боте @Ttaarrroobot.',
-      '6. Для медико-кризисных вопросов сервис показывает мягкое предупреждение и контакты экстренной помощи по региону, без постановки диагнозов.',
-    ],
-    pdf: PRIVACY_PDF_URL,
+  en: {
+    terms: {
+      title: 'Terms of service',
+      intro: 'Draft version. Final legal wording will be updated later without changing the user flow.',
+      body: [
+        '1. AI Taro provides informational interpretations and is not medical, legal, or financial advice.',
+        '2. Users make their own decisions based on the received information.',
+        '3. At first launch, users confirm consent to these documents and to personal reading memory (up to 90 days).',
+        '4. Memory is used only to personalize interpretations. Use /forgetme to delete personal data.',
+        '5. You can request full data deletion via /forgetme in @Ttaarrroobot.',
+        '6. For support, use “Contact support” in profile or /support in the bot.',
+      ],
+      pdf: TERMS_PDF_URL,
+    },
+    privacy: {
+      title: 'Privacy policy',
+      intro: 'Draft version. Final wording will be updated later without changing the user path.',
+      body: [
+        '1. The service processes Telegram profile data (id, username, name) and user prompts.',
+        '2. Data is used only for auth, limits, payments, and response generation.',
+        '3. When personal memory is enabled, structured reading data is stored for up to 90 days.',
+        '4. The service does not sell personal data to third parties.',
+        '5. Use /forgetme in @Ttaarrroobot for full deletion.',
+        '6. For medical/crisis topics the service shows a soft warning and local emergency contacts, without diagnoses.',
+      ],
+      pdf: PRIVACY_PDF_URL,
+    },
+  },
+  uz: {
+    terms: {
+      title: 'Foydalanuvchi kelishuvi',
+      intro: "Hujjatning sinov versiyasi. Yakuniy yuridik matn keyinroq, ekran tuzilmasi o'zgarmagan holda yangilanadi.",
+      body: [
+        "1. AI Taro faqat ma'lumot beruvchi talqinlarni taqdim etadi va tibbiy, yuridik yoki moliyaviy maslahat o'rnini bosa olmaydi.",
+        "2. Foydalanuvchi olingan ma'lumot asosida qarorni mustaqil qabul qiladi.",
+        "3. Birinchi kirishda foydalanuvchi hujjatlarga va shaxsiy xotira funksiyasiga (90 kungacha) rozilik beradi.",
+        "4. Xotira faqat talqinlarni shaxsiylashtirish uchun ishlatiladi. Ma'lumotlarni o'chirish uchun /forgetme dan foydalaning.",
+        "5. To'liq o'chirish so'rovi @Ttaarrroobot botida /forgetme orqali yuboriladi.",
+        "6. Yordam uchun profildagi “Yordamga yozish” yoki botdagi /support tugmasidan foydalaning.",
+      ],
+      pdf: TERMS_PDF_URL,
+    },
+    privacy: {
+      title: 'Maxfiylik siyosati',
+      intro: "Hujjatning sinov versiyasi. Yakuniy tahrir keyinroq foydalanuvchi yo'li o'zgarmasdan yangilanadi.",
+      body: [
+        "1. Xizmat Telegram profil ma'lumotlarini (id, username, ism) va foydalanuvchi so'rovlarini qayta ishlaydi.",
+        "2. Ma'lumotlar faqat avtorizatsiya, limitlar, to'lov va javob generatsiyasi uchun ishlatiladi.",
+        "3. Shaxsiy xotira yoqilganida, yoyilmalar bo'yicha tuzilgan ma'lumotlar 90 kungacha saqlanadi.",
+        "4. Xizmat shaxsiy ma'lumotlarni uchinchi tomonga sotmaydi.",
+        "5. To'liq o'chirish uchun @Ttaarrroobot botida /forgetme buyrug'idan foydalaning.",
+        "6. Tibbiy/inqiroz mavzularida xizmat tashxis qo'ymasdan yumshoq ogohlantirish va mahalliy yordam kontaktlarini ko'rsatadi.",
+      ],
+      pdf: PRIVACY_PDF_URL,
+    },
   },
 }
 
@@ -1131,6 +1470,14 @@ const [token, setToken] = useState<string | null>(() => {
   return readStoredJwt()
 })
 
+const [appLanguage, setAppLanguage] = useState<AppLanguage>(() => {
+  try {
+    const saved = localStorage.getItem('ai_taro_app_language')
+    if (saved) return normalizeAppLanguage(saved)
+  } catch {}
+  return detectRuntimeAppLanguage()
+})
+
 const [user, setUser] = useState<MeDto | null>(null)
 const [billing, setBilling] = useState<BillingStatus | null>(null)
 const [authStatus, setAuthStatus] = useState<AuthStatus>('loading')
@@ -1170,17 +1517,58 @@ const [billingPlanPrices, setBillingPlanPrices] = useState<BillingPlanPricesByPr
 const [showProfilePaymentHelp, setShowProfilePaymentHelp] = useState(false)
 const [showBillingPaymentHelp, setShowBillingPaymentHelp] = useState(false)
 const [showPaymentSuccessModal, setShowPaymentSuccessModal] = useState(false)
-const [paymentSuccessText, setPaymentSuccessText] = useState('Оплата прошла успешно. Подписка активирована.')
+const [paymentSuccessText, setPaymentSuccessText] = useState(() => {
+  if (appLanguage === 'en') return 'Payment successful. Subscription activated.'
+  if (appLanguage === 'uz') return "To'lov muvaffaqiyatli. Obuna faollashtirildi."
+  return 'Оплата прошла успешно. Подписка активирована.'
+})
 const [showAccessPaywall, setShowAccessPaywall] = useState(false)
-const [showLegalConsent, setShowLegalConsent] = useState(false)
-const [legalConsentChecked, setLegalConsentChecked] = useState(false)
 const [activeLegalDoc, setActiveLegalDoc] = useState<LegalDocKind | null>(null)
 const [showPersonalizationModal, setShowPersonalizationModal] = useState(false)
+const [showLanguageModal, setShowLanguageModal] = useState(false)
 const [memoryOptIn, setMemoryOptIn] = useState<boolean>(true)
 const [prefsSaving, setPrefsSaving] = useState(false)
 const [prefsError, setPrefsError] = useState('')
 
 const [question, setQuestion] = useState('')
+const topics = useMemo(() => buildTopics(appLanguage), [appLanguage])
+const spreads = useMemo(() => SPREADS_BY_LANG[appLanguage] || SPREADS_BY_LANG.ru, [appLanguage])
+const t = (key: keyof (typeof UI_TEXT)['ru']) => UI_TEXT[appLanguage]?.[key] || UI_TEXT.ru[key] || key
+const lx = (ru: string, en: string, uz: string) => (appLanguage === 'en' ? en : appLanguage === 'uz' ? uz : ru)
+const homeTourSteps = useMemo(() => HOME_TOUR_STEPS_BY_LANG[appLanguage] || HOME_TOUR_STEPS_BY_LANG.ru, [appLanguage])
+const cardDayLoadingSteps = useMemo(
+  () => CARD_DAY_LOADING_STEPS_BY_LANG[appLanguage] || CARD_DAY_LOADING_STEPS_BY_LANG.ru,
+  [appLanguage],
+)
+const billingCountries = useMemo(
+  () => BILLING_COUNTRIES_BY_LANG[appLanguage] || BILLING_COUNTRIES_BY_LANG.ru,
+  [appLanguage],
+)
+const billingPlanMeta = useMemo(
+  () => BILLING_PLAN_META_BY_LANG[appLanguage] || BILLING_PLAN_META_BY_LANG.ru,
+  [appLanguage],
+)
+const legalDocs = useMemo(() => LEGAL_DOCS_BY_LANG[appLanguage] || LEGAL_DOCS_BY_LANG.ru, [appLanguage])
+
+useEffect(() => {
+  try {
+    localStorage.setItem('ai_taro_app_language', appLanguage)
+  } catch {}
+  try {
+    document.documentElement.setAttribute('lang', appLanguage)
+  } catch {}
+}, [appLanguage])
+
+useEffect(() => {
+  if (showPaymentSuccessModal) return
+  setPaymentSuccessText(
+    lx(
+      'Оплата прошла успешно. Подписка активирована.',
+      'Payment successful. Subscription activated.',
+      "To'lov muvaffaqiyatli. Obuna faollashtirildi.",
+    ),
+  )
+}, [appLanguage, showPaymentSuccessModal])
 
 useEffect(() => {
   let mounted = true
@@ -1212,6 +1600,7 @@ useEffect(() => {
         } catch {}
         safe(() => {
           setUser(me)
+          setAppLanguage(normalizeAppLanguage(me?.app_language || detectRuntimeAppLanguage()))
           setBilling(billingOut)
           setAuthStatus('ready')
         })
@@ -1240,7 +1629,13 @@ useEffect(() => {
       if (!initData) {
         safe(() => {
           setAuthStatus('error')
-          setAuthError('Откройте мини‑приложение из кнопки в Telegram (initData не передан).')
+          if (appLanguage === 'en') {
+            setAuthError('Open the mini app from the Telegram button (initData is missing).')
+          } else if (appLanguage === 'uz') {
+            setAuthError("Mini ilovani Telegram tugmasi orqali oching (initData yuborilmadi).")
+          } else {
+            setAuthError('Откройте мини‑приложение из кнопки в Telegram (initData не передан).')
+          }
         })
         return
       }
@@ -1280,6 +1675,7 @@ useEffect(() => {
       safe(() => {
         setToken(res.token)
         setUser(res.user)
+        setAppLanguage(normalizeAppLanguage(res.user?.app_language || detectRuntimeAppLanguage()))
         setBilling(billingOut)
         setAuthStatus('ready')
       })
@@ -1287,15 +1683,40 @@ useEffect(() => {
       console.error('Auth error', e)
       clearStoredJwt()
       const raw = String(e?.message || e || '')
-      let uiError = 'Не удалось авторизоваться. Перезапустите мини‑приложение в Telegram.'
+      let uiError =
+        appLanguage === 'en'
+          ? 'Authorization failed. Reopen the mini app in Telegram.'
+          : appLanguage === 'uz'
+            ? "Avtorizatsiya bajarilmadi. Telegram ichida mini ilovani qayta oching."
+            : 'Не удалось авторизоваться. Перезапустите мини‑приложение в Telegram.'
       if (/initData is empty|нет initData|initData не передан/i.test(raw)) {
-        uiError = 'Telegram не передал данные входа. Откройте приложение только через кнопку в боте.'
+        uiError =
+          appLanguage === 'en'
+            ? 'Telegram did not pass login data. Open the app only via the bot button.'
+            : appLanguage === 'uz'
+              ? "Telegram kirish ma'lumotlarini uzatmadi. Ilovani faqat bot tugmasi orqali oching."
+              : 'Telegram не передал данные входа. Откройте приложение только через кнопку в боте.'
       } else if (/Invalid Telegram initData|initData expired|Invalid initData timestamp/i.test(raw)) {
-        uiError = 'Данные Telegram устарели. Закройте мини‑приложение и откройте заново из бота.'
+        uiError =
+          appLanguage === 'en'
+            ? 'Telegram data expired. Close the mini app and open it again from the bot.'
+            : appLanguage === 'uz'
+              ? "Telegram ma'lumotlari eskirgan. Mini ilovani yoping va botdan qayta oching."
+              : 'Данные Telegram устарели. Закройте мини‑приложение и откройте заново из бота.'
       } else if (/Network timeout/i.test(raw)) {
-        uiError = 'Сеть отвечает слишком долго. Проверьте интернет и нажмите «Повторить».'
+        uiError =
+          appLanguage === 'en'
+            ? 'Network timeout. Check your connection and tap Retry.'
+            : appLanguage === 'uz'
+              ? "Tarmoq javobi uzoq. Internetni tekshirib, qayta urinib ko'ring."
+              : 'Сеть отвечает слишком долго. Проверьте интернет и нажмите «Повторить».'
       } else if (/401|403/.test(raw)) {
-        uiError = 'Ошибка авторизации Telegram. Закройте мини‑приложение и откройте снова.'
+        uiError =
+          appLanguage === 'en'
+            ? 'Telegram authorization error. Close the mini app and open it again.'
+            : appLanguage === 'uz'
+              ? "Telegram avtorizatsiya xatosi. Mini ilovani yoping va qayta oching."
+              : 'Ошибка авторизации Telegram. Закройте мини‑приложение и откройте снова.'
       }
 
       safe(() => {
@@ -1320,7 +1741,6 @@ useEffect(() => {
 
   useEffect(() => {
     if (authStatus !== 'ready' || !token) return
-    if (showLegalConsent) return
     const tgId = Number(user?.telegram_id || 0)
     if (!tgId) return
 
@@ -1353,41 +1773,17 @@ useEffect(() => {
     return () => {
       cancelled = true
     }
-  }, [authStatus, token, user?.telegram_id, showLegalConsent])
+  }, [authStatus, token, user?.telegram_id])
 
   useEffect(() => {
     setMemoryOptIn(Boolean(user?.memory_opt_in ?? true))
   }, [user?.memory_opt_in])
 
   useEffect(() => {
-    if (authStatus !== 'ready') {
-      setShowLegalConsent(false)
-      return
-    }
-    const tgId = Number(user?.telegram_id || 0)
-    if (!tgId) return
-    const key = `ai_taro_legal_consent:${LEGAL_CONSENT_VERSION}:${tgId}`
-    let accepted = false
-    try {
-      accepted = localStorage.getItem(key) === '1'
-    } catch {}
-    if (accepted) {
-      setShowLegalConsent(false)
-      return
-    }
-    setLegalConsentChecked(false)
-    setShowLegalConsent(true)
-  }, [authStatus, user?.telegram_id])
-
-  const acceptLegalConsent = () => {
-    const tgId = Number(user?.telegram_id || 0)
-    if (!tgId) return
-    const key = `ai_taro_legal_consent:${LEGAL_CONSENT_VERSION}:${tgId}`
-    try {
-      localStorage.setItem(key, '1')
-    } catch {}
-    setShowLegalConsent(false)
-  }
+    if (!user?.app_language) return
+    const next = normalizeAppLanguage(user.app_language)
+    setAppLanguage(next)
+  }, [user?.app_language])
 
   const openLegalDoc = (kind: LegalDocKind) => {
     setActiveLegalDoc(kind)
@@ -1407,12 +1803,50 @@ useEffect(() => {
         retention_nudges_opt_in: false,
         retention_nudge_hour_local: null,
         retention_nudge_tz: null,
+        app_language: appLanguage,
       })
       setMemoryOptIn(Boolean(out.memory_opt_in ?? true))
-      setUser((prev) => (prev ? { ...prev, memory_opt_in: Boolean(out.memory_opt_in ?? true) } : prev))
+      const nextLang = normalizeAppLanguage(out.app_language || appLanguage)
+      setAppLanguage(nextLang)
+      setUser((prev) => (prev ? { ...prev, memory_opt_in: Boolean(out.memory_opt_in ?? true), app_language: nextLang } : prev))
       setShowPersonalizationModal(false)
     } catch {
-      setPrefsError('Не удалось сохранить. Попробуйте ещё раз.')
+      setPrefsError(t('saveFailed'))
+    } finally {
+      setPrefsSaving(false)
+    }
+  }
+
+  const saveAppLanguage = async (nextLanguage: AppLanguage) => {
+    const normalized = normalizeAppLanguage(nextLanguage)
+    setAppLanguage(normalized)
+    setUser((prev) => (prev ? { ...prev, app_language: normalized } : prev))
+
+    if (!token) {
+      setShowLanguageModal(false)
+      return
+    }
+
+    setPrefsSaving(true)
+    setPrefsError('')
+    try {
+      const out = await updateMePreferences(token, {
+        memory_opt_in: memoryOptIn,
+        retention_nudges_opt_in: false,
+        retention_nudge_hour_local: null,
+        retention_nudge_tz: null,
+        app_language: normalized,
+      })
+      const serverLang = normalizeAppLanguage(out.app_language || normalized)
+      setAppLanguage(serverLang)
+      setUser((prev) =>
+        prev
+          ? { ...prev, memory_opt_in: Boolean(out.memory_opt_in ?? true), app_language: serverLang }
+          : prev
+      )
+      setShowLanguageModal(false)
+    } catch {
+      setPrefsError(t('saveFailed'))
     } finally {
       setPrefsSaving(false)
     }
@@ -1512,8 +1946,16 @@ useEffect(() => {
       paymentSuccessNotifiedRef.current.add(cleanOrderId)
       setPaymentSuccessText(
         provider === 'click'
-          ? 'Оплата через CLICK подтверждена. Подписка активирована.'
-          : 'Оплата через СБП подтверждена. Подписка активирована.'
+          ? lx(
+              'Оплата через CLICK подтверждена. Подписка активирована.',
+              'CLICK payment confirmed. Subscription activated.',
+              "CLICK to'lovi tasdiqlandi. Obuna faollashtirildi.",
+            )
+          : lx(
+              'Оплата через СБП подтверждена. Подписка активирована.',
+              'SBP payment confirmed. Subscription activated.',
+              "SBP to'lovi tasdiqlandi. Obuna faollashtirildi.",
+            )
       )
       setShowPaymentSuccessModal(true)
     }
@@ -1572,14 +2014,15 @@ useEffect(() => {
   const formatPlanAmount = (amount: number, currency: string) => {
     const value = Math.max(0, Number(amount || 0))
     const cur = String(currency || '').toUpperCase()
+    const numLocale = appLanguage === 'en' ? 'en-US' : appLanguage === 'uz' ? 'uz-UZ' : 'ru-RU'
     if (cur === 'RUB') {
       const rub = Math.round(value / 100)
-      return `₽ ${rub.toLocaleString('ru-RU')}`
+      return `₽ ${rub.toLocaleString(numLocale)}`
     }
     if (cur === 'UZS') {
-      return `${Math.round(value).toLocaleString('ru-RU')} сум`
+      return `${Math.round(value).toLocaleString(numLocale)} UZS`
     }
-    return `${Math.round(value).toLocaleString('ru-RU')} ${cur || ''}`.trim()
+    return `${Math.round(value).toLocaleString(numLocale)} ${cur || ''}`.trim()
   }
 
   const getPlanPriceLabel = (country: BillingCountryCode, planKey: BillingPlanKey) => {
@@ -1638,7 +2081,14 @@ useEffect(() => {
       }
 
       if (!silent) {
-        setSbpStatusText(msg || 'Статус платежа обновлён.')
+        setSbpStatusText(
+          msg ||
+            lx(
+              'Статус платежа обновлён.',
+              'Payment status updated.',
+              "To'lov holati yangilandi.",
+            ),
+        )
       }
     } catch (err: any) {
       if (!silent) {
@@ -1647,9 +2097,21 @@ useEffect(() => {
         const detail = parsed?.detail
         if (detail?.code === 'SBP_ORDER_NOT_FOUND') {
           setPendingSbpOrder(null)
-          setSbpStatusText('Счёт не найден или уже закрыт. Создайте новый платёж.')
+          setSbpStatusText(
+            lx(
+              'Счёт не найден или уже закрыт. Создайте новый платёж.',
+              'Invoice not found or already closed. Create a new payment.',
+              "Hisob topilmadi yoki yopilgan. Yangi to'lov yarating.",
+            ),
+          )
         } else {
-          setSbpStatusText('Не удалось проверить статус оплаты. Попробуйте ещё раз.')
+          setSbpStatusText(
+            lx(
+              'Не удалось проверить статус оплаты. Попробуйте ещё раз.',
+              'Could not verify payment status. Please try again.',
+              "To'lov holatini tekshirib bo'lmadi. Qayta urinib ko'ring.",
+            ),
+          )
         }
       }
     } finally {
@@ -1673,14 +2135,26 @@ useEffect(() => {
       const link = String(out?.confirmation_url || '').trim()
 
       if (!orderId || !link) {
-        throw new Error('Провайдер не вернул ссылку оплаты.')
+        throw new Error(
+          lx(
+            'Провайдер не вернул ссылку оплаты.',
+            'Payment provider did not return a payment link.',
+            "To'lov provayderi to'lov havolasini qaytarmadi.",
+          ),
+        )
       }
 
       setPendingSbpOrder(orderId)
       if (showBillingFlow) {
         setBillingFlowStep('country')
       }
-      setSbpStatusText('Счёт СБП открыт. Завершите оплату и вернитесь в приложение.')
+      setSbpStatusText(
+        lx(
+          'Счёт СБП открыт. Завершите оплату и вернитесь в приложение.',
+          'SBP invoice created. Complete payment and return to the app.',
+          "SBP hisobi yaratildi. To'lovni tugatib, ilovaga qayting.",
+        ),
+      )
       openTelegramUrl(link)
       window.setTimeout(() => {
         void checkSbpStatus(orderId, true)
@@ -1691,11 +2165,23 @@ useEffect(() => {
       const detail = parsed?.detail
 
       if (detail?.code === 'SBP_NOT_CONFIGURED') {
-        setSbpStatusText('СБП ещё не настроен на сервере. Нужны shop_id и secret_key ЮKassa.')
+        setSbpStatusText(
+          lx(
+            'СБП ещё не настроен на сервере. Нужны shop_id и secret_key ЮKassa.',
+            'SBP is not configured on server yet. shop_id and secret_key are required.',
+            "SBP hali serverda sozlanmagan. shop_id va secret_key kerak.",
+          ),
+        )
       } else if (detail?.message) {
         setSbpStatusText(String(detail.message))
       } else {
-        setSbpStatusText('Не удалось создать счёт СБП. Попробуйте ещё раз.')
+        setSbpStatusText(
+          lx(
+            'Не удалось создать счёт СБП. Попробуйте ещё раз.',
+            'Could not create SBP invoice. Please try again.',
+            "SBP hisobi yaratilmadi. Qayta urinib ko'ring.",
+          ),
+        )
       }
     } finally {
       setSbpBusyPlan(null)
@@ -1722,7 +2208,14 @@ useEffect(() => {
       }
 
       if (!silent) {
-        setClickStatusText(msg || 'Статус оплаты CLICK обновлён.')
+        setClickStatusText(
+          msg ||
+            lx(
+              'Статус оплаты CLICK обновлён.',
+              'CLICK payment status updated.',
+              "CLICK to'lovi holati yangilandi.",
+            ),
+        )
       }
     } catch (err: any) {
       if (!silent) {
@@ -1731,9 +2224,21 @@ useEffect(() => {
         const detail = parsed?.detail
         if (detail?.code === 'CLICK_ORDER_NOT_FOUND') {
           setPendingClickOrder(null)
-          setClickStatusText('Счёт CLICK не найден или уже закрыт. Создайте новый платёж.')
+          setClickStatusText(
+            lx(
+              'Счёт CLICK не найден или уже закрыт. Создайте новый платёж.',
+              'CLICK invoice not found or already closed. Create a new payment.',
+              "CLICK hisobi topilmadi yoki yopilgan. Yangi to'lov yarating.",
+            ),
+          )
         } else {
-          setClickStatusText('Не удалось проверить статус CLICK. Попробуйте ещё раз.')
+          setClickStatusText(
+            lx(
+              'Не удалось проверить статус CLICK. Попробуйте ещё раз.',
+              'Could not verify CLICK payment status. Please try again.',
+              "CLICK to'lovi holatini tekshirib bo'lmadi. Qayta urinib ko'ring.",
+            ),
+          )
         }
       }
     } finally {
@@ -1757,14 +2262,26 @@ useEffect(() => {
       const link = String(out?.payment_url || '').trim()
 
       if (!orderId || !link) {
-        throw new Error('Провайдер CLICK не вернул ссылку оплаты.')
+        throw new Error(
+          lx(
+            'Провайдер CLICK не вернул ссылку оплаты.',
+            'CLICK provider did not return a payment link.',
+            "CLICK provayderi to'lov havolasini qaytarmadi.",
+          ),
+        )
       }
 
       setPendingClickOrder(orderId)
       if (showBillingFlow) {
         setBillingFlowStep('country')
       }
-      setClickStatusText('Счёт CLICK открыт. Завершите оплату и вернитесь в приложение.')
+      setClickStatusText(
+        lx(
+          'Счёт CLICK открыт. Завершите оплату и вернитесь в приложение.',
+          'CLICK invoice created. Complete payment and return to the app.',
+          "CLICK hisobi yaratildi. To'lovni tugatib, ilovaga qayting.",
+        ),
+      )
       openTelegramUrl(link)
       window.setTimeout(() => {
         void checkClickStatus(orderId, true)
@@ -1775,13 +2292,31 @@ useEffect(() => {
       const detail = parsed?.detail
 
       if (detail?.code === 'CLICK_NOT_CONFIGURED') {
-        setClickStatusText('CLICK ещё не настроен на сервере. Проверьте интеграцию и повторите.')
+        setClickStatusText(
+          lx(
+            'CLICK ещё не настроен на сервере. Проверьте интеграцию и повторите.',
+            'CLICK is not configured on server yet. Check integration and retry.',
+            "CLICK hali serverda sozlanmagan. Integratsiyani tekshirib qayta urinib ko'ring.",
+          ),
+        )
       } else if (detail?.code === 'CLICK_INTRO_ALREADY_USED') {
-        setClickStatusText('Пробная неделя уже была использована. Выберите другой тариф.')
+        setClickStatusText(
+          lx(
+            'Пробная неделя уже была использована. Выберите другой тариф.',
+            'Trial week has already been used. Select another plan.',
+            "Sinov haftasi allaqachon ishlatilgan. Boshqa tarifni tanlang.",
+          ),
+        )
       } else if (detail?.message) {
         setClickStatusText(String(detail.message))
       } else {
-        setClickStatusText('Не удалось создать счёт CLICK. Попробуйте ещё раз.')
+        setClickStatusText(
+          lx(
+            'Не удалось создать счёт CLICK. Попробуйте ещё раз.',
+            'Could not create CLICK invoice. Please try again.',
+            "CLICK hisobi yaratilmadi. Qayta urinib ko'ring.",
+          ),
+        )
       }
     } finally {
       setClickBusyPlan(null)
@@ -1829,8 +2364,11 @@ useEffect(() => {
   }, [token, clickOrderId])
 
   const readingLimitMessage =
-    `Бесплатный лимит раскладов за месяц исчерпан.\n\n` +
-    `Откройте оплату в приложении (профиль или paywall) или через бота: ${BOT_PAYMENT_URL}`
+    appLanguage === 'en'
+      ? `Your monthly free reading limit is exhausted.\n\nOpen payment in the app (profile or paywall) or via bot: ${BOT_PAYMENT_URL}`
+      : appLanguage === 'uz'
+        ? `Oy bo‘yicha bepul yoyilmalar limiti tugadi.\n\nTo‘lovni ilova ichida (profil yoki paywall) yoki bot orqali oching: ${BOT_PAYMENT_URL}`
+        : `Бесплатный лимит раскладов за месяц исчерпан.\n\nОткройте оплату в приложении (профиль или paywall) или через бота: ${BOT_PAYMENT_URL}`
 
   const isReadingLimitExceeded = (raw: string) => {
     const msg = String(raw || '').trim()
@@ -1844,7 +2382,8 @@ useEffect(() => {
     if (!value) return '—'
     const d = new Date(value)
     if (!Number.isFinite(d.getTime())) return '—'
-    return d.toLocaleDateString('ru-RU')
+    const locale = appLanguage === 'en' ? 'en-US' : appLanguage === 'uz' ? 'uz-UZ' : 'ru-RU'
+    return d.toLocaleDateString(locale)
   }
 
   const mapReadingError = (raw: string) => {
@@ -1855,10 +2394,23 @@ useEffect(() => {
     if (isReadingLimitExceeded(msg)) {
       return readingLimitMessage
     }
-    if (/401|403/i.test(msg)) return 'Сессия устарела. Перезапустите мини-приложение и попробуйте снова.'
-    if (/503|service unavailable/i.test(msg)) return 'AI-сервис временно недоступен. Повторите через минуту.'
-    if (typeof detail === 'string' && detail.trim()) return detail.trim()
-    return msg || 'Не удалось получить ответ от сервера.'
+    if (/401|403/i.test(msg)) {
+      if (appLanguage === 'en') return 'Session expired. Reopen the mini app and try again.'
+      if (appLanguage === 'uz') return "Sessiya tugagan. Mini ilovani qayta ochib yana urinib ko'ring."
+      return 'Сессия устарела. Перезапустите мини-приложение и попробуйте снова.'
+    }
+    if (/503|service unavailable/i.test(msg)) {
+      if (appLanguage === 'en') return 'AI service is temporarily unavailable. Please retry in a minute.'
+      if (appLanguage === 'uz') return "AI xizmati vaqtincha ishlamayapti. Bir daqiqadan keyin qayta urinib ko'ring."
+      return 'AI-сервис временно недоступен. Повторите через минуту.'
+    }
+    if (typeof detail === 'string' && detail.trim() && appLanguage === 'ru') return detail.trim()
+    if (msg && appLanguage === 'ru') return msg
+    return lx(
+      'Не удалось получить ответ от сервера.',
+      'Could not get a server response.',
+      "Serverdan javob olib bo'lmadi.",
+    )
   }
 
   const [needsMotionPermission, setNeedsMotionPermission] = useState(false)
@@ -1957,9 +2509,9 @@ useEffect(() => {
 
   const indices = useMemo(() => {
     const map = new Map<Topic, number>()
-    TOPICS.forEach((t, i) => map.set(t.id, i))
+    topics.forEach((t, i) => map.set(t.id, i))
     return map
-  }, [])
+  }, [topics])
   const activeIndex = indices.get(topic) ?? 0
   const prevIndex = indices.get(prevTopic) ?? 0
 
@@ -2534,7 +3086,7 @@ useEffect(() => {
 
         const recognition = new SpeechRecognitionCtor()
         speechRecognitionRef.current = recognition
-        recognition.lang = 'ru-RU'
+        recognition.lang = appLanguage === 'en' ? 'en-US' : appLanguage === 'uz' ? 'uz-UZ' : 'ru-RU'
         recognition.continuous = true
         recognition.interimResults = true
         recognition.maxAlternatives = 1
@@ -2633,7 +3185,7 @@ useEffect(() => {
   const shouldAttnSpreads = attnStage === 'spread' && !spread
 
   const renderSafetyNotice = (sourceQuestion: string) => {
-    const note = buildSafetyNotice(sourceQuestion)
+    const note = buildSafetyNotice(sourceQuestion, appLanguage)
     if (!note) return null
     return (
       <div className={`safety-notice ${note.kind === 'crisis' ? 'is-crisis' : 'is-medical'}`} role="note">
@@ -2798,7 +3350,11 @@ useEffect(() => {
                 meaning: String(card?.meaning || ''),
               }))
               const first = cards[0] || {}
-              const fallbackLabel = SPREAD_HISTORY_LABELS[String(p.spread_type || '')] || 'Расклад'
+              const spreadTypeKey = String(p.spread_type || '')
+              const fallbackLabel =
+                SPREAD_HISTORY_LABELS_BY_LANG[appLanguage]?.[spreadTypeKey] ||
+                SPREAD_HISTORY_LABELS_BY_LANG.ru[spreadTypeKey] ||
+                lx('Расклад', 'Spread', 'Yoyilma')
               return {
                 kind: 'reading' as const,
                 reading_id: Number(p.id ?? 0),
@@ -2835,7 +3391,13 @@ useEffect(() => {
         })
       } catch (e: any) {
         if (!mounted) return
-        setHistoryError(e?.message ? String(e.message) : 'Не удалось загрузить историю')
+        setHistoryError(
+          lx(
+            'Не удалось загрузить историю',
+            'Could not load history.',
+            "Tarixni yuklab bo'lmadi.",
+          ),
+        )
       } finally {
         if (!mounted) return
         setHistoryLoading(false)
@@ -2847,7 +3409,7 @@ useEffect(() => {
     return () => {
       mounted = false
     }
-  }, [navTab, token])
+  }, [navTab, token, appLanguage])
 
   useEffect(() => {
     if (navTab !== 'history') setOpenedReadingId(null)
@@ -2860,11 +3422,11 @@ useEffect(() => {
   type ThreeScreen = 'setup' | 'shuffle' | 'result'
   type ThreeQuestionKind = 'open' | 'yesno' | 'advice'
 
-  const THREE_QKINDS: { id: ThreeQuestionKind; label: string;}[] = [
-    { id: 'open', label: 'Отношения'},
-    { id: 'yesno', label: 'Карьера'},
-    { id: 'advice', label: 'Финансы'},
-  ]
+  const THREE_QKINDS: { id: ThreeQuestionKind; label: string}[] = useMemo(() => [
+    { id: 'open', label: lx('Открытый вопрос', 'Open question', 'Ochiq savol') },
+    { id: 'yesno', label: lx('Да / Нет', 'Yes / No', "Ha / Yo'q") },
+    { id: 'advice', label: lx('Совет', 'Advice', 'Maslahat') },
+  ], [appLanguage])
 
   type ThreeCardPos = { x: number; y: number; r: number; s: number; z: number }
   type ThreeCardResult = { idx: number; url: string; name: string; role: string; text: string; isReversed?: boolean }
@@ -2901,7 +3463,7 @@ useEffect(() => {
     const m = new Map<ThreeQuestionKind, number>()
     THREE_QKINDS.forEach((k, i) => m.set(k.id, i))
     return m
-  }, [])
+  }, [THREE_QKINDS])
 
   const threeKindActiveIndex = threeKindIndices.get(threeKind) ?? 0
   const threeKindPrevIndex = threeKindIndices.get(threePrevKind) ?? 0
@@ -2969,12 +3531,15 @@ useEffect(() => {
   type PpfScreen = 'setup' | 'shuffle' | 'result'
   type PpfFocus = 'past' | 'present' | 'future'
 
-  const PPF_FOCUS: { id: PpfFocus; label: string }[] = [
-    { id: 'past', label: 'Прошлое' },
-    { id: 'present', label: 'Настоящее' },
-    { id: 'future', label: 'Будущее' },
-  ]
-  const PPF_SLOT_LABELS = ['Прошлое', 'Настоящее', 'Будущее'] as const
+  const PPF_FOCUS: { id: PpfFocus; label: string }[] = useMemo(() => [
+    { id: 'past', label: lx('Прошлое', 'Past', "O'tmish") },
+    { id: 'present', label: lx('Настоящее', 'Present', 'Hozir') },
+    { id: 'future', label: lx('Будущее', 'Future', 'Kelajak') },
+  ], [appLanguage])
+  const PPF_SLOT_LABELS = useMemo(
+    () => [lx('Прошлое', 'Past', "O'tmish"), lx('Настоящее', 'Present', 'Hozir'), lx('Будущее', 'Future', 'Kelajak')] as const,
+    [appLanguage],
+  )
 
   type PpfCardResult = { idx: number; url: string; name: string; role: string; text: string; isReversed?: boolean }
 
@@ -2993,7 +3558,7 @@ useEffect(() => {
     const m = new Map<PpfFocus, number>()
     PPF_FOCUS.forEach((k, i) => m.set(k.id, i))
     return m
-  }, [])
+  }, [PPF_FOCUS])
 
   const ppfFocusActiveIndex = ppfFocusIndices.get(ppfFocus) ?? 0
   const ppfFocusPrevIndex = ppfFocusIndices.get(ppfPrevFocus) ?? 0
@@ -3121,12 +3686,28 @@ useEffect(() => {
     | ({ kind: 'card_of_day' } & CardHistoryItem)
     | ReadingHistoryItem
 
-  const SPREAD_HISTORY_LABELS: Record<string, string> = {
-    three_cards: 'Расклад по 3 картам',
-    ppf: 'Прошлое • Настоящее • Будущее',
-    decision: 'Принятие решения',
-    custom: 'Пользовательский расклад',
-    photo_analysis: 'Анализ фото',
+  const SPREAD_HISTORY_LABELS_BY_LANG: Record<AppLanguage, Record<string, string>> = {
+    ru: {
+      three_cards: 'Расклад по 3 картам',
+      ppf: 'Прошлое • Настоящее • Будущее',
+      decision: 'Принятие решения',
+      custom: 'Пользовательский расклад',
+      photo_analysis: 'Анализ фото',
+    },
+    en: {
+      three_cards: '3-card spread',
+      ppf: 'Past • Present • Future',
+      decision: 'Decision spread',
+      custom: 'Custom spread',
+      photo_analysis: 'Photo analysis',
+    },
+    uz: {
+      three_cards: '3 kartalik yoyilma',
+      ppf: "O'tmish • Hozir • Kelajak",
+      decision: 'Qaror yoyilmasi',
+      custom: 'Shaxsiy yoyilma',
+      photo_analysis: 'Foto tahlili',
+    },
   }
 
   const [historyLoading, setHistoryLoading] = useState(false)
@@ -3231,10 +3812,10 @@ useEffect(() => {
       return
     }
     const timer = window.setInterval(() => {
-      setCardDayLoaderStep((idx) => (idx + 1) % CARD_DAY_LOADING_STEPS.length)
+      setCardDayLoaderStep((idx) => (idx + 1) % cardDayLoadingSteps.length)
     }, 1200)
     return () => window.clearInterval(timer)
-  }, [cardDayLoading])
+  }, [cardDayLoading, cardDayLoadingSteps.length])
 
   const markHomeTourSeen = () => {
     const tgId = Number(user?.telegram_id || 0)
@@ -3252,11 +3833,11 @@ useEffect(() => {
   }
 
   const nextHomeTourStep = () => {
-    if (homeTourIndex >= HOME_TOUR_STEPS.length - 1) {
+    if (homeTourIndex >= homeTourSteps.length - 1) {
       closeHomeTour()
       return
     }
-    setHomeTourIndex((i) => Math.min(HOME_TOUR_STEPS.length - 1, i + 1))
+    setHomeTourIndex((i) => Math.min(homeTourSteps.length - 1, i + 1))
   }
 
   const prevHomeTourStep = () => {
@@ -3264,7 +3845,7 @@ useEffect(() => {
   }
 
   useEffect(() => {
-    if (authStatus !== 'ready' || showLegalConsent) {
+    if (authStatus !== 'ready') {
       setShowHomeTour(false)
       setHomeTourSpotlight(null)
       return
@@ -3280,11 +3861,11 @@ useEffect(() => {
     if (seen) return
     setHomeTourIndex(0)
     setShowHomeTour(true)
-  }, [authStatus, showLegalConsent, view, navTab, user?.telegram_id])
+  }, [authStatus, view, navTab, user?.telegram_id])
 
   useEffect(() => {
     if (!showHomeTour || view !== 'home' || navTab !== 'main') return
-    const step = HOME_TOUR_STEPS[homeTourIndex]
+    const step = homeTourSteps[homeTourIndex]
     if (!step) return
     const target = getHomeTourTarget(step.id)
     if (!target) return
@@ -3300,7 +3881,7 @@ useEffect(() => {
       setHomeTourSpotlight(null)
       return
     }
-    const step = HOME_TOUR_STEPS[homeTourIndex]
+    const step = homeTourSteps[homeTourIndex]
     if (!step) {
       setHomeTourSpotlight(null)
       return
@@ -3744,7 +4325,15 @@ useEffect(() => {
       }
       img.onerror = () => {
         URL.revokeObjectURL(url)
-        reject(new Error('Не удалось прочитать изображение.'))
+        reject(
+          new Error(
+            lx(
+              'Не удалось прочитать изображение.',
+              'Could not read image.',
+              "Rasmni o'qib bo'lmadi.",
+            ),
+          ),
+        )
       }
       img.src = url
     })
@@ -3804,21 +4393,60 @@ useEffect(() => {
 
   const mapPhotoError = (raw: string) => {
     const msg = (raw || '').trim()
-    if (!msg) return 'Не удалось получить ответ от AI.'
+    if (!msg) {
+      return lx(
+        'Не удалось получить ответ от AI.',
+        'Could not get a response from AI.',
+        "AI'dan javob olib bo'lmadi.",
+      )
+    }
     const parsed = readBackendErrorDetail(msg)
     const detail = parsed?.detail
     if (isReadingLimitExceeded(msg)) {
       return readingLimitMessage
     }
-    if (/401|403/i.test(msg)) return 'Сессия устарела. Перезапустите мини-приложение и попробуйте снова.'
-    if (/413|too large/i.test(msg)) return 'Фото слишком большое. Выберите более лёгкое изображение.'
-    if (/415|unsupported/i.test(msg)) return 'Формат фото не поддерживается. Лучше использовать JPG или PNG.'
-    if (/503|service unavailable/i.test(msg)) return 'AI-сервис временно недоступен. Повторите через минуту.'
-    if (/load failed|failed to fetch|networkerror/i.test(msg)) {
-      return 'Не удалось отправить фото на сервер. Проверьте интернет и попробуйте ещё раз.'
+    if (/401|403/i.test(msg)) {
+      return lx(
+        'Сессия устарела. Перезапустите мини-приложение и попробуйте снова.',
+        'Session expired. Reopen the mini app and try again.',
+        "Sessiya tugagan. Mini ilovani qayta ochib yana urinib ko'ring.",
+      )
     }
-    if (typeof detail === 'string' && detail.trim()) return detail.trim()
-    return msg
+    if (/413|too large/i.test(msg)) {
+      return lx(
+        'Фото слишком большое. Выберите более лёгкое изображение.',
+        'Image is too large. Choose a lighter file.',
+        "Rasm juda katta. Kichikroq faylni tanlang.",
+      )
+    }
+    if (/415|unsupported/i.test(msg)) {
+      return lx(
+        'Формат фото не поддерживается. Лучше использовать JPG или PNG.',
+        'Image format is not supported. Use JPG or PNG.',
+        "Rasm formati qo'llab-quvvatlanmaydi. JPG yoki PNG ishlating.",
+      )
+    }
+    if (/503|service unavailable/i.test(msg)) {
+      return lx(
+        'AI-сервис временно недоступен. Повторите через минуту.',
+        'AI service is temporarily unavailable. Retry in a minute.',
+        "AI xizmati vaqtincha ishlamayapti. Bir daqiqadan so'ng urinib ko'ring.",
+      )
+    }
+    if (/load failed|failed to fetch|networkerror/i.test(msg)) {
+      return lx(
+        'Не удалось отправить фото на сервер. Проверьте интернет и попробуйте ещё раз.',
+        'Could not send image to server. Check connection and try again.',
+        "Rasm serverga yuborilmadi. Internetni tekshirib, qayta urinib ko'ring.",
+      )
+    }
+    if (typeof detail === 'string' && detail.trim() && appLanguage === 'ru') return detail.trim()
+    if (msg && appLanguage === 'ru') return msg
+    return lx(
+      'Не удалось получить ответ от AI.',
+      'Could not get a response from AI.',
+      "AI'dan javob olib bo'lmadi.",
+    )
   }
 
   const normalizePhotoCards = (raw: any): PhotoCardItem[] => {
@@ -3826,7 +4454,11 @@ useEffect(() => {
     return raw.slice(0, 10).map((card: any, idx: number) => {
       const cardIndex = Number(card?.card_index)
       const confRaw = Number(card?.confidence)
-      const fallbackTitle = String(card?.title || card?.position || `Карта ${idx + 1}`).trim()
+      const fallbackTitle = String(
+        card?.title ||
+          card?.position ||
+          (appLanguage === 'en' ? `Card ${idx + 1}` : appLanguage === 'uz' ? `Karta ${idx + 1}` : `Карта ${idx + 1}`)
+      ).trim()
       const fallbackName = String(card?.card_name || card?.title || card?.position || '').trim()
       return {
         position: String(card?.position || '').trim(),
@@ -3842,7 +4474,15 @@ useEffect(() => {
 
   const assessPhotoDetection = (cards: PhotoCardItem[]) => {
     if (!cards.length) {
-      return { ok: false as const, reason: 'Карты не распознаны. Попробуйте сделать фото сверху при хорошем свете.' }
+      return {
+        ok: false as const,
+        reason:
+          appLanguage === 'en'
+            ? 'Cards were not recognized. Try taking a top-down photo in good light.'
+            : appLanguage === 'uz'
+              ? "Kartalar aniqlanmadi. Yaxshi yorug'likda yuqoridan suratga olib ko'ring."
+              : 'Карты не распознаны. Попробуйте сделать фото сверху при хорошем свете.',
+      }
     }
 
     const known = cards.filter((card) => {
@@ -3858,9 +4498,39 @@ useEffect(() => {
   const buildPhotoFallbackText = (cards: PhotoCardItem[], questionText: string) => {
     const cardsLine = cards
       .slice(0, 4)
-      .map((card) => String(card.card_name || card.title || card.position || 'Карта').trim())
+      .map((card) =>
+        String(card.card_name || card.title || card.position || (appLanguage === 'en' ? 'Card' : appLanguage === 'uz' ? 'Karta' : 'Карта')).trim()
+      )
       .filter(Boolean)
       .join(', ')
+    if (appLanguage === 'en') {
+      const main = String(questionText || '').trim()
+        ? `For your question, the card combination (${cardsLine || 'this spread'}) suggests choosing a steadier line of action.`
+        : `The card combination (${cardsLine || 'this spread'}) shows a period of reviewing priorities and inner alignment.`
+      return [
+        '## General direction',
+        main,
+        '',
+        '## Recommendations',
+        '- Separate facts from anxious scenarios and avoid rushed decisions.',
+        '- Pick one concrete step you can realistically do today.',
+        '- Keep a calm and consistent pace for the next 24 hours.',
+      ].join('\n')
+    }
+    if (appLanguage === 'uz') {
+      const main = String(questionText || '').trim()
+        ? `Savolingiz bo'yicha kartalar uyg'unligi (${cardsLine || 'shu yoyilma'}) yanada barqaror harakat yo'lini tanlash kerakligini ko'rsatmoqda.`
+        : `Kartalar uyg'unligi (${cardsLine || 'shu yoyilma'}) ustuvorliklarni qayta ko'rib chiqish va ichki moslashuv davrini ko'rsatadi.`
+      return [
+        "## Umumiy yo'nalish",
+        main,
+        '',
+        '## Tavsiyalar',
+        "- Faktlarni xavotirli taxminlardan ajrating va shoshma-shosharlik bilan qaror qabul qilmang.",
+        "- Bugun amalga oshirish mumkin bo'lgan bitta aniq qadamni tanlang.",
+        '- Keyingi 24 soatda xotirjam va izchil sur’atni saqlang.',
+      ].join('\n')
+    }
     const main = String(questionText || '').trim()
       ? `По вашему вопросу сочетание карт (${cardsLine || 'этот расклад'}) показывает необходимость выбрать более устойчивую линию действий.`
       : `По сочетанию карт (${cardsLine || 'этот расклад'}) видно, что вы в моменте пересмотра приоритетов и внутренней настройки.`
@@ -3898,9 +4568,17 @@ useEffect(() => {
     const layout = buildPhotoFanLayout(source.length, compact)
     const sizeClass = source.length >= 8 ? 'is-dense' : source.length >= 5 ? 'is-mid' : 'is-wide'
     return (
-      <div className={`photo-cards-fan ${compact ? 'is-compact' : ''} ${sizeClass}`.trim()} aria-label="Распознанные карты">
+      <div
+        className={`photo-cards-fan ${compact ? 'is-compact' : ''} ${sizeClass}`.trim()}
+        aria-label={appLanguage === 'en' ? 'Recognized cards' : appLanguage === 'uz' ? 'Aniqlangan kartalar' : 'Распознанные карты'}
+      >
         {source.map((card, idx) => {
-          const name = String(card.card_name || card.title || card.position || `Карта ${idx + 1}`).trim()
+          const name = String(
+            card.card_name ||
+              card.title ||
+              card.position ||
+              (appLanguage === 'en' ? `Card ${idx + 1}` : appLanguage === 'uz' ? `Karta ${idx + 1}` : `Карта ${idx + 1}`)
+          ).trim()
           const cardIndex = Number(card.card_index)
           const imageSrc =
             Number.isFinite(cardIndex) && cardIndex >= 0 && cardIndex < FRONT_CARD_URLS.length
@@ -3934,14 +4612,26 @@ useEffect(() => {
     if (photoBusy) return
     if (!token) {
       setPhotoStep('error')
-      setPhotoError('Нужен вход через Telegram, чтобы отправить фото на анализ.')
+      setPhotoError(
+        lx(
+          'Нужен вход через Telegram, чтобы отправить фото на анализ.',
+          'Telegram sign-in is required to analyze photos.',
+          "Rasmni tahlil qilish uchun Telegram orqali kirish kerak.",
+        ),
+      )
       return
     }
 
     const sourceFile = incomingFile || photoFile
     if (!sourceFile) {
       setPhotoStep('error')
-      setPhotoError('Выберите фото расклада (из галереи или сделайте снимок).')
+      setPhotoError(
+        lx(
+          'Выберите фото расклада (из галереи или сделайте снимок).',
+          'Choose a spread photo (from gallery or camera).',
+          "Yoyilma rasmini tanlang (galereyadan yoki kameradan).",
+        ),
+      )
       return
     }
 
@@ -4066,7 +4756,13 @@ useEffect(() => {
 
     const followText = String(photoFollowupQuestion || '').trim()
     if (!followText) {
-      setPhotoFollowupError('Введите уточняющий вопрос.')
+      setPhotoFollowupError(
+        lx(
+          'Введите уточняющий вопрос.',
+          'Enter a follow-up question.',
+          "Aniqlashtiruvchi savol kiriting.",
+        ),
+      )
       return
     }
 
@@ -4123,7 +4819,14 @@ useEffect(() => {
 
   const photoCardsLabel = photoDetectedCards
     .slice(0, 10)
-    .map((card, idx) => String(card.card_name || card.title || card.position || `Карта ${idx + 1}`).trim())
+    .map((card, idx) =>
+      String(
+        card.card_name ||
+          card.title ||
+          card.position ||
+          lx(`Карта ${idx + 1}`, `Card ${idx + 1}`, `Karta ${idx + 1}`),
+      ).trim(),
+    )
     .filter(Boolean)
     .join(' • ')
 
@@ -4153,6 +4856,16 @@ useEffect(() => {
       .replace(/\s+/g, ' ')
       .trim()
   }
+
+  const withReversedLabel = (name: string, isReversed: boolean) =>
+    isReversed ? `${name}${lx(' (перевёрнутая)', ' (reversed)', ' (teskari)')}` : name
+
+  const threeRoleLabels = useMemo(
+    () =>
+      [lx('Карта 1', 'Card 1', '1-karta'), lx('Карта 2', 'Card 2', '2-karta'), lx('Карта 3', 'Card 3', '3-karta')] as const,
+    [appLanguage],
+  )
+  const ppfRoleLabels = PPF_SLOT_LABELS
 
   const pickUniqueIndexes = (n: number, max: number) => {
     const set = new Set<number>()
@@ -4184,7 +4897,6 @@ useEffect(() => {
   }
 
   const buildThreeCardsPreview = (): ThreeCardResult[] => {
-    const roles = ['Карта 1', 'Карта 2', 'Карта 3']
     const idxs = pickUniqueIndexes(3, FRONT_CARD_URLS.length || 78)
     return idxs.map((idx, i) => {
       const url = FRONT_CARD_URLS[idx] || backCardImg
@@ -4193,8 +4905,8 @@ useEffect(() => {
       return {
         idx,
         url,
-        name: isReversed ? `${baseName} (перевёрнутая)` : baseName,
-        role: roles[i] || `Карта ${i + 1}`,
+        name: withReversedLabel(baseName, isReversed),
+        role: threeRoleLabels[i] || lx(`Карта ${i + 1}`, `Card ${i + 1}`, `${i + 1}-karta`),
         text: '',
         isReversed,
       }
@@ -4202,7 +4914,6 @@ useEffect(() => {
   }
 
   const buildThreeCardsMock = (): ThreeCardResult[] => {
-    const roles = ['Карта 1', 'Карта 2', 'Карта 3']
     const idxs = pickUniqueIndexes(3, FRONT_CARD_URLS.length || 78)
 
     return idxs.map((idx, i) => {
@@ -4211,12 +4922,24 @@ useEffect(() => {
 
       const text =
         threeKind === 'yesno'
-          ? 'Ответ будет подтянут с бэкенда. Сейчас это mock.\n\nСфокусируйтесь на ощущениях от карты и переформулируйте вопрос, если нужно.'
+          ? lx(
+              'Ответ будет подтянут с бэкенда. Сейчас это mock.\n\nСфокусируйтесь на ощущениях от карты и переформулируйте вопрос, если нужно.',
+              'Answer will be loaded from backend. This is a mock now.\n\nFocus on your first feeling from the card and rephrase the question if needed.',
+              "Javob backenddan olinadi. Hozir bu mock.\n\nKartadan olgan birinchi hisingizga e'tibor bering va kerak bo'lsa savolni qayta yozing.",
+            )
           : threeKind === 'advice'
-          ? 'Совет будет подтянут с бэкенда. Сейчас это mock.\n\nПодумайте: какой маленький шаг вы можете сделать уже сегодня?'
-          : 'Интерпретация будет подтянута с бэкенда. Сейчас это mock.\n\nЗаметьте эмоции и ассоциации — это уже часть ответа.'
+          ? lx(
+              'Совет будет подтянут с бэкенда. Сейчас это mock.\n\nПодумайте: какой маленький шаг вы можете сделать уже сегодня?',
+              'Advice will be loaded from backend. This is a mock now.\n\nThink: what small step can you take today?',
+              "Maslahat backenddan olinadi. Hozir bu mock.\n\nO'ylab ko'ring: bugun qaysi kichik qadamni qo'ya olasiz?",
+            )
+          : lx(
+              'Интерпретация будет подтянута с бэкенда. Сейчас это mock.\n\nЗаметьте эмоции и ассоциации — это уже часть ответа.',
+              'Interpretation will be loaded from backend. This is a mock now.\n\nNotice your emotions and associations, this is already part of the answer.',
+              "Talqin backenddan olinadi. Hozir bu mock.\n\nHissiyot va assotsiatsiyalarni payqang, bu ham javobning bir qismi.",
+            )
 
-      return { idx, url, name, role: roles[i], text, isReversed: false }
+      return { idx, url, name, role: threeRoleLabels[i], text, isReversed: false }
     })
   }
 
@@ -4447,7 +5170,6 @@ useEffect(() => {
   // ---------------------------------------------------------------------------------------------
 
   const buildPpfCardsMock = (): PpfCardResult[] => {
-    const roles = ['Прошлое', 'Настоящее', 'Будущее']
     const idxs = pickUniqueIndexes(3, FRONT_CARD_URLS.length || 78)
 
     return idxs.map((idx, i) => {
@@ -4456,22 +5178,24 @@ useEffect(() => {
 
       const focusLine =
         ppfFocus === 'past'
-          ? 'Фокус: прошлое — что привело к ситуации?'
+          ? lx('Фокус: прошлое — что привело к ситуации?', 'Focus: past - what led to this situation?', "Fokus: o'tmish - bu holatga nima olib keldi?")
           : ppfFocus === 'present'
-          ? 'Фокус: настоящее — что происходит прямо сейчас?'
-          : 'Фокус: будущее — куда ведёт текущая динамика?'
+          ? lx('Фокус: настоящее — что происходит прямо сейчас?', 'Focus: present - what is happening right now?', 'Fokus: hozir - ayni paytda nima bo‘lyapti?')
+          : lx('Фокус: будущее — куда ведёт текущая динамика?', 'Focus: future - where is current dynamics leading?', 'Fokus: kelajak - hozirgi yo‘nalish qayerga olib boryapti?')
 
       const text =
         `${focusLine}\n\n` +
-        'Интерпретация будет подтянута с бэкенда. Сейчас это mock.\n\n' +
-        'Смотрите на символы, ощущения и первую ассоциацию — это часто самый точный ответ.'
+        lx(
+          'Интерпретация будет подтянута с бэкенда. Сейчас это mock.\n\nСмотрите на символы, ощущения и первую ассоциацию — это часто самый точный ответ.',
+          'Interpretation will be loaded from backend. This is a mock now.\n\nWatch symbols, feelings and first association - that is often the most precise answer.',
+          "Talqin backenddan olinadi. Hozir bu mock.\n\nBelgilar, hislar va birinchi assotsiatsiyaga e'tibor bering - ko'pincha eng aniq javob shu bo'ladi.",
+        )
 
-      return { idx, url, name, role: roles[i], text, isReversed: false }
+      return { idx, url, name, role: ppfRoleLabels[i], text, isReversed: false }
     })
   }
 
   const buildPpfCardsPreview = (): PpfCardResult[] => {
-    const roles = ['Прошлое', 'Настоящее', 'Будущее']
     const idxs = pickUniqueIndexes(3, FRONT_CARD_URLS.length || 78)
     return idxs.map((idx, i) => {
       const url = FRONT_CARD_URLS[idx] || backCardImg
@@ -4480,8 +5204,8 @@ useEffect(() => {
       return {
         idx,
         url,
-        name: isReversed ? `${baseName} (перевёрнутая)` : baseName,
-        role: roles[i] || '',
+        name: withReversedLabel(baseName, isReversed),
+        role: ppfRoleLabels[i] || '',
         text: '',
         isReversed,
       }
@@ -5003,7 +5727,10 @@ useEffect(() => {
   type DecisionScreen = 'shuffle' | 'result'
   type DecisionCardResult = { idx: number; url: string; name: string; role: string; text: string; isReversed?: boolean }
 
-  const DECISION_SLOT_LABELS = ['Вариант A', 'Вариант B'] as const
+  const DECISION_SLOT_LABELS = useMemo(
+    () => [lx('Вариант A', 'Option A', 'A varianti'), lx('Вариант B', 'Option B', 'B varianti')] as const,
+    [appLanguage],
+  )
   const DECISION_FAN_CARDS = 9
   const DECISION_TOP_INDEX = DECISION_FAN_CARDS - 1
 
@@ -5118,7 +5845,7 @@ useEffect(() => {
       return {
         idx,
         url,
-        name: isReversed ? `${baseName} (перевёрнутая)` : baseName,
+        name: withReversedLabel(baseName, isReversed),
         role: DECISION_SLOT_LABELS[i] || '',
         text: '',
         isReversed,
@@ -5152,19 +5879,18 @@ useEffect(() => {
     void refreshBilling(token)
     // Save the description from the backend so we can display it in the UI
     setThreeDesc(String(reading?.description ?? ''))
-    const roles = ['Карта 1', 'Карта 2', 'Карта 3']
     const mapped = (reading.cards || []).slice(0, 3).map((c: any, i: number) => {
       const idx = Number(c.card_index ?? 0)
       const url = FRONT_CARD_URLS[idx] || backCardImg
       const isReversed = Boolean(c?.is_reversed)
       const baseName = String(c.card_name || cardNameFromUrl(url))
-      const name = isReversed ? `${baseName} (перевёрнутая)` : baseName
+      const name = withReversedLabel(baseName, isReversed)
       const text = String(c.meaning || '').trim() || ''
       return {
         idx,
         url,
         name,
-        role: roles[i] || `Карта ${i + 1}`,
+        role: threeRoleLabels[i] || lx(`Карта ${i + 1}`, `Card ${i + 1}`, `${i + 1}-karta`),
         text,
         isReversed,
       }
@@ -5193,26 +5919,25 @@ useEffect(() => {
     void refreshBilling(token)
     // Save description returned from the backend
     setPpfDesc(String(reading?.description ?? ''))
-    const roles = ['Прошлое', 'Настоящее', 'Будущее']
     const focusLine =
       ppfFocus === 'past'
-        ? 'Фокус: прошлое — что привело к ситуации?'
+        ? lx('Фокус: прошлое — что привело к ситуации?', 'Focus: past - what led to this situation?', "Fokus: o'tmish - bu holatga nima olib keldi?")
         : ppfFocus === 'present'
-        ? 'Фокус: настоящее — что происходит прямо сейчас?'
-        : 'Фокус: будущее — куда ведёт текущая динамика?'
+        ? lx('Фокус: настоящее — что происходит прямо сейчас?', 'Focus: present - what is happening right now?', 'Fokus: hozir - ayni paytda nima bo‘lyapti?')
+        : lx('Фокус: будущее — куда ведёт текущая динамика?', 'Focus: future - where is current dynamics leading?', 'Fokus: kelajak - hozirgi yo‘nalish qayerga olib boryapti?')
     const mapped = (reading.cards || []).slice(0, 3).map((c: any, i: number) => {
       const idx = Number(c.card_index ?? 0)
       const url = FRONT_CARD_URLS[idx] || backCardImg
       const isReversed = Boolean(c?.is_reversed)
       const baseName = String(c.card_name || cardNameFromUrl(url))
-      const name = isReversed ? `${baseName} (перевёрнутая)` : baseName
+      const name = withReversedLabel(baseName, isReversed)
       const meaning = String(c.meaning || '').trim() || ''
       const text = `${focusLine}\n\n${meaning}`
       return {
         idx,
         url,
         name,
-        role: roles[i] || '',
+        role: ppfRoleLabels[i] || '',
         text,
         isReversed,
       }
@@ -5229,7 +5954,8 @@ useEffect(() => {
     if (!token) return previewCards && previewCards.length ? previewCards : buildDecisionCardsPreview()
 
     const effectiveQuestion =
-      String(questionText ?? decisionQuestion ?? question).trim() || 'Выбор между вариантом A и вариантом B'
+      String(questionText ?? decisionQuestion ?? question).trim() ||
+      lx('Выбор между вариантом A и вариантом B', 'Choice between option A and option B', 'A varianti va B varianti o‘rtasidagi tanlov')
 
     const params = {
       spread_type: 'decision' as const,
@@ -5247,7 +5973,7 @@ useEffect(() => {
       const url = FRONT_CARD_URLS[idx] || backCardImg
       const isReversed = Boolean(c?.is_reversed)
       const baseName = String(c.card_name || cardNameFromUrl(url))
-      const name = isReversed ? `${baseName} (перевёрнутая)` : baseName
+      const name = withReversedLabel(baseName, isReversed)
       const text = String(c.meaning || '').trim() || ''
       return {
         idx,
@@ -6182,19 +6908,19 @@ useEffect(() => {
   const profileName =
     user?.first_name || user?.last_name
       ? `${user?.first_name || ''}${user?.last_name ? ` ${user.last_name}` : ''}`.trim()
-      : 'Профиль'
+      : t('profile')
   const profileUsername = user?.username ? `@${user.username}` : '@username'
   const freeLimit = Math.max(1, Number(billing?.free_limit ?? 5))
   const freeLeft = Math.max(0, Number(billing?.free_left ?? 0))
   const subActive = !!billing?.has_active_subscription
   const subLabel = subActive
-    ? `Активна до ${formatRuDate(billing?.subscription_until)}`
-    : 'Не активна'
-  const currentLegalDoc = activeLegalDoc ? LEGAL_DOCS[activeLegalDoc] : null
+    ? lx(`Активна до ${formatRuDate(billing?.subscription_until)}`, `Active until ${formatRuDate(billing?.subscription_until)}`, `${formatRuDate(billing?.subscription_until)} gacha faol`)
+    : lx('Не активна', 'Inactive', 'Faol emas')
+  const currentLegalDoc = activeLegalDoc ? legalDocs[activeLegalDoc] : null
   const canStartReading = !!spread
   const showHomePrimaryCta = view === 'home' && navTab === 'main'
   const isHomeTourActive = showHomeTour && showHomePrimaryCta
-  const homeTourStep = isHomeTourActive ? HOME_TOUR_STEPS[Math.max(0, Math.min(homeTourIndex, HOME_TOUR_STEPS.length - 1))] : null
+  const homeTourStep = isHomeTourActive ? homeTourSteps[Math.max(0, Math.min(homeTourIndex, homeTourSteps.length - 1))] : null
   const homeTourStepId = homeTourStep?.id || null
   const homeTourSpotlightStyle = homeTourSpotlight
     ? {
@@ -6218,9 +6944,9 @@ useEffect(() => {
         paddingBottom: `calc(${92 + Math.max(0, keyboardInset)}px + env(safe-area-inset-bottom, 0px))`,
       }
     : undefined
-  const billingCountryLabel = BILLING_COUNTRIES.find((item) => item.code === billingFlowCountry)?.label || '—'
+  const billingCountryLabel = billingCountries.find((item) => item.code === billingFlowCountry)?.label || '—'
   const billingPlans = BILLING_PLAN_KEYS_BY_COUNTRY[billingFlowCountry] || BILLING_PLAN_KEYS_BY_COUNTRY.ru
-  const billingSelectedPlan = billingFlowPlan ? BILLING_PLAN_META[billingFlowPlan] : null
+  const billingSelectedPlan = billingFlowPlan ? billingPlanMeta[billingFlowPlan] : null
   const billingStepNumber = billingFlowStep === 'country' ? 1 : billingFlowStep === 'plan' ? 2 : 3
   const inAppBillingEnabled = true
   const combinedPaymentStatus = clickStatusText || sbpStatusText
@@ -6239,8 +6965,8 @@ useEffect(() => {
   <div className="auth-overlay" role="status" aria-live="polite">
     <div className="auth-overlay__card">
       <div className="auth-overlay__ring" aria-hidden="true" />
-      <div className="auth-overlay__title">Загрузка приложения…</div>
-      <div className="auth-overlay__sub">Пожалуйста, подождите пару секунд</div>
+      <div className="auth-overlay__title">{t('loadingApp')}</div>
+      <div className="auth-overlay__sub">{t('waitSeconds')}</div>
     </div>
   </div>
 )}
@@ -6270,8 +6996,8 @@ useEffect(() => {
         boxShadow: '0 18px 60px rgba(0,0,0,0.35)',
       }}
     >
-      <div style={{ fontWeight: 700, marginBottom: 8 }}>Нужна авторизация</div>
-      <div style={{ fontSize: 13, opacity: 0.85, lineHeight: 1.35 }}>{authError || 'Ошибка авторизации.'}</div>
+      <div style={{ fontWeight: 700, marginBottom: 8 }}>{t('authRequired')}</div>
+      <div style={{ fontSize: 13, opacity: 0.85, lineHeight: 1.35 }}>{authError || t('authErrorDefault')}</div>
 
       <div style={{ display: 'flex', gap: 10, marginTop: 14, flexWrap: 'wrap' }}>
         <button
@@ -6285,7 +7011,7 @@ useEffect(() => {
             setAuthRetryNonce((n) => n + 1)
           }}
         >
-          Повторить
+          {t('retry')}
         </button>
 
         <button
@@ -6298,51 +7024,9 @@ useEffect(() => {
             } catch {}
           }}
         >
-          Закрыть
+          {t('close')}
         </button>
       </div>
-    </div>
-  </div>
-)}
-
-{authStatus === 'ready' && showLegalConsent && (
-  <div className="auth-overlay legal-consent" role="dialog" aria-modal="true" aria-label="Согласие с документами">
-    <div className="auth-overlay__card legal-consent__card">
-      <div className="legal-consent__title">Перед началом использования</div>
-      <div className="legal-consent__text">
-        Подтвердите согласие с документами, чтобы продолжить работу в AI Taro.
-      </div>
-
-      <div className="legal-consent__links">
-        <button type="button" className="legal-consent__link" onClick={() => openLegalDoc('terms')}>
-          📄 Пользовательское соглашение
-        </button>
-        <button type="button" className="legal-consent__link" onClick={() => openLegalDoc('privacy')}>
-          🔐 Политика конфиденциальности
-        </button>
-      </div>
-
-      <label className="legal-consent__check">
-        <input
-          type="checkbox"
-          checked={legalConsentChecked}
-          onChange={(e) => setLegalConsentChecked(e.target.checked)}
-        />
-        <span>Соглашаюсь с Пользовательским соглашением и Политикой конфиденциальности</span>
-      </label>
-
-      <button
-        type="button"
-        className="glass-cta legal-consent__accept"
-        disabled={!legalConsentChecked}
-        onClick={acceptLegalConsent}
-      >
-        <span className="glass-cta__inner">
-          <span className="glass-cta__rim" aria-hidden="true" />
-          <span className="glass-cta__text">Согласиться и продолжить</span>
-          <span className="glass-cta__spark" aria-hidden="true" />
-        </span>
-      </button>
     </div>
   </div>
 )}
@@ -6352,7 +7036,7 @@ useEffect(() => {
     className="home-tour-overlay"
     role="dialog"
     aria-modal="true"
-    aria-label="Быстрый гид по приложению"
+    aria-label={lx('Быстрый гид по приложению', 'Quick app guide', "Ilova bo'yicha tezkor yo'riqnoma")}
     onClick={nextHomeTourStep}
   >
     <div className="home-tour-overlay__veil" />
@@ -6372,7 +7056,7 @@ useEffect(() => {
           type="button"
           className="home-tour-card__close"
           onClick={closeHomeTour}
-          aria-label="Пропустить инструкцию"
+          aria-label={lx('Пропустить инструкцию', 'Skip tutorial', "Yo'riqnomani o'tkazib yuborish")}
         >
           ×
         </button>
@@ -6380,7 +7064,7 @@ useEffect(() => {
       <div className="home-tour-card__text">{homeTourStep.text}</div>
       <div className="home-tour-card__foot">
         <div className="home-tour-card__step">
-          {homeTourIndex + 1} из {HOME_TOUR_STEPS.length}
+          {homeTourIndex + 1} / {homeTourSteps.length}
         </div>
         <div className="home-tour-card__actions">
           {homeTourIndex > 0 && (
@@ -6389,7 +7073,7 @@ useEffect(() => {
               className="glassbtn home-tour-card__prev"
               onClick={prevHomeTourStep}
             >
-              Назад
+              {lx('Назад', 'Back', 'Orqaga')}
             </button>
           )}
           <button
@@ -6397,14 +7081,14 @@ useEffect(() => {
             className="glassbtn home-tour-card__skip"
             onClick={closeHomeTour}
           >
-            Пропустить
+            {lx('Пропустить', 'Skip', "O'tkazib yuborish")}
           </button>
           <button
             type="button"
             className="glassbtn home-tour-card__next"
             onClick={nextHomeTourStep}
           >
-            {homeTourIndex >= HOME_TOUR_STEPS.length - 1 ? 'Готово' : 'Далее'}
+            {homeTourIndex >= homeTourSteps.length - 1 ? lx('Готово', 'Done', 'Tayyor') : lx('Далее', 'Next', 'Keyingi')}
           </button>
         </div>
       </div>
@@ -6434,19 +7118,19 @@ useEffect(() => {
                         goToMainTab()
                       }
                     }}
-                    aria-label={navTab !== 'main' ? 'Вернуться на главную' : undefined}
+                    aria-label={navTab !== 'main' ? lx('Вернуться на главную', 'Back to home', 'Bosh sahifaga qaytish') : undefined}
                   >
                     <h1>AI Taro</h1>
-                    <p>Мудрость карт и искусственного интеллекта</p>
+                    <p>{t('appSubtitle')}</p>
                   </div>
 
-                  <div className="home-head__actions" aria-label="Навигация">
+                  <div className="home-head__actions" aria-label={lx('Навигация', 'Navigation', 'Navigatsiya')}>
                     <button
                       type="button"
                       className="home-head__action"
                       onClick={toggleHistoryTab}
-                      aria-label="Открыть историю"
-                      title="История"
+                      aria-label={t('history')}
+                      title={t('history')}
                     >
                       <svg viewBox="0 0 24 24" aria-hidden="true">
                         <path d="M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20Z" fill="none" stroke="currentColor" strokeWidth="1.8" />
@@ -6458,8 +7142,8 @@ useEffect(() => {
                       type="button"
                       className="home-head__action home-head__action--avatar"
                       onClick={toggleProfileTab}
-                      aria-label="Открыть профиль"
-                      title="Профиль"
+                      aria-label={t('profile')}
+                      title={t('profile')}
                     >
                       {user?.photo_url ? (
                         <img src={user.photo_url} alt="" />
@@ -6471,7 +7155,7 @@ useEffect(() => {
                 </>
               ) : (
                 <div className="home-head__center-title" aria-live="polite">
-                  {navTab === 'profile' ? 'Профиль' : 'История'}
+                  {navTab === 'profile' ? t('profile') : t('history')}
                 </div>
               )}
             </div>
@@ -6491,10 +7175,10 @@ useEffect(() => {
                     <div className="card-day__rim" aria-hidden="true" />
                     <div className="card-day__spark" aria-hidden="true" />
                     <div className="card-day__text">
-                      <div className="card-day__title">Карта дня</div>
+                      <div className="card-day__title">{t('cardOfDay')}</div>
                       <div className="card-day__subtitle">
-                        <span>Ежедневное руководство</span>
-                        <span>от Вселенной</span>
+                        <span>{t('dailyGuideLine1')}</span>
+                        <span>{t('dailyGuideLine2')}</span>
                       </div>
                     </div>
                     <div className="card-day__media" aria-hidden="true">
@@ -6513,10 +7197,10 @@ useEffect(() => {
                     <div className="card-day__rim" aria-hidden="true" />
                     <div className="card-day__spark" aria-hidden="true" />
                     <div className="card-day__text">
-                    <div className="card-day__title">Фото расклада</div>
+                    <div className="card-day__title">{t('photoSpread')}</div>
                     <div className="card-day__subtitle">
-                      <span>Загрузите снимок расклада</span>
-                      <span>и получите AI-разбор</span>
+                      <span>{t('photoSpreadLine1')}</span>
+                      <span>{t('photoSpreadLine2')}</span>
                     </div>
                   </div>
                     <div className="card-day__media" aria-hidden="true">
@@ -6528,7 +7212,7 @@ useEffect(() => {
                     ref={homeQuestionZoneRef}
                     className={`home-guided-zone ${isHomeTourActive && homeTourStepId === 'question_zone' ? 'is-onboarding-focus' : ''}`}
                   >
-                    <h2 className="home-section-title">Задайте ваш вопрос</h2>
+                    <h2 className="home-section-title">{t('askQuestion')}</h2>
 
                     <div
                       className={`ask-wrap ${attnStage === 'question' ? 'is-attn' : ''}`}
@@ -6540,7 +7224,7 @@ useEffect(() => {
                           className="ask-input"
                           value={question}
                           onChange={(e) => setQuestion(e.target.value)}
-                          placeholder="Что вас беспокоит? О чем хотели бы узнать?"
+                          placeholder={t('questionPlaceholder')}
                           enterKeyHint="search"
                           rows={2}
                         />
@@ -6548,28 +7232,30 @@ useEffect(() => {
                           type="button"
                           className={`ask-mic ${isHomeRecording ? 'recording' : ''}`}
                           onClick={() => void toggleRecording('home')}
-                          aria-label={isHomeRecording ? 'Остановить запись' : 'Начать запись'}
-                          title={isHomeRecording ? 'Остановить запись' : 'Записать голосом'}
+                          aria-label={isHomeRecording ? lx('Остановить запись', 'Stop recording', "Yozuvni to'xtatish") : lx('Начать запись', 'Start recording', 'Yozishni boshlash')}
+                          title={isHomeRecording ? lx('Остановить запись', 'Stop recording', "Yozuvni to'xtatish") : lx('Записать голосом', 'Record voice', 'Ovoz yozish')}
                         >
                           <img className="ask-mic__icon" src={micIcon} alt="" aria-hidden="true" />
                         </button>
                       </div>
 
-                      <div className={`ask-hint ${isHomeRecording ? 'is-visible' : ''}`}>Идёт запись… нажмите ещё раз, чтобы остановить</div>
+                      <div className={`ask-hint ${isHomeRecording ? 'is-visible' : ''}`}>
+                        {lx('Идёт запись… нажмите ещё раз, чтобы остановить', 'Recording… tap again to stop', "Yozilmoqda… to'xtatish uchun yana bosing")}
+                      </div>
                     </div>
 
-                    <h2 className="home-section-title">Выберите категорию вопроса</h2>
+                    <h2 className="home-section-title">{t('chooseTopic')}</h2>
 
                     <div
                       className={`seg seg--topics ${isBumping ? 'is-bump' : ''}`}
                       data-bump={bump}
                       style={{
-                        ['--seg-cols' as any]: TOPICS.length,
+                        ['--seg-cols' as any]: topics.length,
                         ['--i' as any]: activeIndex,
                         ['--from' as any]: prevIndex,
                       }}
                       role="tablist"
-                      aria-label="Выбор темы"
+                      aria-label={lx('Выбор темы', 'Topic selection', 'Mavzu tanlash')}
                     >
                       <svg className="seg__svg" aria-hidden="true">
                         <filter id="seg-goo">
@@ -6586,7 +7272,7 @@ useEffect(() => {
 
                       <div className="seg__pill" aria-hidden="true" />
 
-                      {TOPICS.map((t) => (
+                      {topics.map((t) => (
                         <button
                           key={t.id}
                           type="button"
@@ -6600,9 +7286,9 @@ useEffect(() => {
                       ))}
                     </div>
 
-                    <h2 className="home-section-title">Выберите тип расклада</h2>
+                    <h2 className="home-section-title">{t('chooseSpread')}</h2>
                     <div className={`spread-soft-hint ${shouldAttnSpreads ? 'is-visible' : ''}`} aria-live="polite">
-                      Сначала выберите тип расклада
+                      {t('pickSpreadFirst')}
                     </div>
 
                     <div
@@ -6610,7 +7296,7 @@ useEffect(() => {
                       data-attn={shouldAttnSpreads ? attnNonce : undefined}
                       ref={spreadListRef}
                     >
-                      {SPREADS.map((s) => {
+                      {spreads.map((s) => {
                         const isActive = spread === s.id
                         return (
                           <div
@@ -6645,7 +7331,7 @@ useEffect(() => {
                         type="button"
                         className="subtab-back"
                         onClick={goToMainTab}
-                        aria-label="Вернуться на главную"
+                        aria-label={lx('Вернуться на главную', 'Back to home', 'Bosh sahifaga qaytish')}
                       >
                         <span className="subtab-back__arrow" aria-hidden="true">
                           <svg viewBox="0 0 24 24" fill="none">
@@ -6658,21 +7344,27 @@ useEffect(() => {
                             />
                           </svg>
                         </span>
-                        <span className="subtab-back__label">Назад</span>
+                        <span className="subtab-back__label">{lx('Назад', 'Back', 'Orqaga')}</span>
                       </button>
                     </div>
 
                     {!token && (
-                      <div className="history-empty">История доступна после входа через Telegram.</div>
+                      <div className="history-empty">
+                        {appLanguage === 'en'
+                          ? 'History is available after Telegram sign-in.'
+                          : appLanguage === 'uz'
+                            ? "Tarix Telegram orqali kirgandan keyin ko'rinadi."
+                            : 'История доступна после входа через Telegram.'}
+                      </div>
                     )}
 
-                    {token && historyLoading && <div className="history-loading">Загружаем историю...</div>}
+                    {token && historyLoading && <div className="history-loading">{lx('Загружаем историю...', 'Loading history...', 'Tarix yuklanmoqda...')}</div>}
 
                     {token && !!historyError && <div className="history-error">{historyError}</div>}
 
                     {token && !historyLoading && !historyError && history.length === 0 && (
                       <div className="history-empty">
-                        Ваша история только начинается...
+                        {lx('Ваша история только начинается...', 'Your history is just beginning...', "Sizning tarixingiz endi boshlanmoqda...")}
                       </div>
                     )}
 
@@ -6681,21 +7373,22 @@ useEffect(() => {
                         {history.map((it) => {
                           const idx = clamp(it.card_index ?? 0, 0, 77)
                           const img = FRONT_CARD_URLS[idx] || backCardImg
-                          const topicLabel = TOPICS.find((t) => t.id === (it.topic as any))?.label || it.topic
+                          const topicLabel = topics.find((t) => t.id === (it.topic as any))?.label || it.topic
                           const isCardDay = it.kind === 'card_of_day'
                           const isReadingOpen = isCardDay ? false : openedReadingId === it.reading_id
                           const title = isCardDay
-                            ? (it.card_name || 'Карта дня')
-                            : (SPREAD_HISTORY_LABELS[it.spread_type] || 'Расклад')
+                            ? (it.card_name || lx('Карта дня', 'Card of the day', 'Kun kartasi'))
+                            : (SPREAD_HISTORY_LABELS_BY_LANG[appLanguage]?.[it.spread_type] || SPREAD_HISTORY_LABELS_BY_LANG.ru[it.spread_type] || lx('Расклад', 'Spread', 'Yoyilma'))
                           const rawThemeCapsule = String(it.theme_capsule || '').trim()
                           const themeCapsule = isGenericThemeCapsule(rawThemeCapsule) ? '' : rawThemeCapsule
                           const subtitle = themeCapsule
-                            ? `Тема: ${themeCapsule}`
+                            ? `${lx('Тема', 'Theme', 'Mavzu')}: ${themeCapsule}`
                             : `${topicLabel}${it.question ? ` • ${it.question}` : ''}`
                           const when = (() => {
                             const d = new Date(it.created_at)
                             if (!isFinite(d.getTime())) return isCardDay ? it.day_key : ''
-                            return d.toLocaleString('ru-RU', {
+                            const locale = appLanguage === 'en' ? 'en-US' : appLanguage === 'uz' ? 'uz-UZ' : 'ru-RU'
+                            return d.toLocaleString(locale, {
                               day: '2-digit',
                               month: '2-digit',
                               year: 'numeric',
@@ -6704,8 +7397,8 @@ useEffect(() => {
                             })
                           })()
                           const metaPrefix = isCardDay
-                            ? 'Карта дня'
-                            : `${it.cards_count || 0} карт`
+                            ? lx('Карта дня', 'Card of the day', 'Kun kartasi')
+                            : lx(`${it.cards_count || 0} карт`, `${it.cards_count || 0} cards`, `${it.cards_count || 0} karta`)
                           const itemKey = isCardDay
                             ? `${it.kind}:${it.day_key || it.created_at}:${it.card_index}:${it.card_name}`
                             : `${it.kind}:${it.reading_id}:${it.created_at}`
@@ -6732,7 +7425,11 @@ useEffect(() => {
                                   }
                                 }}
                                 aria-expanded={!isCardDay ? isReadingOpen : undefined}
-                                aria-label={isCardDay ? 'Открыть карту дня из истории' : 'Открыть детали расклада из истории'}
+                                aria-label={
+                                  isCardDay
+                                    ? lx('Открыть карту дня из истории', 'Open card of the day from history', 'Tarixdan kun kartasini ochish')
+                                    : lx('Открыть детали расклада из истории', 'Open spread details from history', 'Tarixdan yoyilma tafsilotlarini ochish')
+                                }
                               >
                                 <div className="history-card-media" aria-hidden="true">
                                   <img className="history-card-image" src={img} alt="" />
@@ -6751,7 +7448,7 @@ useEffect(() => {
 
                                 {!isCardDay && (
                                   <div className="history-open-indicator">
-                                    {isReadingOpen ? 'Свернуть' : 'Открыть'}
+                                    {isReadingOpen ? lx('Свернуть', 'Collapse', "Yig'ish") : lx('Открыть', 'Open', 'Ochish')}
                                   </div>
                                 )}
                               </div>
@@ -6761,7 +7458,7 @@ useEffect(() => {
                                   <div className="history-reading-detail__head">
                                     <div className="history-reading-detail__title">{title}</div>
                                   <div className="history-reading-detail__meta">
-                                    {themeCapsule ? `Тема: ${themeCapsule} • ` : ''}
+                                    {themeCapsule ? `${lx('Тема', 'Theme', 'Mavzu')}: ${themeCapsule} • ` : ''}
                                     {topicLabel}
                                     {it.question ? ` • ${it.question}` : ''}
                                     {when ? ` • ${when}` : ''}
@@ -6771,7 +7468,7 @@ useEffect(() => {
                                   <div className="history-reading-cards">
                                     {it.cards.map((card, cardIdx) => {
                                       const cardImage = FRONT_CARD_URLS[clamp(card.card_index ?? 0, 0, 77)] || backCardImg
-                                      const cardLabel = card.title || card.position || `Карта ${cardIdx + 1}`
+                                      const cardLabel = card.title || card.position || lx(`Карта ${cardIdx + 1}`, `Card ${cardIdx + 1}`, `Karta ${cardIdx + 1}`)
                                       return (
                                         <div key={`${itemKey}:card:${cardIdx}`} className="history-reading-card">
                                           <img
@@ -6781,8 +7478,8 @@ useEffect(() => {
                                           />
                                           <div className="history-reading-card__label">{cardLabel}</div>
                                           <div className="history-reading-card__name">
-                                            {card.card_name || `Карта ${cardIdx + 1}`}
-                                            {card.is_reversed ? ' (перевёрнутая)' : ''}
+                                            {card.card_name || lx(`Карта ${cardIdx + 1}`, `Card ${cardIdx + 1}`, `Karta ${cardIdx + 1}`)}
+                                            {card.is_reversed ? lx(' (перевёрнутая)', ' (reversed)', ' (teskari)') : ''}
                                           </div>
                                         </div>
                                       )
@@ -6809,7 +7506,7 @@ useEffect(() => {
                       type="button"
                       className="subtab-back"
                       onClick={goToMainTab}
-                      aria-label="Вернуться на главную"
+                      aria-label={lx('Вернуться на главную', 'Back to home', 'Bosh sahifaga qaytish')}
                     >
                       <span className="subtab-back__arrow" aria-hidden="true">
                         <svg viewBox="0 0 24 24" fill="none">
@@ -6822,7 +7519,7 @@ useEffect(() => {
                           />
                         </svg>
                       </span>
-                      <span className="subtab-back__label">Назад</span>
+                      <span className="subtab-back__label">{lx('Назад', 'Back', 'Orqaga')}</span>
                     </button>
                   </div>
 
@@ -6853,7 +7550,7 @@ useEffect(() => {
                     />
 
                     {!subActive && (
-                      <section className="profile-piece profile-piece--stack" aria-label="Купить подписку">
+                      <section className="profile-piece profile-piece--stack" aria-label={lx('Купить подписку', 'Buy subscription', "Obuna sotib olish")}>
                         <div className="profile-piece__info">
                           <div className="profile-piece__title">
                             <span className="profile-icon profile-icon--piece" aria-hidden="true">
@@ -6862,10 +7559,10 @@ useEffect(() => {
                                 <path d="M12 4.8V3M12 21v-1.8M4.8 12H3M21 12h-1.8" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
                               </svg>
                             </span>
-                            <span>Купить подписку</span>
+                            <span>{lx('Купить подписку', 'Buy subscription', "Obuna sotib olish")}</span>
                           </div>
-                          <div className="profile-piece__meta">Бесплатно в этом месяце: {freeLeft} из {freeLimit}</div>
-                          <div className="profile-piece__submeta">Выберите страну и удобный способ оплаты</div>
+                          <div className="profile-piece__meta">{lx(`Бесплатно в этом месяце: ${freeLeft} из ${freeLimit}`, `Free this month: ${freeLeft} of ${freeLimit}`, `Bu oy bepul: ${freeLeft} / ${freeLimit}`)}</div>
+                          <div className="profile-piece__submeta">{lx('Выберите страну и удобный способ оплаты', 'Choose your country and payment method', "Mamlakat va to'lov usulini tanlang")}</div>
                         </div>
 
                         {inAppBillingEnabled ? (
@@ -6879,7 +7576,7 @@ useEffect(() => {
                                   openBillingFlow('profile')
                                 }}
                               >
-                                Купить подписку
+                                {lx('Купить подписку', 'Buy subscription', "Obuna sotib olish")}
                               </button>
                             </div>
 
@@ -6887,37 +7584,44 @@ useEffect(() => {
                               <div className="profile-piece__checks">
                                 <button
                                   type="button"
-                                  className="profile-piece__check"
+                                  className="profile-piece__check profile-piece__check--center"
                                   onClick={() => setShowProfilePaymentHelp((prev) => !prev)}
                                 >
-                                  {showProfilePaymentHelp ? 'Скрыть' : 'Оплатили, но ошибка?'}
+                                  {showProfilePaymentHelp ? lx('Скрыть', 'Hide', 'Yashirish') : lx('Оплатили, но ошибка?', 'Paid but got an error?', "To'lov qildingiz, lekin xato chiqyaptimi?")}
                                 </button>
                                 {showProfilePaymentHelp && (
                                   <>
                                     {sbpOrderId && (
                                       <button
                                         type="button"
-                                        className="profile-piece__check"
+                                        className="profile-piece__check profile-piece__check--center"
                                         disabled={sbpPolling}
                                         onClick={() => {
                                           void checkSbpStatus()
                                         }}
                                       >
-                                        {sbpPolling ? 'Проверяю…' : 'Проверить оплату СБП'}
+                                        {sbpPolling ? lx('Проверяю…', 'Checking…', 'Tekshirilmoqda…') : lx('Проверить оплату СБП', 'Check SBP payment', "SBP to'lovini tekshirish")}
                                       </button>
                                     )}
                                     {clickOrderId && (
                                       <button
                                         type="button"
-                                        className="profile-piece__check"
+                                        className="profile-piece__check profile-piece__check--center"
                                         disabled={clickPolling}
                                         onClick={() => {
                                           void checkClickStatus()
                                         }}
                                       >
-                                        {clickPolling ? 'Проверяю…' : 'Проверить оплату CLICK'}
+                                        {clickPolling ? lx('Проверяю…', 'Checking…', 'Tekshirilmoqda…') : lx('Проверить оплату CLICK', 'Check CLICK payment', "CLICK to'lovini tekshirish")}
                                       </button>
                                     )}
+                                    <button
+                                      type="button"
+                                      className="profile-piece__check profile-piece__check--center profile-piece__check--support"
+                                      onClick={() => openTelegramAndCloseMiniApp(SUPPORT_URL)}
+                                    >
+                                      {lx('Ошибка не уходит? Напишите в поддержку', 'Still not fixed? Contact support', "Muammo ketmayaptimi? Yordamga yozing")}
+                                    </button>
                                   </>
                                 )}
                               </div>
@@ -6936,7 +7640,9 @@ useEffect(() => {
                                   void startSbpPayment('sub_2weeks')
                                 }}
                               >
-                                {sbpBusyPlan === 'sub_2weeks' ? 'Создаю…' : 'СБП • 2 недели • 124 ₽'}
+                                {sbpBusyPlan === 'sub_2weeks'
+                                  ? lx('Создаю…', 'Creating…', 'Yaratilmoqda…')
+                                  : `${lx('СБП • 2 недели •', 'SBP • 2 weeks •', 'SBP • 2 hafta •')} ${getPlanPriceLabel('ru', 'sub_2weeks')}`}
                               </button>
 
                               <button
@@ -6947,7 +7653,9 @@ useEffect(() => {
                                   void startSbpPayment('sub_month')
                                 }}
                               >
-                                {sbpBusyPlan === 'sub_month' ? 'Создаю…' : 'СБП • месяц • 224 ₽'}
+                                {sbpBusyPlan === 'sub_month'
+                                  ? lx('Создаю…', 'Creating…', 'Yaratilmoqda…')
+                                  : `${lx('СБП • месяц •', 'SBP • month •', 'SBP • oy •')} ${getPlanPriceLabel('ru', 'sub_month')}`}
                               </button>
 
                               <button
@@ -6958,7 +7666,9 @@ useEffect(() => {
                                   void startSbpPayment('sub_year')
                                 }}
                               >
-                                {sbpBusyPlan === 'sub_year' ? 'Создаю…' : 'СБП • год • 1 747 ₽'}
+                                {sbpBusyPlan === 'sub_year'
+                                  ? lx('Создаю…', 'Creating…', 'Yaratilmoqda…')
+                                  : `${lx('СБП • год •', 'SBP • year •', 'SBP • yil •')} ${getPlanPriceLabel('ru', 'sub_year')}`}
                               </button>
 
                               <a
@@ -6972,7 +7682,7 @@ useEffect(() => {
                                   openTelegramUrl(BOT_CARD_URL)
                                 }}
                               >
-                                По карте или SberPay
+                                {lx('По карте или SberPay', 'Card or SberPay', 'Karta yoki SberPay')}
                               </a>
 
                               <a
@@ -6986,7 +7696,7 @@ useEffect(() => {
                                   openTelegramUrl(BOT_CLICK_URL)
                                 }}
                               >
-                                CLICK (Узбекистан)
+                                {lx('CLICK (Узбекистан)', 'CLICK (Uzbekistan)', "CLICK (O'zbekiston)")}
                               </a>
 
                               <a
@@ -7000,7 +7710,7 @@ useEffect(() => {
                                   openTelegramUrl(BOT_CLICK_CARD_URL)
                                 }}
                               >
-                                Карта через CLICK (UZ)
+                                {lx('Карта через CLICK (UZ)', 'Card via CLICK (UZ)', "CLICK orqali karta (UZ)")}
                               </a>
                             </div>
 
@@ -7013,7 +7723,7 @@ useEffect(() => {
                                   void checkSbpStatus()
                                 }}
                               >
-                                {sbpPolling ? 'Проверяю…' : 'Проверить оплату СБП'}
+                                {sbpPolling ? lx('Проверяю…', 'Checking…', 'Tekshirilmoqda…') : lx('Проверить оплату СБП', 'Check SBP payment', "SBP to'lovini tekshirish")}
                               </button>
                             )}
 
@@ -7023,8 +7733,8 @@ useEffect(() => {
                       </section>
                     )}
 
-                    <section className="profile-panel" aria-label="Настройки">
-                      <div className="profile-group-title">Настройки</div>
+                    <section className="profile-panel" aria-label={t('settings')}>
+                      <div className="profile-group-title">{t('settings')}</div>
 
                       <button
                         type="button"
@@ -7047,12 +7757,19 @@ useEffect(() => {
                               />
                             </svg>
                           </span>
-                          <span>Персонализация AI</span>
+                          <span>{t('personalization')}</span>
                         </span>
                         <span className="profile-link-row__chevron" aria-hidden="true">›</span>
                       </button>
 
-                      <div className="profile-link-row profile-link-row--static">
+                      <button
+                        type="button"
+                        className="profile-link-row"
+                        onClick={() => {
+                          setPrefsError('')
+                          setShowLanguageModal(true)
+                        }}
+                      >
                         <span className="profile-link-row__left">
                           <span className="profile-icon profile-icon--row" aria-hidden="true">
                             <svg viewBox="0 0 24 24">
@@ -7060,10 +7777,11 @@ useEffect(() => {
                               <path d="M3.7 12h16.6M12 3.7c2.4 2.2 3.7 5.2 3.7 8.3s-1.3 6.1-3.7 8.3M12 3.7c-2.4 2.2-3.7 5.2-3.7 8.3s1.3 6.1 3.7 8.3" fill="none" stroke="currentColor" strokeWidth="1.35" />
                             </svg>
                           </span>
-                          <span>Язык приложения (Draft)</span>
+                          <span>{t('appLanguage')}</span>
                         </span>
-                        <span className="profile-link-row__right">Русский</span>
-                      </div>
+                        <span className="profile-link-row__right">{languageDisplayName(appLanguage, appLanguage)}</span>
+                        <span className="profile-link-row__chevron" aria-hidden="true">›</span>
+                      </button>
 
                       <div className="profile-link-row profile-link-row--static">
                         <span className="profile-link-row__left">
@@ -7073,16 +7791,16 @@ useEffect(() => {
                               <path d="m21 3-7 18-3.4-7.2L3 10l18-7Z" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" />
                             </svg>
                           </span>
-                          <span>Привязка Telegram</span>
+                          <span>{t('telegramBinding')}</span>
                         </span>
                         <span className={`profile-link-row__right ${token ? 'is-ok' : 'is-muted'}`}>
-                          {token ? 'Подключен' : 'Не подключен'}
+                          {token ? t('connected') : t('disconnected')}
                         </span>
                       </div>
                     </section>
 
-                    <section className="profile-panel" aria-label="Информация и поддержка">
-                      <div className="profile-group-title">Информация и поддержка</div>
+                    <section className="profile-panel" aria-label={t('infoSupport')}>
+                      <div className="profile-group-title">{t('infoSupport')}</div>
 
                       <a
                         href={SUPPORT_URL}
@@ -7100,7 +7818,7 @@ useEffect(() => {
                               <path d="M6.2 18.4c-1.2 0-2.2-1-2.2-2.2V8.8c0-1.2 1-2.2 2.2-2.2h11.6c1.2 0 2.2 1 2.2 2.2v7.4c0 1.2-1 2.2-2.2 2.2H11l-4 2.7v-2.7H6.2Z" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" />
                             </svg>
                           </span>
-                          <span>Написать в поддержку</span>
+                          <span>{t('writeSupport')}</span>
                         </span>
                         <span className="profile-link-row__chevron" aria-hidden="true">›</span>
                       </a>
@@ -7122,7 +7840,7 @@ useEffect(() => {
                               <path d="M14 3.8v4h4M9.5 12h6.8M9.5 15.3h6.8" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
                             </svg>
                           </span>
-                          <span>Пользовательское соглашение</span>
+                          <span>{t('terms')}</span>
                         </span>
                         <span className="profile-link-row__chevron" aria-hidden="true">›</span>
                       </a>
@@ -7144,14 +7862,14 @@ useEffect(() => {
                               <path d="M8.8 10.2V8a3.2 3.2 0 0 1 6.4 0v2.2" fill="none" stroke="currentColor" strokeWidth="1.6" />
                             </svg>
                           </span>
-                          <span>Политика конфиденциальности</span>
+                          <span>{t('privacy')}</span>
                         </span>
                         <span className="profile-link-row__chevron" aria-hidden="true">›</span>
                       </a>
                     </section>
 
                     <button type="button" className="profile-logout-btn" onClick={handleProfileLogout}>
-                      Выйти из аккаунта
+                      {appLanguage === 'en' ? 'Log out' : appLanguage === 'uz' ? 'Hisobdan chiqish' : 'Выйти из аккаунта'}
                     </button>
                   </div>
                 </div>
@@ -7164,7 +7882,7 @@ useEffect(() => {
         {view === 'photo_analysis' && (
           <>
             <h1>AI Taro</h1>
-            <p>AI анализ расклада по фото</p>
+            <p>{appLanguage === 'en' ? 'AI photo spread analysis' : appLanguage === 'uz' ? "AI foto yoyilma tahlili" : 'AI анализ расклада по фото'}</p>
 
             <div className={`photo-flow photo-flow--${photoStep}`}>
               <input
@@ -7177,11 +7895,31 @@ useEffect(() => {
 
               {(photoStep === 'start' || photoStep === 'error') && (
                 <section className="photo-glass-card photo-glass-card--centered">
-                  <h2 className="photo-flow-title">{photoStep === 'error' ? 'Карты не распознаны' : 'Анализ расклада по фото'}</h2>
+                  <h2 className="photo-flow-title">
+                    {photoStep === 'error'
+                      ? appLanguage === 'en'
+                        ? 'Cards not recognized'
+                        : appLanguage === 'uz'
+                          ? 'Kartalar aniqlanmadi'
+                          : 'Карты не распознаны'
+                      : appLanguage === 'en'
+                        ? 'Photo spread analysis'
+                        : appLanguage === 'uz'
+                          ? 'Foto yoyilma tahlili'
+                          : 'Анализ расклада по фото'}
+                  </h2>
                   <p className="photo-flow-text">
                     {photoStep === 'error'
-                      ? 'Попробуйте сфотографировать расклад снова или выбрать другое фото.'
-                      : 'Разложите карты и снимите расклад сверху при хорошем свете.'}
+                      ? appLanguage === 'en'
+                        ? 'Try taking the spread photo again or choose another photo.'
+                        : appLanguage === 'uz'
+                          ? "Yoyilmani qayta suratga oling yoki boshqa rasm tanlang."
+                          : 'Попробуйте сфотографировать расклад снова или выбрать другое фото.'
+                      : appLanguage === 'en'
+                        ? 'Lay out the cards and shoot the spread from above in good light.'
+                        : appLanguage === 'uz'
+                          ? "Kartalarni yoyib, yaxshi yorug'likda yuqoridan suratga oling."
+                          : 'Разложите карты и снимите расклад сверху при хорошем свете.'}
                   </p>
 
                   <button
@@ -7203,27 +7941,41 @@ useEffect(() => {
                       </svg>
                     </span>
                     <span className="photo-upload-block__body">
-                      <span className="photo-upload-block__title">{photoStep === 'error' ? 'Сделать фото снова' : 'Сделать фото'}</span>
-                      <span className="photo-upload-block__sub">или выбрать из галереи</span>
+                      <span className="photo-upload-block__title">
+                        {photoStep === 'error'
+                          ? appLanguage === 'en'
+                            ? 'Take photo again'
+                            : appLanguage === 'uz'
+                              ? 'Qayta suratga olish'
+                              : 'Сделать фото снова'
+                          : appLanguage === 'en'
+                            ? 'Take a photo'
+                            : appLanguage === 'uz'
+                              ? 'Suratga olish'
+                              : 'Сделать фото'}
+                      </span>
+                      <span className="photo-upload-block__sub">
+                        {appLanguage === 'en' ? 'or choose from gallery' : appLanguage === 'uz' ? 'yoki galereyadan tanlang' : 'или выбрать из галереи'}
+                      </span>
                     </span>
                     <span className="photo-upload-block__chevron" aria-hidden="true">›</span>
                   </button>
 
                   <div className="photo-tip-row" aria-hidden="true">
-                    <span className="photo-tip-pill">Сверху</span>
-                    <span className="photo-tip-pill">Без бликов</span>
-                    <span className="photo-tip-pill">Весь расклад</span>
+                    <span className="photo-tip-pill">{appLanguage === 'en' ? 'From above' : appLanguage === 'uz' ? 'Yuqoridan' : 'Сверху'}</span>
+                    <span className="photo-tip-pill">{appLanguage === 'en' ? 'No glare' : appLanguage === 'uz' ? "Yaltiroqsiz" : 'Без бликов'}</span>
+                    <span className="photo-tip-pill">{appLanguage === 'en' ? 'Full spread' : appLanguage === 'uz' ? "To'liq yoyilma" : 'Весь расклад'}</span>
                   </div>
 
                   {photoStep === 'error' && photoFile && (
                     <button type="button" className="photo-ghost-btn" onClick={retryPhotoDetection} disabled={photoBusy}>
-                      Повторить с этим фото
+                      {appLanguage === 'en' ? 'Retry with this photo' : appLanguage === 'uz' ? 'Shu rasm bilan qayta urinish' : 'Повторить с этим фото'}
                     </button>
                   )}
 
                   {photoPreviewUrl && (
                     <div className="photo-preview-frame photo-preview-frame--soft">
-                      <img src={photoPreviewUrl} alt="Фото расклада" />
+                      <img src={photoPreviewUrl} alt={appLanguage === 'en' ? 'Spread photo' : appLanguage === 'uz' ? 'Yoyilma rasmi' : 'Фото расклада'} />
                     </div>
                   )}
 
@@ -7233,28 +7985,30 @@ useEffect(() => {
 
               {photoStep === 'analyzing' && (
                 <section className="photo-glass-card">
-                  <h2 className="photo-flow-title">Анализируем расклад</h2>
+                  <h2 className="photo-flow-title">{appLanguage === 'en' ? 'Analyzing spread' : appLanguage === 'uz' ? 'Yoyilma tahlil qilinmoqda' : 'Анализируем расклад'}</h2>
                   <div className="photo-preview-frame photo-preview-frame--scanning">
                     {photoPreviewUrl ? (
-                      <img src={photoPreviewUrl} alt="Фото расклада" />
+                      <img src={photoPreviewUrl} alt={appLanguage === 'en' ? 'Spread photo' : appLanguage === 'uz' ? 'Yoyilma rasmi' : 'Фото расклада'} />
                     ) : (
-                      <div className="photo-preview-frame__empty">Подготовка фото…</div>
+                      <div className="photo-preview-frame__empty">{appLanguage === 'en' ? 'Preparing photo…' : appLanguage === 'uz' ? 'Rasm tayyorlanmoqda…' : 'Подготовка фото…'}</div>
                     )}
                   </div>
-                  <div className="photo-stage-status">Распознаем карты…</div>
+                  <div className="photo-stage-status">{appLanguage === 'en' ? 'Recognizing cards…' : appLanguage === 'uz' ? 'Kartalar aniqlanmoqda…' : 'Распознаем карты…'}</div>
                 </section>
               )}
 
               {photoStep === 'detected' && (
                 <section className="photo-glass-card">
-                  <h2 className="photo-flow-title">Карты найдены</h2>
+                  <h2 className="photo-flow-title">{appLanguage === 'en' ? 'Cards found' : appLanguage === 'uz' ? 'Kartalar topildi' : 'Карты найдены'}</h2>
                   <div className="photo-cards-stage">
                     {renderPhotoCardsFan(photoDetectedCards, false)}
                   </div>
                   {photoCardsLabel ? <div className="photo-cards-label">{photoCardsLabel}</div> : null}
 
                   <div className="photo-field">
-                    <label className="photo-field__label" htmlFor="photo-main-question">Ваш вопрос</label>
+                    <label className="photo-field__label" htmlFor="photo-main-question">
+                      {appLanguage === 'en' ? 'Your question' : appLanguage === 'uz' ? 'Savolingiz' : 'Ваш вопрос'}
+                    </label>
                     <div className="ask-wrap photo-question-ask">
                       <div className="ask-glass">
                         <textarea
@@ -7262,7 +8016,13 @@ useEffect(() => {
                           className="ask-input photo-question-ask__input"
                           value={photoMainQuestion}
                           onChange={(e) => setPhotoMainQuestion(e.target.value)}
-                          placeholder="Что мне важно понять?"
+                          placeholder={
+                            appLanguage === 'en'
+                              ? 'What is important for me to understand?'
+                              : appLanguage === 'uz'
+                                ? "Men uchun nimani tushunish muhim?"
+                                : 'Что мне важно понять?'
+                          }
                           rows={2}
                           enterKeyHint="send"
                         />
@@ -7270,15 +8030,43 @@ useEffect(() => {
                           type="button"
                           className={`ask-mic ${isPhotoMainRecording ? 'recording' : ''}`}
                           onClick={() => void toggleRecording('photo_main')}
-                          aria-label={isPhotoMainRecording ? 'Остановить запись' : 'Начать запись'}
-                          title={isPhotoMainRecording ? 'Остановить запись' : 'Записать голосом'}
+                          aria-label={
+                            isPhotoMainRecording
+                              ? appLanguage === 'en'
+                                ? 'Stop recording'
+                                : appLanguage === 'uz'
+                                  ? "Yozuvni to'xtatish"
+                                  : 'Остановить запись'
+                              : appLanguage === 'en'
+                                ? 'Start recording'
+                                : appLanguage === 'uz'
+                                  ? 'Yozishni boshlash'
+                                  : 'Начать запись'
+                          }
+                          title={
+                            isPhotoMainRecording
+                              ? appLanguage === 'en'
+                                ? 'Stop recording'
+                                : appLanguage === 'uz'
+                                  ? "Yozuvni to'xtatish"
+                                  : 'Остановить запись'
+                              : appLanguage === 'en'
+                                ? 'Record voice'
+                                : appLanguage === 'uz'
+                                  ? 'Ovoz yozish'
+                                  : 'Записать голосом'
+                          }
                         >
                           <img className="ask-mic__icon" src={micIcon} alt="" aria-hidden="true" />
                         </button>
                       </div>
                     </div>
                     <div className={`ask-hint ${isPhotoMainRecording ? 'is-visible' : ''}`}>
-                      Идёт запись… нажмите ещё раз, чтобы остановить
+                      {appLanguage === 'en'
+                        ? 'Recording… tap again to stop'
+                        : appLanguage === 'uz'
+                          ? "Yozilmoqda… to'xtatish uchun yana bosing"
+                          : 'Идёт запись… нажмите ещё раз, чтобы остановить'}
                     </div>
                   </div>
 
@@ -7290,13 +8078,25 @@ useEffect(() => {
                   >
                     <span className="glass-cta__inner">
                       <span className="glass-cta__rim" aria-hidden="true" />
-                      <span className="glass-cta__text">{photoBusy ? 'Готовим ответ…' : 'Получить ответ'}</span>
+                      <span className="glass-cta__text">
+                        {photoBusy
+                          ? appLanguage === 'en'
+                            ? 'Preparing answer…'
+                            : appLanguage === 'uz'
+                              ? 'Javob tayyorlanmoqda…'
+                              : 'Готовим ответ…'
+                          : appLanguage === 'en'
+                            ? 'Get answer'
+                            : appLanguage === 'uz'
+                              ? 'Javob olish'
+                              : 'Получить ответ'}
+                      </span>
                       <span className="glass-cta__spark" aria-hidden="true" />
                     </span>
                   </button>
 
                   <button type="button" className="photo-ghost-btn" onClick={openPhotoActionSheet} disabled={photoBusy}>
-                    Выбрать другое фото
+                    {appLanguage === 'en' ? 'Choose another photo' : appLanguage === 'uz' ? 'Boshqa rasm tanlash' : 'Выбрать другое фото'}
                   </button>
                   {photoError ? <div className="photo-stage-error">{photoError}</div> : null}
                 </section>
@@ -7304,23 +8104,31 @@ useEffect(() => {
 
               {photoStep === 'result' && (
                 <section className="photo-glass-card photo-glass-card--result">
-                  <h2 className="photo-flow-title">Ваш расклад</h2>
+                  <h2 className="photo-flow-title">{appLanguage === 'en' ? 'Your spread' : appLanguage === 'uz' ? 'Sizning yoyilmangiz' : 'Ваш расклад'}</h2>
                   <div className="photo-cards-stage is-compact">
                     {renderPhotoCardsFan(photoDetectedCards, true)}
                   </div>
 
                   <div className="photo-reading-card">
-                    <div className="photo-reading-card__title">Интерпретация</div>
+                    <div className="photo-reading-card__title">{appLanguage === 'en' ? 'Interpretation' : appLanguage === 'uz' ? 'Talqin' : 'Интерпретация'}</div>
                     {renderSafetyNotice(photoMainQuestion)}
                     {photoInterpretation ? (
                       <MarkdownText text={photoInterpretation} />
                     ) : (
-                      <p style={{ margin: 0, opacity: 0.8 }}>Не удалось получить интерпретацию. Попробуйте ещё раз.</p>
+                      <p style={{ margin: 0, opacity: 0.8 }}>
+                        {appLanguage === 'en'
+                          ? 'Could not get interpretation. Please try again.'
+                          : appLanguage === 'uz'
+                            ? "Talqinni olib bo'lmadi. Qayta urinib ko'ring."
+                            : 'Не удалось получить интерпретацию. Попробуйте ещё раз.'}
+                      </p>
                     )}
                   </div>
 
                   <div className="photo-followup-card">
-                    <div className="photo-reading-card__title">Уточнить по раскладу</div>
+                    <div className="photo-reading-card__title">
+                      {appLanguage === 'en' ? 'Ask a follow-up' : appLanguage === 'uz' ? "Yoyilma bo'yicha aniqlashtirish" : 'Уточнить по раскладу'}
+                    </div>
 
                     {!photoFollowupUsed && (
                       <>
@@ -7328,7 +8136,13 @@ useEffect(() => {
                           className="photo-field__input photo-field__input--sm"
                           value={photoFollowupQuestion}
                           onChange={(e) => setPhotoFollowupQuestion(e.target.value)}
-                          placeholder="Например: что это значит для отношений?"
+                          placeholder={
+                            appLanguage === 'en'
+                              ? 'For example: what does this mean for relationships?'
+                              : appLanguage === 'uz'
+                                ? "Masalan: bu munosabatlar uchun nimani anglatadi?"
+                                : 'Например: что это значит для отношений?'
+                          }
                           rows={2}
                           enterKeyHint="send"
                         />
@@ -7340,7 +8154,19 @@ useEffect(() => {
                         >
                           <span className="glass-cta__inner">
                             <span className="glass-cta__rim" aria-hidden="true" />
-                            <span className="glass-cta__text">{photoBusy ? 'Готовим ответ…' : 'Задать вопрос'}</span>
+                            <span className="glass-cta__text">
+                              {photoBusy
+                                ? appLanguage === 'en'
+                                  ? 'Preparing answer…'
+                                  : appLanguage === 'uz'
+                                    ? 'Javob tayyorlanmoqda…'
+                                    : 'Готовим ответ…'
+                                : appLanguage === 'en'
+                                  ? 'Ask question'
+                                  : appLanguage === 'uz'
+                                    ? 'Savol berish'
+                                    : 'Задать вопрос'}
+                            </span>
                             <span className="glass-cta__spark" aria-hidden="true" />
                           </span>
                         </button>
@@ -7357,7 +8183,11 @@ useEffect(() => {
 
                     {photoFollowupUsed && (
                       <div className="photo-followup-note">
-                        Дополнительный вопрос уже использован. Чтобы получить новый разбор, начните новый расклад.
+                        {appLanguage === 'en'
+                          ? 'Follow-up question already used. Start a new spread for a new analysis.'
+                          : appLanguage === 'uz'
+                            ? "Qo'shimcha savoldan foydalanib bo'lindi. Yangi tahlil uchun yangi yoyilma boshlang."
+                            : 'Дополнительный вопрос уже использован. Чтобы получить новый разбор, начните новый расклад.'}
                       </div>
                     )}
                   </div>
@@ -7370,7 +8200,7 @@ useEffect(() => {
                   >
                     <span className="glass-cta__inner">
                       <span className="glass-cta__rim" aria-hidden="true" />
-                      <span className="glass-cta__text">Новый расклад</span>
+                      <span className="glass-cta__text">{appLanguage === 'en' ? 'New spread' : appLanguage === 'uz' ? 'Yangi yoyilma' : 'Новый расклад'}</span>
                       <span className="glass-cta__spark" aria-hidden="true" />
                     </span>
                   </button>
@@ -7383,22 +8213,9 @@ useEffect(() => {
         {view === 'card_day_prep' && (
           <>
             <h1>AI Taro</h1>
-            <p ref={subtitleRef}>Мудрость карт и искусственного интеллекта</p>
+            <p ref={subtitleRef}>{t('appSubtitle')}</p>
             {cardDayLoading && (
-              <div className="cardday-loader-stage" aria-live="polite">
-                <div className="cardday-loader-orb" aria-hidden="true">
-                  <span className="cardday-loader-halo" />
-                  <span className="cardday-loader-ring cardday-loader-ring--a" />
-                  <span className="cardday-loader-ring cardday-loader-ring--b" />
-                  <span className="cardday-loader-core">✦</span>
-                </div>
-                <div className="cardday-loader-caption">{CARD_DAY_LOADING_STEPS[cardDayLoaderStep]}</div>
-                <div className="cardday-loader-dots" aria-hidden="true">
-                  <span />
-                  <span />
-                  <span />
-                </div>
-              </div>
+              <CardDayMysticLoader caption={cardDayLoadingSteps[cardDayLoaderStep]} />
             )}
             {/* активный spread-card */}
             {!isResult && !cardDayLoading && (
@@ -7409,9 +8226,9 @@ useEffect(() => {
                   </div>
 
                   <div className="spread-body">
-                    <div className="spread-title">Карта дня</div>
-                    <div className="spread-subtitle">Ежедневное руководство</div>
-                    <div className="spread-meta">1 карта</div>
+                    <div className="spread-title">{t('cardOfDay')}</div>
+                    <div className="spread-subtitle">{t('dailyGuideLine1')}</div>
+                    <div className="spread-meta">{spreads.find((s) => s.id === 'card_of_day')?.cards || '1'}</div>
                   </div>
                 </div>
               </div>
@@ -7447,8 +8264,14 @@ useEffect(() => {
                   aria-hidden={cardDayShuffleStarted ? 'true' : 'false'}
                 >
                   <div className="cardday-shake-overlay__phone" />
-                  <div className="cardday-shake-overlay__title">Встряхните телефон</div>
-                  <div className="cardday-shake-overlay__sub">Или нажмите кнопку ниже для авто‑перемешивания</div>
+                  <div className="cardday-shake-overlay__title">{lx('Встряхните телефон', 'Shake your phone', "Telefonni silkitib ko'ring")}</div>
+                  <div className="cardday-shake-overlay__sub">
+                    {lx(
+                      'Или нажмите кнопку ниже для авто‑перемешивания',
+                      'Or use the button below for auto shuffle',
+                      "Yoki pastdagi tugma bilan avtomatik aralashtiring",
+                    )}
+                  </div>
                 </div>
 
                 {needsMotionPermission && !cardDayShuffleStarted && shuffleProgress < 1 && (
@@ -7465,33 +8288,29 @@ useEffect(() => {
                     <>
                       {needsMotionPermission && (
                         <button type="button" className="motion-permission-cta motion-permission-cta--tech" onClick={requestMotion}>
-                          Разрешить встряхивание
+                          {lx('Ruxsat berish', 'Allow motion', "Silkitishga ruxsat berish")}
                         </button>
                       )}
 
                       <button type="button" className="glass-cta mini-cta" onClick={autoShuffle}>
                         <span className="glass-cta__inner">
                           <span className="glass-cta__rim" aria-hidden="true" />
-                          <span className="glass-cta__text">Перемешать автоматически</span>
+                          <span className="glass-cta__text">{lx('Перемешать автоматически', 'Shuffle automatically', 'Avtomatik aralashtirish')}</span>
                           <span className="glass-cta__spark" aria-hidden="true" />
                         </span>
                       </button>
                     </>
                   ) : (
-                    <>
-                      <div className="shake__badge is-done">
-                        <div className="shake__title">Открываем карту…</div>
-                        <div className="shake__sub">Сейчас покажем значение карты дня.</div>
-                      </div>
-
-                      <button type="button" className="glass-cta mini-cta" disabled>
-                        <span className="glass-cta__inner">
-                          <span className="glass-cta__rim" aria-hidden="true" />
-                          <span className="glass-cta__text">Идёт раскрытие</span>
-                          <span className="glass-cta__spark" aria-hidden="true" />
-                        </span>
-                      </button>
-                    </>
+                    <div className="cardday-inline-loader-wrap">
+                      <CardDayMysticLoader
+                        compact
+                        caption={lx(
+                          'Загружаем интерпретацию карты дня…',
+                          'Loading card interpretation…',
+                          "Kun kartasi talqini yuklanmoqda…",
+                        )}
+                      />
+                    </div>
                   )}
                 </div>
               </>
@@ -7501,16 +8320,16 @@ useEffect(() => {
               <div className="result-layout">
                 <div className="result-layout__desc">
                   <div className="result-card">
-                    <div className="result-card__title">Значение карты</div>
+                    <div className="result-card__title">{lx('Значение карты', 'Card meaning', 'Karta maʼnosi')}</div>
                     <div className="result-card__name">
                       {dailyCardName
                         ? dailyCardName
-                        : (selectedFrontUrl.split('/').pop() || 'Карта').replace(/\.(png|jpg|jpeg|webp)$/i, '')}
+                        : (selectedFrontUrl.split('/').pop() || lx('Карта', 'Card', 'Karta')).replace(/\.(png|jpg|jpeg|webp)$/i, '')}
                     </div>
 
                     <div className="result-card__scroll">
                       {dailyDayKey ? (
-                        <p style={{ opacity: 0.72, marginTop: 0 }}>Карта дня: {dailyDayKey}</p>
+                        <p style={{ opacity: 0.72, marginTop: 0 }}>{lx('Карта дня', 'Card of the day', 'Kun kartasi')}: {dailyDayKey}</p>
                       ) : null}
 
                       {renderSafetyNotice(dailyQuestion)}
@@ -7518,7 +8337,7 @@ useEffect(() => {
                       {dailyDesc ? (
                         <MarkdownText text={stripDailyQuestionContextSection(dailyDesc, dailyQuestion)} />
                       ) : (
-                        <p>Описание пока недоступно.</p>
+                        <p>{lx('Описание пока недоступно.', 'Description is not available yet.', "Izoh hozircha mavjud emas.")}</p>
                       )}
                     </div>
 
@@ -7530,7 +8349,7 @@ useEffect(() => {
                 <button type="button" className="glass-cta result-back" onClick={backHome}>
                   <span className="glass-cta__inner">
                     <span className="glass-cta__rim" aria-hidden="true" />
-                    <span className="glass-cta__text">Вернуться в меню</span>
+                    <span className="glass-cta__text">{lx('Вернуться в меню', 'Back to menu', 'Menyuga qaytish')}</span>
                     <span className="glass-cta__spark" aria-hidden="true" />
                   </span>
                 </button>
@@ -7541,14 +8360,14 @@ useEffect(() => {
         {view === 'three_cards_prep' && (
           <>
             <h1>AI Taro</h1>
-            <p>Расклад по 3 картам</p>
+            <p>{lx('Расклад по 3 картам', '3-card spread', '3 kartalik yoyilma')}</p>
 
             <div className="threepage">
 
               {/* 1) SETUP */}
               {threeScreen === 'setup' && (
                 <>
-                  <div className="threecards-row" aria-label="Три карты (рубашка)">
+                  <div className="threecards-row" aria-label={lx('Три карты (рубашка)', 'Three cards (back side)', 'Uchta karta (orqa tomoni)')}>
                     {[0, 1, 2].map((i) => (
                       <div key={i} className="threecard">
                         <img src={backCardImg} alt="" />
@@ -7563,7 +8382,7 @@ useEffect(() => {
                           className="ask-input"
                           value={threeQuestion}
                           onChange={(e) => setThreeQuestion(e.target.value)}
-                          placeholder="Ваш вопрос…"
+                          placeholder={appLanguage === 'en' ? 'Your question…' : appLanguage === 'uz' ? 'Savolingiz…' : 'Ваш вопрос…'}
                           enterKeyHint="search"
                           rows={2}
                         />
@@ -7578,7 +8397,7 @@ useEffect(() => {
                         ['--from' as any]: threeKindPrevIndex,
                       }}
                       role="tablist"
-                      aria-label="Тип вопроса"
+                      aria-label={lx('Тип вопроса', 'Question type', 'Savol turi')}
                     >
                       <div className="seg__pill" aria-hidden="true" />
                       {THREE_QKINDS.map((k) => (
@@ -7598,7 +8417,7 @@ useEffect(() => {
                     <button type="button" className="glass-cta" onClick={() => { void beginThreeShuffle() }}>
                       <span className="glass-cta__inner">
                         <span className="glass-cta__rim" aria-hidden="true" />
-                        <span className="glass-cta__text">Продолжить</span>
+                        <span className="glass-cta__text">{t('continue')}</span>
                         <span className="glass-cta__spark" aria-hidden="true" />
                       </span>
                     </button>
@@ -7611,7 +8430,7 @@ useEffect(() => {
                 <>
                   <div
                     className={`three-mix-area three-mix-area--wide ${threeShuffleProgress < 1 ? 'is-shuffling' : 'is-done'}`}
-                    aria-label="Перемешивание"
+                    aria-label={lx('Перемешивание', 'Shuffling', 'Aralashtirish')}
                   >
                     {[0, 1, 2].map((cardIdx) => {
                       const slot = Math.max(0, threeOrder.indexOf(cardIdx)) // 0..2
@@ -7641,8 +8460,14 @@ useEffect(() => {
                       aria-hidden={threeShuffleStarted ? 'true' : 'false'}
                     >
                       <div className="cardday-shake-overlay__phone" />
-                      <div className="cardday-shake-overlay__title">Встряхните телефон</div>
-                      <div className="cardday-shake-overlay__sub">Или нажмите кнопку ниже для авто‑перемешивания</div>
+                      <div className="cardday-shake-overlay__title">{lx('Встряхните телефон', 'Shake your phone', "Telefonni silkitib ko'ring")}</div>
+                      <div className="cardday-shake-overlay__sub">
+                        {lx(
+                          'Или нажмите кнопку ниже для авто‑перемешивания',
+                          'Or use the button below for auto shuffle',
+                          "Yoki pastdagi tugma bilan avtomatik aralashtiring",
+                        )}
+                      </div>
                     </div>
                   )}
 
@@ -7659,22 +8484,22 @@ useEffect(() => {
                       <>
                         {needsMotionPermission && (
                           <button type="button" className="motion-permission-cta motion-permission-cta--tech" onClick={requestMotion}>
-                            Разрешить встряхивание
+                            {lx('Разрешить встряхивание', 'Allow motion', "Silkitishga ruxsat berish")}
                           </button>
                         )}
 
-                        <div className="threehint">Прогресс: {Math.round(threeShuffleProgress * 100)}%</div>
+                        <div className="threehint">{lx('Прогресс', 'Progress', 'Jarayon')}: {Math.round(threeShuffleProgress * 100)}%</div>
 
                         <button type="button" className="glass-cta mini-cta" onClick={autoShuffleThree}>
                           <span className="glass-cta__inner">
                             <span className="glass-cta__rim" aria-hidden="true" />
-                            <span className="glass-cta__text">Перемешать автоматически</span>
+                            <span className="glass-cta__text">{lx('Перемешать автоматически', 'Shuffle automatically', 'Avtomatik aralashtirish')}</span>
                             <span className="glass-cta__spark" aria-hidden="true" />
                           </span>
                         </button>
                       </>
                     ) : (
-                      <div className="threehint">Открываем карты…</div>
+                      <div className="threehint">{lx('Открываем карты…', 'Opening cards…', 'Kartalar ochilmoqda…')}</div>
                     )}
                   </div>
                 </>
@@ -7683,7 +8508,7 @@ useEffect(() => {
               {/* 3) RESULT */}
               {threeScreen === 'result' && (
                 <>
-                  <div className="threecards-row" aria-label="Три карты (результат)">
+                  <div className="threecards-row" aria-label={lx('Три карты (результат)', 'Three cards (result)', 'Uchta karta (natija)')}>
                     {(threeCards.length ? threeCards : []).map((c, i) => (
                       <div key={`${c.idx}-${i}`} className="threecard">
                         <img className={c.isReversed ? 'is-reversed' : ''} src={c.url || backCardImg} alt={c.name} />
@@ -7695,38 +8520,46 @@ useEffect(() => {
                   <div className={`three-result ${decisionLoading ? 'is-loading' : ''}`.trim()}>
                     {threeLoading ? (
                       <div className="result-loading-standalone">
-                        <InterpretationLoader text="Получаем интерпретацию" />
+                        <InterpretationLoader text={lx('Получаем интерпретацию', 'Preparing interpretation', 'Talqin tayyorlanmoqda')} />
                       </div>
                     ) : (
                       <div className="result-layout__desc">
                         <div className="result-card">
-                          <div className="result-card__title">Значение расклада</div>
-                          <div className="result-card__name">Расклад по 3 картам</div>
+                          <div className="result-card__title">{lx('Значение расклада', 'Spread meaning', 'Yoyilma maʼnosi')}</div>
+                          <div className="result-card__name">{lx('Расклад по 3 картам', '3-card spread', '3 kartalik yoyilma')}</div>
 
                           <div className="result-card__scroll">
                             {threeDayKey ? (
-                              <p style={{ opacity: 0.72, marginTop: 0 }}>Дата расклада: {threeDayKey}</p>
+                              <p style={{ opacity: 0.72, marginTop: 0 }}>{lx('Дата расклада', 'Spread date', 'Yoyilma sanasi')}: {threeDayKey}</p>
                             ) : null}
 
                             {threeQuestion ? (
                               <p style={{ opacity: 0.85, marginTop: 10, marginBottom: 0 }}>
-                                <b>Вопрос:</b> {threeQuestion}
+                                <b>{lx('Вопрос', 'Question', 'Savol')}:</b> {threeQuestion}
                               </p>
                             ) : (
                               <p style={{ opacity: 0.72, marginTop: 10, marginBottom: 0 }}>
-                                Вопрос не задан. Показана общая интерпретация по картам.
+                                {lx(
+                                  'Вопрос не задан. Показана общая интерпретация по картам.',
+                                  'No question provided. Showing a general interpretation by cards.',
+                                  "Savol berilmagan. Kartalar bo'yicha umumiy talqin ko'rsatilmoqda.",
+                                )}
                               </p>
                             )}
 
                             <p style={{ opacity: 0.82, marginTop: 10, marginBottom: 0 }}>
-                              <b>Тип:</b>{' '}
-                              {threeKind === 'yesno' ? 'Да / Нет' : threeKind === 'advice' ? 'Совет' : 'Открытый вопрос'}
+                              <b>{lx('Тип', 'Type', 'Turi')}:</b>{' '}
+                              {threeKind === 'yesno'
+                                ? lx('Да / Нет', 'Yes / No', "Ha / Yo'q")
+                                : threeKind === 'advice'
+                                  ? lx('Совет', 'Advice', 'Maslahat')
+                                  : lx('Открытый вопрос', 'Open question', 'Ochiq savol')}
                             </p>
 
                             <div style={{ height: 10 }} />
 
                             {!threeShowMeaning ? (
-                              <p style={{ opacity: 0.8, marginTop: 10 }}>Карты раскрываются…</p>
+                              <p style={{ opacity: 0.8, marginTop: 10 }}>{lx('Карты раскрываются…', 'Cards are revealing…', 'Kartalar ochilmoqda…')}</p>
                             ) : (
                               <>
                                 {renderSafetyNotice(threeQuestion)}
@@ -7759,7 +8592,7 @@ useEffect(() => {
                     <button type="button" className="glass-cta" onClick={restartThreeCards}>
                       <span className="glass-cta__inner">
                         <span className="glass-cta__rim" aria-hidden="true" />
-                        <span className="glass-cta__text">Новый расклад</span>
+                        <span className="glass-cta__text">{lx('Новый расклад', 'New spread', 'Yangi yoyilma')}</span>
                         <span className="glass-cta__spark" aria-hidden="true" />
                       </span>
                     </button>
@@ -7767,7 +8600,7 @@ useEffect(() => {
                     <button type="button" className="glass-cta result-back" onClick={backHome}>
                       <span className="glass-cta__inner">
                         <span className="glass-cta__rim" aria-hidden="true" />
-                        <span className="glass-cta__text">Вернуться в меню</span>
+                        <span className="glass-cta__text">{lx('Вернуться в меню', 'Back to menu', 'Menyuga qaytish')}</span>
                         <span className="glass-cta__spark" aria-hidden="true" />
                       </span>
                     </button>
@@ -7781,13 +8614,13 @@ useEffect(() => {
         {view === 'past_present_future_prep' && (
           <>
             <h1>AI Taro</h1>
-            <p>Прошлое • Настоящее • Будущее</p>
+            <p>{lx('Прошлое • Настоящее • Будущее', 'Past • Present • Future', "O'tmish • Hozir • Kelajak")}</p>
 
             <div className="threepage">
               {/* 1) SETUP */}
               {ppfScreen === 'setup' && (
                 <>
-                  <div className="threecards-row" aria-label="Три карты (рубашка)">
+                  <div className="threecards-row" aria-label={lx('Три карты (рубашка)', 'Three cards (back side)', 'Uchta karta (orqa tomoni)')}>
                     {[0, 1, 2].map((i) => (
                       <div key={i} className="threecard">
                         <img src={backCardImg} alt="" />
@@ -7802,7 +8635,7 @@ useEffect(() => {
                           className="ask-input"
                           value={ppfQuestion}
                           onChange={(e) => setPpfQuestion(e.target.value)}
-                          placeholder="Ваш вопрос…"
+                          placeholder={appLanguage === 'en' ? 'Your question…' : appLanguage === 'uz' ? 'Savolingiz…' : 'Ваш вопрос…'}
                           enterKeyHint="search"
                           rows={2}
                         />
@@ -7817,7 +8650,7 @@ useEffect(() => {
                         ['--from' as any]: ppfFocusPrevIndex,
                       }}
                       role="tablist"
-                      aria-label="Фокус"
+                      aria-label={lx('Фокус', 'Focus', 'Fokus')}
                     >
                       <div className="seg__pill" aria-hidden="true" />
                       {PPF_FOCUS.map((k) => (
@@ -7837,7 +8670,7 @@ useEffect(() => {
                     <button type="button" className="glass-cta" onClick={() => void beginPpfShuffle()}>
                       <span className="glass-cta__inner">
                         <span className="glass-cta__rim" aria-hidden="true" />
-                        <span className="glass-cta__text">Продолжить</span>
+                        <span className="glass-cta__text">{t('continue')}</span>
                         <span className="glass-cta__spark" aria-hidden="true" />
                       </span>
                     </button>
@@ -7850,7 +8683,7 @@ useEffect(() => {
               {/* 2) SHUFFLE */}
               {ppfScreen === 'shuffle' && (
                 <>
-                  <div className="ppf-drag-board" aria-label="Расклад с перетаскиванием карт">
+                  <div className="ppf-drag-board" aria-label={lx('Расклад с перетаскиванием карт', 'Drag-and-drop spread', "Kartalarni sudrab joylash yoyilmasi")}>
                     <div className="ppf-drag-board__slots">
                       {PPF_SLOT_LABELS.map((label, slotIdx) => {
                         const placed = ppfPlacedCards[slotIdx]
@@ -7934,26 +8767,30 @@ useEffect(() => {
                     {ppfPlacedCount < 3 ? (
                       <>
                         <div className="shake__badge">
-                          <div className="shake__title">Вытащите карты из колоды</div>
+                          <div className="shake__title">{lx('Вытащите карты из колоды', 'Pull cards from the deck', "Kartalarni kolodadan oling")}</div>
                           <div className="shake__sub">
-                            Зажмите карту снизу и перетащите в подсвеченный пунктирный слот.
+                            {lx(
+                              'Зажмите карту снизу и перетащите в подсвеченный пунктирный слот.',
+                              'Hold a bottom card and drag it into the highlighted slot.',
+                              "Pastdagi kartani bosib ushlab, yoritilgan joyga sudrab o'tkazing.",
+                            )}
                           </div>
                         </div>
 
-                        <div className="threehint">Выложено: {ppfPlacedCount} из 3</div>
+                        <div className="threehint">{lx('Выложено', 'Placed', 'Joylashtirildi')}: {ppfPlacedCount} / 3</div>
 
                         <button type="button" className="glass-cta mini-cta" onClick={autoShufflePpf}>
                           <span className="glass-cta__inner">
                             <span className="glass-cta__rim" aria-hidden="true" />
-                            <span className="glass-cta__text">Разложить автоматически</span>
+                            <span className="glass-cta__text">{lx('Разложить автоматически', 'Auto place cards', 'Avtomatik joylashtirish')}</span>
                             <span className="glass-cta__spark" aria-hidden="true" />
                           </span>
                         </button>
                       </>
                     ) : (
                       <div className="shake__badge is-done">
-                        <div className="shake__title">Открываем карты…</div>
-                        <div className="shake__sub">Сейчас покажем 3 карты и интерпретацию.</div>
+                        <div className="shake__title">{lx('Открываем карты…', 'Opening cards…', 'Kartalar ochilmoqda…')}</div>
+                        <div className="shake__sub">{lx('Сейчас покажем 3 карты и интерпретацию.', 'Now showing 3 cards and interpretation.', "Hozir 3 ta karta va talqin ko'rsatiladi.")}</div>
                       </div>
                     )}
                   </div>
@@ -7963,7 +8800,7 @@ useEffect(() => {
               {/* 3) RESULT */}
               {ppfScreen === 'result' && (
                 <>
-                  <div className="threecards-row" aria-label="Три карты (результат)">
+                  <div className="threecards-row" aria-label={lx('Три карты (результат)', 'Three cards (result)', 'Uchta karta (natija)')}>
                     {(ppfCards.length ? ppfCards : []).map((c, i) => (
                       <div key={`${c.idx}-${i}`} className="threecard">
                         <img className={c.isReversed ? 'is-reversed' : ''} src={c.url || backCardImg} alt={c.name} />
@@ -7974,29 +8811,33 @@ useEffect(() => {
                   <div className="three-result">
                     {ppfLoading ? (
                       <div className="result-loading-standalone">
-                        <InterpretationLoader text="Получаем интерпретацию" />
+                        <InterpretationLoader text={lx('Получаем интерпретацию', 'Preparing interpretation', 'Talqin tayyorlanmoqda')} />
                       </div>
                     ) : (
                       <div className="result-layout__desc">
                         <div className="result-card">
-                          <div className="result-card__title">Значение расклада</div>
+                          <div className="result-card__title">{lx('Значение расклада', 'Spread meaning', 'Yoyilma maʼnosi')}</div>
 
                           <div className="result-card__scroll">
-                            {ppfDayKey ? <p style={{ opacity: 0.72, marginTop: 0 }}>Дата расклада: {ppfDayKey}</p> : null}
+                            {ppfDayKey ? <p style={{ opacity: 0.72, marginTop: 0 }}>{lx('Дата расклада', 'Spread date', 'Yoyilma sanasi')}: {ppfDayKey}</p> : null}
 
                             {!!ppfQuestion && (
                               <p style={{ opacity: 0.86, marginTop: 10 }}>
-                                <b>Вопрос:</b> {ppfQuestion}
+                                <b>{lx('Вопрос', 'Question', 'Savol')}:</b> {ppfQuestion}
                               </p>
                             )}
                             {!ppfQuestion && (
                               <p style={{ opacity: 0.72, marginTop: 10, marginBottom: 0 }}>
-                                Вопрос не задан. Показана общая интерпретация по картам.
+                                {lx(
+                                  'Вопрос не задан. Показана общая интерпретация по картам.',
+                                  'No question provided. Showing a general interpretation by cards.',
+                                  "Savol berilmagan. Kartalar bo'yicha umumiy talqin ko'rsatilmoqda.",
+                                )}
                               </p>
                             )}
 
                             <p style={{ opacity: 0.86, marginTop: 10 }}>
-                              <b>Фокус:</b> {PPF_FOCUS.find((x) => x.id === ppfFocus)?.label || '—'}
+                              <b>{lx('Фокус', 'Focus', 'Fokus')}:</b> {PPF_FOCUS.find((x) => x.id === ppfFocus)?.label || '—'}
                             </p>
 
                             {renderSafetyNotice(ppfQuestion)}
@@ -8027,7 +8868,7 @@ useEffect(() => {
                     <button type="button" className="glass-cta" onClick={restartPpf}>
                       <span className="glass-cta__inner">
                         <span className="glass-cta__rim" aria-hidden="true" />
-                        <span className="glass-cta__text">Новый расклад</span>
+                        <span className="glass-cta__text">{lx('Новый расклад', 'New spread', 'Yangi yoyilma')}</span>
                         <span className="glass-cta__spark" aria-hidden="true" />
                       </span>
                     </button>
@@ -8035,7 +8876,7 @@ useEffect(() => {
                     <button type="button" className="glass-cta result-back" onClick={backHome}>
                       <span className="glass-cta__inner">
                         <span className="glass-cta__rim" aria-hidden="true" />
-                        <span className="glass-cta__text">Вернуться в меню</span>
+                        <span className="glass-cta__text">{lx('Вернуться в меню', 'Back to menu', 'Menyuga qaytish')}</span>
                         <span className="glass-cta__spark" aria-hidden="true" />
                       </span>
                     </button>
@@ -8049,12 +8890,12 @@ useEffect(() => {
         {view === 'decision_prep' && (
           <>
             <h1>AI Taro</h1>
-            <p>Принятие решения</p>
+            <p>{lx('Принятие решения', 'Decision spread', 'Qaror yoyilmasi')}</p>
 
             <div className="threepage">
               {decisionScreen === 'shuffle' && (
                 <>
-                  <div className="decision-drag-board" aria-label="Расклад по вариантам A и B">
+                  <div className="decision-drag-board" aria-label={lx('Расклад по вариантам A и B', 'Spread by options A and B', "A va B variantlari bo'yicha yoyilma")}>
                     <div className="decision-drag-board__slots">
                       {DECISION_SLOT_LABELS.map((label, slotIdx) => {
                         const placed = decisionPlacedCards[slotIdx]
@@ -8139,23 +8980,23 @@ useEffect(() => {
                     {decisionPlacedCount < 2 || !decisionRevealMap.every(Boolean) ? (
                       <>
                         {decisionPlacedCount < 2 ? (
-                          <div className="threehint">Выложено: {decisionPlacedCount} из 2</div>
+                          <div className="threehint">{lx('Выложено', 'Placed', 'Joylashtirildi')}: {decisionPlacedCount} / 2</div>
                         ) : (
-                          <div className="decision-flip-caption">Нажмите на карту, чтобы её перевернуть</div>
+                          <div className="decision-flip-caption">{lx('Нажмите на карту, чтобы её перевернуть', 'Tap a card to flip it', "Kartani ochish uchun ustiga bosing")}</div>
                         )}
 
                         {decisionPlacedCount < 2 ? (
                           <button type="button" className="glass-cta mini-cta" onClick={autoShuffleDecision}>
                             <span className="glass-cta__inner">
                               <span className="glass-cta__rim" aria-hidden="true" />
-                              <span className="glass-cta__text">Разложить автоматически</span>
+                              <span className="glass-cta__text">{lx('Разложить автоматически', 'Auto place cards', 'Avtomatik joylashtirish')}</span>
                               <span className="glass-cta__spark" aria-hidden="true" />
                             </span>
                           </button>
                         ) : null}
                       </>
                     ) : (
-                      <div className="threehint">Открываем интерпретацию…</div>
+                      <div className="threehint">{lx('Открываем интерпретацию…', 'Opening interpretation…', 'Talqin ochilmoqda…')}</div>
                     )}
                   </div>
                 </>
@@ -8163,7 +9004,7 @@ useEffect(() => {
 
               {decisionScreen === 'result' && (
                 <>
-                  <div className="decision-result-row" aria-label="Две карты (результат)">
+                  <div className="decision-result-row" aria-label={lx('Две карты (результат)', 'Two cards (result)', 'Ikki karta (natija)')}>
                     {(decisionCards.length ? decisionCards : []).map((c, i) => (
                       <div key={`${c.idx}-${i}`} className="threecard">
                         <img className={c.isReversed ? 'is-reversed' : ''} src={c.url || backCardImg} alt={c.name} />
@@ -8174,19 +9015,19 @@ useEffect(() => {
                   <div className="three-result">
                     {decisionLoading ? (
                       <div className="result-loading-standalone">
-                        <InterpretationLoader text="Получаем интерпретацию" />
+                        <InterpretationLoader text={lx('Получаем интерпретацию', 'Preparing interpretation', 'Talqin tayyorlanmoqda')} />
                       </div>
                     ) : (
                       <div className="result-layout__desc">
                         <div className="result-card">
-                          <div className="result-card__title">Значение расклада</div>
+                          <div className="result-card__title">{lx('Значение расклада', 'Spread meaning', 'Yoyilma maʼnosi')}</div>
 
                           <div className="result-card__scroll">
-                            {decisionDayKey ? <p style={{ opacity: 0.72, marginTop: 0 }}>Расклад: {decisionDayKey}</p> : null}
+                            {decisionDayKey ? <p style={{ opacity: 0.72, marginTop: 0 }}>{lx('Расклад', 'Spread', 'Yoyilma')}: {decisionDayKey}</p> : null}
 
                             {decisionQuestion ? (
                               <p style={{ marginTop: 10, opacity: 0.86 }}>
-                                <b>Вопрос:</b> {decisionQuestion}
+                                <b>{lx('Вопрос', 'Question', 'Savol')}:</b> {decisionQuestion}
                               </p>
                             ) : null}
 
@@ -8216,7 +9057,7 @@ useEffect(() => {
                     <button type="button" className="glass-cta" onClick={restartDecision}>
                       <span className="glass-cta__inner">
                         <span className="glass-cta__rim" aria-hidden="true" />
-                        <span className="glass-cta__text">Новый расклад</span>
+                        <span className="glass-cta__text">{lx('Новый расклад', 'New spread', 'Yangi yoyilma')}</span>
                         <span className="glass-cta__spark" aria-hidden="true" />
                       </span>
                     </button>
@@ -8224,7 +9065,7 @@ useEffect(() => {
                     <button type="button" className="glass-cta result-back" onClick={backHome}>
                       <span className="glass-cta__inner">
                         <span className="glass-cta__rim" aria-hidden="true" />
-                        <span className="glass-cta__text">Вернуться в меню</span>
+                        <span className="glass-cta__text">{lx('Вернуться в меню', 'Back to menu', 'Menyuga qaytish')}</span>
                         <span className="glass-cta__spark" aria-hidden="true" />
                       </span>
                     </button>
@@ -8258,7 +9099,7 @@ useEffect(() => {
               <span className="glass-cta__icon" aria-hidden="true">
                 <StartReadingIcon />
               </span>
-              <span className="glass-cta__text">Начать расклад</span>
+              <span className="glass-cta__text">{t('startReading')}</span>
               <span className="glass-cta__spark" aria-hidden="true" />
             </span>
           </button>
@@ -8275,12 +9116,12 @@ useEffect(() => {
         >
           <div className="legal-doc-card" onClick={(e) => e.stopPropagation()}>
             <div className="legal-doc-card__head">
-              <div className="legal-doc-card__title">{currentLegalDoc.title}</div>
+                <div className="legal-doc-card__title">{currentLegalDoc.title}</div>
               <button
                 type="button"
                 className="legal-doc-card__close"
                 onClick={closeLegalDoc}
-                aria-label="Закрыть документ"
+                aria-label={lx('Закрыть документ', 'Close document', 'Hujjatni yopish')}
               >
                 ×
               </button>
@@ -8308,14 +9149,14 @@ useEffect(() => {
                 rel="noreferrer"
                 className="legal-doc-card__action"
               >
-                Открыть PDF
+                {lx('Открыть PDF', 'Open PDF', 'PDF ochish')}
               </a>
               <button
                 type="button"
                 className="legal-doc-card__action legal-doc-card__action--ghost"
                 onClick={() => openTelegramAndCloseMiniApp(LEGAL_DOC_BOT_DEEPLINK[activeLegalDoc || 'terms'])}
               >
-                Открыть в боте
+                {lx('Открыть в боте', 'Open in bot', 'Botda ochish')}
               </button>
             </div>
           </div>
@@ -8327,34 +9168,44 @@ useEffect(() => {
           className="prefs-modal-overlay"
           role="dialog"
           aria-modal="true"
-          aria-label="Персонализация AI"
+          aria-label={t('personalization')}
           onClick={() => {
             if (!prefsSaving) setShowPersonalizationModal(false)
           }}
         >
           <div className="prefs-modal-card" onClick={(e) => e.stopPropagation()}>
             <div className="prefs-modal-card__head">
-              <div className="prefs-modal-card__title">Персонализация AI</div>
+              <div className="prefs-modal-card__title">{t('personalization')}</div>
               <button
                 type="button"
                 className="prefs-modal-card__close"
                 onClick={() => setShowPersonalizationModal(false)}
-                aria-label="Закрыть"
+                aria-label={t('close')}
               >
                 ×
               </button>
             </div>
 
             <p className="prefs-modal-card__text">
-              Используем вашу историю раскладов для более точной интерпретации. Отдельную «вторую историю» не создаём.
+              {lx(
+                'Используем вашу историю раскладов для более точной интерпретации. Отдельную «вторую историю» не создаём.',
+                'We use your reading history for more accurate interpretations. No separate “second history” is created.',
+                "Aniqroq talqin uchun yoyilmalar tarixingizdan foydalanamiz. Alohida “ikkinchi tarix” yaratilmaydi.",
+              )}
             </p>
 
             <div className="prefs-modal-card__row">
               <div className="prefs-modal-card__row-text">
-                <div className="prefs-modal-card__row-title">Память раскладов (90 дней)</div>
-                <div className="prefs-modal-card__row-sub">Учитываем повторяющиеся темы и динамику по похожим вопросам.</div>
+                <div className="prefs-modal-card__row-title">{lx('Память раскладов (90 дней)', 'Reading memory (90 days)', "Yoyilma xotirasi (90 kun)")}</div>
+                <div className="prefs-modal-card__row-sub">
+                  {lx(
+                    'Учитываем повторяющиеся темы и динамику по похожим вопросам.',
+                    'Tracks recurring topics and dynamics across similar questions.',
+                    "O'xshash savollar bo'yicha takrorlanadigan mavzu va dinamikani hisobga oladi.",
+                  )}
+                </div>
               </div>
-              <label className="prefs-switch" aria-label="Память раскладов">
+              <label className="prefs-switch" aria-label={lx('Память раскладов', 'Reading memory', "Yoyilma xotirasi")}>
                 <input
                   type="checkbox"
                   checked={memoryOptIn}
@@ -8366,7 +9217,13 @@ useEffect(() => {
             </div>
 
             <p className="prefs-modal-card__hint">
-              Для полного удаления персональных данных используйте команду <b>/forgetme</b> в боте.
+              {lx(
+                'Для полного удаления персональных данных используйте команду',
+                'To fully delete personal data, use command',
+                "Shaxsiy ma'lumotlarni to'liq o'chirish uchun",
+              )}{' '}
+              <b>/forgetme</b>{' '}
+              {lx('в боте.', 'in the bot.', 'buyrug‘idan botda foydalaning.')}
             </p>
 
             {prefsError ? <div className="prefs-modal-card__error">{prefsError}</div> : null}
@@ -8381,7 +9238,9 @@ useEffect(() => {
             >
               <span className="glass-cta__inner">
                 <span className="glass-cta__rim" aria-hidden="true" />
-                <span className="glass-cta__text">{prefsSaving ? 'Сохраняем…' : 'Сохранить'}</span>
+                <span className="glass-cta__text">
+                  {prefsSaving ? lx('Сохраняем…', 'Saving…', 'Saqlanmoqda…') : lx('Сохранить', 'Save', 'Saqlash')}
+                </span>
                 <span className="glass-cta__spark" aria-hidden="true" />
               </span>
             </button>
@@ -8389,24 +9248,76 @@ useEffect(() => {
         </div>
       )}
 
+      {showLanguageModal && (
+        <div
+          className="prefs-modal-overlay"
+          role="dialog"
+          aria-modal="true"
+          aria-label={t('appLanguage')}
+          onClick={() => {
+            if (!prefsSaving) setShowLanguageModal(false)
+          }}
+        >
+          <div className="prefs-modal-card prefs-lang-card" onClick={(e) => e.stopPropagation()}>
+            <div className="prefs-modal-card__head">
+              <div className="prefs-modal-card__title">{t('appLanguage')}</div>
+              <button
+                type="button"
+                className="prefs-modal-card__close"
+                onClick={() => setShowLanguageModal(false)}
+                aria-label={appLanguage === 'en' ? 'Close' : appLanguage === 'uz' ? 'Yopish' : 'Закрыть'}
+              >
+                ×
+              </button>
+            </div>
+
+            <div className="prefs-lang-list">
+              {(['ru', 'uz', 'en'] as AppLanguage[]).map((langCode) => {
+                const active = appLanguage === langCode
+                return (
+                  <button
+                    key={langCode}
+                    type="button"
+                    className={`prefs-lang-option ${active ? 'is-active' : ''}`}
+                    disabled={prefsSaving}
+                    onClick={() => {
+                      if (active) {
+                        setShowLanguageModal(false)
+                        return
+                      }
+                      void saveAppLanguage(langCode)
+                    }}
+                  >
+                    <span>{languageDisplayName(langCode, appLanguage)}</span>
+                    {active ? <span className="prefs-lang-option__mark">✓</span> : null}
+                  </button>
+                )
+              })}
+            </div>
+
+            {prefsError ? <div className="prefs-modal-card__error">{prefsError}</div> : null}
+          </div>
+        </div>
+      )}
+
       {inAppBillingEnabled && showBillingFlow && (
-        <div className="billing-flow-overlay" role="dialog" aria-modal="true" aria-label="Оплата подписки">
+        <div className="billing-flow-overlay" role="dialog" aria-modal="true" aria-label={lx('Оплата подписки', 'Subscription payment', "Obuna to'lovi")}>
           <div className="billing-flow-card" data-source={billingFlowSource}>
             <div className="billing-flow-card__head">
-              <div className="billing-flow-card__step">Шаг {billingStepNumber} из 3</div>
-              <button type="button" className="billing-flow-card__close" onClick={closeBillingFlow} aria-label="Закрыть">
+              <div className="billing-flow-card__step">{lx('Шаг', 'Step', 'Qadam')} {billingStepNumber} {lx('из', 'of', 'dan')} 3</div>
+              <button type="button" className="billing-flow-card__close" onClick={closeBillingFlow} aria-label={t('close')}>
                 ×
               </button>
             </div>
 
             {billingFlowStep === 'country' && (
               <>
-                <div className="billing-flow-card__title">Из какой вы страны?</div>
+                <div className="billing-flow-card__title">{lx('Из какой вы страны?', 'What country are you from?', "Siz qaysi mamlakatdansiz?")}</div>
                 <div className="billing-flow-card__text">
-                  Покажем только подходящие способы оплаты.
+                  {lx('Покажем только подходящие способы оплаты.', 'We will show only suitable payment methods.', "Faqat mos to'lov usullari ko'rsatiladi.")}
                 </div>
                 <div className="billing-flow-list">
-                  {BILLING_COUNTRIES.map((country) => (
+                  {billingCountries.map((country) => (
                     <button
                       key={country.code}
                       type="button"
@@ -8428,11 +9339,11 @@ useEffect(() => {
 
             {billingFlowStep === 'plan' && (
               <>
-                <div className="billing-flow-card__title">Выберите тариф</div>
-                <div className="billing-flow-card__text">Страна: {billingCountryLabel}</div>
+                <div className="billing-flow-card__title">{lx('Выберите тариф', 'Select a plan', 'Tarifni tanlang')}</div>
+                <div className="billing-flow-card__text">{lx('Страна', 'Country', 'Mamlakat')}: {billingCountryLabel}</div>
                 <div className="billing-flow-list">
                   {billingPlans.map((planKey) => {
-                    const plan = BILLING_PLAN_META[planKey]
+                    const plan = billingPlanMeta[planKey]
                     const planPriceLabel = getPlanPriceLabel(billingFlowCountry, planKey)
                     return (
                       <button
@@ -8461,9 +9372,9 @@ useEffect(() => {
 
             {billingFlowStep === 'method' && billingFlowPlan && (
               <>
-                <div className="billing-flow-card__title">Выберите способ оплаты</div>
+                <div className="billing-flow-card__title">{lx('Выберите способ оплаты', 'Select payment method', "To'lov usulini tanlang")}</div>
                 <div className="billing-flow-card__text">
-                  {billingSelectedPlan?.title || 'Подписка'} • {billingCountryLabel}
+                  {billingSelectedPlan?.title || lx('Подписка', 'Subscription', 'Obuna')} • {billingCountryLabel}
                 </div>
                 <div className="billing-flow-list">
                   {hasSbpMethod && (
@@ -8478,9 +9389,11 @@ useEffect(() => {
                       }}
                     >
                       <span className="billing-flow-option__title">
-                        {sbpBusyPlan === mapPlanToSbpPlan(billingFlowPlan) ? 'Создаю счёт СБП…' : 'СБП (внутри приложения)'}
+                        {sbpBusyPlan === mapPlanToSbpPlan(billingFlowPlan)
+                          ? lx('Создаю счёт СБП…', 'Creating SBP invoice…', 'SBP hisobi yaratilmoqda…')
+                          : lx('СБП (внутри приложения)', 'SBP (inside app)', 'SBP (ilova ichida)')}
                       </span>
-                      <span className="billing-flow-option__meta">Оплатите и вернитесь в mini app</span>
+                      <span className="billing-flow-option__meta">{lx('Оплатите и вернитесь в mini app', 'Pay and return to mini app', "To'lab, mini appga qayting")}</span>
                     </button>
                   )}
 
@@ -8494,9 +9407,11 @@ useEffect(() => {
                       }}
                     >
                       <span className="billing-flow-option__title">
-                        {clickBusyPlan === billingFlowPlan ? 'Создаю счёт CLICK…' : 'CLICK / карта через CLICK'}
+                        {clickBusyPlan === billingFlowPlan
+                          ? lx('Создаю счёт CLICK…', 'Creating CLICK invoice…', 'CLICK hisobi yaratilmoqda…')
+                          : lx('CLICK / карта через CLICK', 'CLICK / card via CLICK', 'CLICK / karta orqali CLICK')}
                       </span>
-                      <span className="billing-flow-option__meta">Откроется страница оплаты CLICK</span>
+                      <span className="billing-flow-option__meta">{lx('Откроется страница оплаты CLICK', 'CLICK payment page will open', "CLICK to'lov sahifasi ochiladi")}</span>
                     </button>
                   )}
                 </div>
@@ -8508,10 +9423,12 @@ useEffect(() => {
                 {hasPendingPayment && (
                   <button
                     type="button"
-                    className="billing-flow-status__link"
+                    className="billing-flow-status__link billing-flow-status__link--center"
                     onClick={() => setShowBillingPaymentHelp((prev) => !prev)}
                   >
-                    {showBillingPaymentHelp ? 'Скрыть' : 'Оплатили, но ошибка?'}
+                    {showBillingPaymentHelp
+                      ? lx('Скрыть', 'Hide', 'Yopish')
+                      : lx('Оплатили, но ошибка?', 'Paid but got an error?', "To'lov qilindi, lekin xatomi?")}
                   </button>
                 )}
                 {showBillingPaymentHelp && (
@@ -8519,27 +9436,38 @@ useEffect(() => {
                     {sbpOrderId && (
                       <button
                         type="button"
-                        className="billing-flow-status__link billing-flow-status__link--action"
+                        className="billing-flow-status__link billing-flow-status__link--action billing-flow-status__link--center"
                         disabled={sbpPolling}
                         onClick={() => {
                           void checkSbpStatus()
                         }}
                       >
-                        {sbpPolling ? 'Проверяю СБП…' : 'Проверить оплату СБП'}
+                        {sbpPolling
+                          ? lx('Проверяю СБП…', 'Checking SBP…', 'SBP tekshirilmoqda…')
+                          : lx('Проверить оплату СБП', 'Check SBP payment', "SBP to'lovini tekshirish")}
                       </button>
                     )}
                     {clickOrderId && (
                       <button
                         type="button"
-                        className="billing-flow-status__link billing-flow-status__link--action"
+                        className="billing-flow-status__link billing-flow-status__link--action billing-flow-status__link--center"
                         disabled={clickPolling}
                         onClick={() => {
                           void checkClickStatus()
                         }}
                       >
-                        {clickPolling ? 'Проверяю CLICK…' : 'Проверить оплату CLICK'}
+                        {clickPolling
+                          ? lx('Проверяю CLICK…', 'Checking CLICK…', 'CLICK tekshirilmoqda…')
+                          : lx('Проверить оплату CLICK', 'Check CLICK payment', "CLICK to'lovini tekshirish")}
                       </button>
                     )}
+                    <button
+                      type="button"
+                      className="billing-flow-status__link billing-flow-status__link--support billing-flow-status__link--center"
+                      onClick={() => openTelegramAndCloseMiniApp(SUPPORT_URL)}
+                    >
+                      {lx('Ошибка не уходит? Напишите в поддержку', 'Still an error? Contact support', "Xato saqlanib qoldimi? Qo'llab-quvvatlashga yozing")}
+                    </button>
                   </div>
                 )}
                 {!!combinedPaymentStatus && <div className="billing-flow-status__text">{combinedPaymentStatus}</div>}
@@ -8549,13 +9477,13 @@ useEffect(() => {
             <div className="billing-flow-card__foot">
               {billingFlowStep !== 'country' ? (
                 <button type="button" className="billing-flow-back" onClick={backBillingFlowStep}>
-                  ← Назад
+                  ← {lx('Назад', 'Back', 'Orqaga')}
                 </button>
               ) : (
                 <span />
               )}
               <button type="button" className="billing-flow-back" onClick={closeBillingFlow}>
-                Закрыть
+                {t('close')}
               </button>
             </div>
           </div>
@@ -8563,15 +9491,18 @@ useEffect(() => {
       )}
 
       {showAccessPaywall && (
-        <div className="paywall-overlay" role="dialog" aria-modal="true" aria-label="Доступ к раскладам">
+        <div className="paywall-overlay" role="dialog" aria-modal="true" aria-label={lx('Доступ к раскладам', 'Reading access', 'Yoyilma kirishi')}>
           <div className="paywall-card">
-            <div className="paywall-card__title">Бесплатные расклады закончились</div>
+            <div className="paywall-card__title">{lx('Бесплатные расклады закончились', 'Free readings are over', 'Bepul yoyilmalar tugadi')}</div>
             <div className="paywall-card__text">
-              Извините, мы не можем показать новый расклад: бесплатные попытки закончились и подписка не активна.
-              Подключите подписку, чтобы продолжить пользоваться сервисом.
+              {lx(
+                'Извините, мы не можем показать новый расклад: бесплатные попытки закончились и подписка не активна. Подключите безлимит, чтобы продолжить пользоваться сервисом.',
+                'Sorry, we cannot show a new spread: free attempts are over and subscription is inactive. Activate unlimited access to continue.',
+                "Kechirasiz, yangi yoyilma ko'rsatib bo'lmaydi: bepul urinishlar tugagan va obuna faol emas. Davom etish uchun cheksiz tarifni yoqing.",
+              )}
             </div>
             <div className="paywall-card__meta">
-              В этом месяце: {Math.max(0, Number(billing?.free_left ?? 0))} бесплатных из {Math.max(1, Number(billing?.free_limit ?? 5))}
+              {lx('Bu oyda', 'This month', 'Bu oyda')}: {Math.max(0, Number(billing?.free_left ?? 0))} {lx('bepul', 'free', 'bepul')} {lx('из', 'of', 'dan')} {Math.max(1, Number(billing?.free_limit ?? 5))}
             </div>
 
             <div className="paywall-card__actions">
@@ -8586,7 +9517,7 @@ useEffect(() => {
               >
                 <span className="glass-cta__inner">
                   <span className="glass-cta__rim" aria-hidden="true" />
-                  <span className="glass-cta__text">Подключить подписку</span>
+                  <span className="glass-cta__text">{lx('Подключить безлимит', 'Activate unlimited', 'Cheksizni yoqish')}</span>
                   <span className="glass-cta__spark" aria-hidden="true" />
                 </span>
               </button>
@@ -8602,23 +9533,23 @@ useEffect(() => {
               >
                 <span className="glass-cta__inner">
                   <span className="glass-cta__rim" aria-hidden="true" />
-                  <span className="glass-cta__text">Открыть профиль</span>
+                  <span className="glass-cta__text">{lx('Открыть профиль', 'Open profile', 'Profilni ochish')}</span>
                   <span className="glass-cta__spark" aria-hidden="true" />
                 </span>
               </button>
             </div>
 
             <button type="button" className="paywall-card__close" onClick={() => setShowAccessPaywall(false)}>
-              Позже
+              {lx('Позже', 'Later', 'Keyinroq')}
             </button>
           </div>
         </div>
       )}
 
       {showPaymentSuccessModal && (
-        <div className="paywall-overlay" role="dialog" aria-modal="true" aria-label="Оплата успешна">
+        <div className="paywall-overlay" role="dialog" aria-modal="true" aria-label={lx('Оплата успешна', 'Payment successful', "To'lov muvaffaqiyatli")}>
           <div className="paywall-card">
-            <div className="paywall-card__title">Оплата успешна</div>
+            <div className="paywall-card__title">{lx('Оплата успешна', 'Payment successful', "To'lov muvaffaqiyatli")}</div>
             <div className="paywall-card__text">{paymentSuccessText}</div>
             <div className="paywall-card__actions">
               <button
@@ -8628,7 +9559,7 @@ useEffect(() => {
               >
                 <span className="glass-cta__inner">
                   <span className="glass-cta__rim" aria-hidden="true" />
-                  <span className="glass-cta__text">Закрыть</span>
+                  <span className="glass-cta__text">{t('close')}</span>
                   <span className="glass-cta__spark" aria-hidden="true" />
                 </span>
               </button>
@@ -8652,7 +9583,7 @@ useEffect(() => {
               if (active instanceof HTMLElement) active.blur()
             }}
           >
-            Готово
+            {lx('Готово', 'Done', 'Tayyor')}
           </button>
         </div>
       )}

@@ -13,7 +13,7 @@ from datetime import datetime, timedelta, timezone
 from html import escape
 from io import BytesIO
 from types import SimpleNamespace
-from typing import Dict, Any, List, Optional, Set
+from typing import Dict, Any, List, Optional, Set, Tuple
 from urllib.parse import urlencode
 
 import asyncpg
@@ -52,6 +52,111 @@ from models import BotOpenUser, SupportTicket, User
 load_dotenv()
 
 logger = logging.getLogger("telegram_bot")
+
+SUPPORTED_LANGS = {"ru", "en", "uz"}
+
+
+def _normalize_bot_language(raw: Optional[str]) -> str:
+    text = str(raw or "").strip().lower().replace("_", "-")
+    if not text:
+        return "ru"
+    if text == "ru" or text.startswith("ru"):
+        return "ru"
+    if text == "en" or text.startswith("en"):
+        return "en"
+    if text == "uz" or text.startswith("uz"):
+        return "uz"
+    return "ru"
+
+
+def _lang_from_user(user: Any) -> str:
+    code = str(getattr(user, "language_code", "") or "").strip().lower()
+    return _normalize_bot_language(code)
+
+
+def _lang_from_update(update: Update, default: str = "ru") -> str:
+    if not update:
+        return _normalize_bot_language(default)
+    user = getattr(update, "effective_user", None)
+    if user:
+        return _lang_from_user(user)
+    cb = getattr(update, "callback_query", None)
+    if cb and getattr(cb, "from_user", None):
+        return _lang_from_user(cb.from_user)
+    msg = getattr(update, "message", None)
+    if msg and getattr(msg, "from_user", None):
+        return _lang_from_user(msg.from_user)
+    return _normalize_bot_language(default)
+
+
+def _tr(lang: str, ru: str, en: str, uz: str) -> str:
+    safe = _normalize_bot_language(lang)
+    if safe == "en":
+        return en
+    if safe == "uz":
+        return uz
+    return ru
+
+
+_LANG_PREF_CACHE: Dict[int, Tuple[str, float]] = {}
+_LANG_PREF_CACHE_TTL_SECONDS = 30
+
+
+def _extract_telegram_user_id(user: Any) -> int:
+    try:
+        return int(getattr(user, "id", 0) or 0)
+    except Exception:
+        return 0
+
+
+async def _lang_from_user_db(telegram_user_id: int, fallback: str = "ru") -> str:
+    safe_fallback = _normalize_bot_language(fallback)
+    tg_user_id = int(telegram_user_id or 0)
+    if tg_user_id <= 0:
+        return safe_fallback
+
+    now_ts = float(time.time())
+    cached = _LANG_PREF_CACHE.get(tg_user_id)
+    if cached and float(cached[1]) > now_ts:
+        return _normalize_bot_language(cached[0])
+
+    resolved = safe_fallback
+    try:
+        async with SessionLocal() as db:
+            q = await db.execute(select(User.app_language).where(User.telegram_id == tg_user_id))
+            value = q.scalar_one_or_none()
+            if value:
+                resolved = _normalize_bot_language(value)
+    except Exception as exc:
+        logger.debug("lang lookup failed for tg_user=%s: %s", tg_user_id, exc)
+
+    _LANG_PREF_CACHE[tg_user_id] = (resolved, now_ts + _LANG_PREF_CACHE_TTL_SECONDS)
+    return resolved
+
+
+async def _resolve_lang_from_user(user: Any, default: str = "ru") -> str:
+    fallback = _lang_from_user(user) if user else _normalize_bot_language(default)
+    tg_user_id = _extract_telegram_user_id(user)
+    return await _lang_from_user_db(tg_user_id, fallback=fallback)
+
+
+async def _resolve_lang_from_update(update: Update, default: str = "ru") -> str:
+    if not update:
+        return _normalize_bot_language(default)
+
+    user = getattr(update, "effective_user", None)
+    if user:
+        return await _resolve_lang_from_user(user, default=default)
+
+    cb = getattr(update, "callback_query", None)
+    if cb and getattr(cb, "from_user", None):
+        return await _resolve_lang_from_user(cb.from_user, default=default)
+
+    msg = getattr(update, "message", None)
+    if msg and getattr(msg, "from_user", None):
+        return await _resolve_lang_from_user(msg.from_user, default=default)
+
+    return _normalize_bot_language(default)
 
 
 def _env_int(name: str, default: int = 0) -> int:
@@ -387,19 +492,19 @@ PRODUCTS: List[Dict[str, Any]] = [
 ]
 
 PLAN_ORDER = ["sub_week", "sub_2weeks", "sub_month", "sub_year"]
-PLAN_TITLES = {
-    "sub_week": "Неделя",
-    "sub_2weeks": "2 недели",
-    "sub_month": "Месяц",
-    "sub_year": "Год",
+PLAN_TITLES: Dict[str, Dict[str, str]] = {
+    "sub_week": {"ru": "Неделя", "en": "Week", "uz": "Hafta"},
+    "sub_2weeks": {"ru": "2 недели", "en": "2 weeks", "uz": "2 hafta"},
+    "sub_month": {"ru": "Месяц", "en": "Month", "uz": "Oy"},
+    "sub_year": {"ru": "Год", "en": "Year", "uz": "Yil"},
 }
-COUNTRY_CHOICES: List[Dict[str, str]] = [
-    {"code": "ru", "label": "🇷🇺 Россия"},
-    {"code": "uz", "label": "🇺🇿 Узбекистан"},
-    {"code": "kz", "label": "🇰🇿 Казахстан"},
-    {"code": "by", "label": "🇧🇾 Беларусь"},
-    {"code": "kg", "label": "🇰🇬 Кыргызстан"},
-    {"code": "other", "label": "🌍 Другая страна"},
+COUNTRY_CHOICES: List[Dict[str, Any]] = [
+    {"code": "ru", "emoji": "🇷🇺", "name": {"ru": "Россия", "en": "Russia", "uz": "Rossiya"}},
+    {"code": "uz", "emoji": "🇺🇿", "name": {"ru": "Узбекистан", "en": "Uzbekistan", "uz": "O'zbekiston"}},
+    {"code": "kz", "emoji": "🇰🇿", "name": {"ru": "Казахстан", "en": "Kazakhstan", "uz": "Qozog'iston"}},
+    {"code": "by", "emoji": "🇧🇾", "name": {"ru": "Беларусь", "en": "Belarus", "uz": "Belarus"}},
+    {"code": "kg", "emoji": "🇰🇬", "name": {"ru": "Кыргызстан", "en": "Kyrgyzstan", "uz": "Qirg'iziston"}},
+    {"code": "other", "emoji": "🌍", "name": {"ru": "Другая страна", "en": "Other country", "uz": "Boshqa mamlakat"}},
 ]
 DEFAULT_COUNTRY_CODE = "ru"
 TERMS_PLACEHOLDER_TEXT = (
@@ -643,11 +748,22 @@ def _normalize_country_code(country_code: str) -> str:
     return code if code in available else DEFAULT_COUNTRY_CODE
 
 
-def _country_label(country_code: str) -> str:
+def _plan_title(plan_key: str, lang: str = "ru") -> str:
+    safe = _normalize_bot_language(lang)
+    key = str(plan_key or "").strip().lower()
+    labels = PLAN_TITLES.get(key) or {}
+    return str(labels.get(safe) or labels.get("ru") or key)
+
+
+def _country_label(country_code: str, lang: str = "ru") -> str:
+    safe_lang = _normalize_bot_language(lang)
     safe = _normalize_country_code(country_code)
     for item in COUNTRY_CHOICES:
         if item["code"] == safe:
-            return item["label"]
+            emoji = str(item.get("emoji") or "").strip()
+            names = item.get("name") or {}
+            name = str(names.get(safe_lang) or names.get("ru") or safe.upper())
+            return f"{emoji} {name}".strip()
     return safe.upper()
 
 
@@ -678,8 +794,8 @@ def _available_plan_keys_for_country(country_code: str) -> List[str]:
     return result
 
 
-def _plan_summary_label(plan_key: str, country_code: str) -> str:
-    title = PLAN_TITLES.get(plan_key, plan_key)
+def _plan_summary_label(plan_key: str, country_code: str, lang: str = "ru") -> str:
+    title = _plan_title(plan_key, lang)
     safe_country = _normalize_country_code(country_code)
 
     card_product = _card_product_for_country(plan_key, safe_country)
@@ -694,55 +810,64 @@ def _plan_summary_label(plan_key: str, country_code: str) -> str:
     return title
 
 
-def _country_keyboard() -> InlineKeyboardMarkup:
+def _country_keyboard(lang: str = "ru") -> InlineKeyboardMarkup:
     rows: List[List[InlineKeyboardButton]] = []
     for country in COUNTRY_CHOICES:
-        rows.append([InlineKeyboardButton(country["label"], callback_data=f"country:{country['code']}")])
+        code = str(country.get("code") or "").strip().lower()
+        rows.append([InlineKeyboardButton(_country_label(code, lang), callback_data=f"country:{code}")])
     return InlineKeyboardMarkup(rows)
 
 
-def _format_country_list() -> str:
-    return (
-        "<b>Тарифы AI Tarot</b>\n"
-        "Шаг 1 из 3: выберите страну.\n\n"
-        "Мы покажем подходящие способы оплаты и корректную валюту."
+def _format_country_list(lang: str = "ru") -> str:
+    return _tr(
+        lang,
+        "<b>Тарифы AI Tarot</b>\nШаг 1 из 3: выберите страну.\n\nМы покажем подходящие способы оплаты и корректную валюту.",
+        "<b>AI Tarot plans</b>\nStep 1 of 3: choose your country.\n\nWe will show suitable payment methods and currency.",
+        "<b>AI Tarot tariflari</b>\n3 bosqichdan 1-qadam: mamlakatingizni tanlang.\n\nMos to'lov usullari va valyutani ko'rsatamiz.",
     )
 
 
-def _plans_keyboard(country_code: str) -> InlineKeyboardMarkup:
+def _plans_keyboard(country_code: str, lang: str = "ru") -> InlineKeyboardMarkup:
     safe_country = _normalize_country_code(country_code)
     rows: List[List[InlineKeyboardButton]] = []
     for plan_key in _available_plan_keys_for_country(safe_country):
         rows.append(
             [
                 InlineKeyboardButton(
-                    _plan_summary_label(plan_key, safe_country),
+                    _plan_summary_label(plan_key, safe_country, lang),
                     callback_data=f"plan:{safe_country}:{plan_key}",
                 )
             ]
         )
     if not rows:
-        rows.append([InlineKeyboardButton("Обновить", callback_data=f"country:{safe_country}")])
-    rows.append([InlineKeyboardButton("⬅️ Назад к выбору страны", callback_data="country_menu")])
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    _tr(lang, "Обновить", "Refresh", "Yangilash"),
+                    callback_data=f"country:{safe_country}",
+                )
+            ]
+        )
+    rows.append([InlineKeyboardButton(_tr(lang, "⬅️ Назад к выбору страны", "⬅️ Back to country", "⬅️ Mamlakat tanloviga qaytish"), callback_data="country_menu")])
     return InlineKeyboardMarkup(rows)
 
 
-def _format_plan_list(country_code: str) -> str:
+def _format_plan_list(country_code: str, lang: str = "ru") -> str:
     safe_country = _normalize_country_code(country_code)
     parts: List[str] = [
-        "<b>Тарифы AI Tarot</b>",
-        f"Страна: <b>{_country_label(safe_country)}</b>",
-        "Шаг 2 из 3: выберите период подписки.",
+        _tr(lang, "<b>Тарифы AI Tarot</b>", "<b>AI Tarot plans</b>", "<b>AI Tarot tariflari</b>"),
+        f"{_tr(lang, 'Страна', 'Country', 'Mamlakat')}: <b>{_country_label(safe_country, lang)}</b>",
+        _tr(lang, "Шаг 2 из 3: выберите период подписки.", "Step 2 of 3: choose plan period.", "3 bosqichdan 2-qadam: obuna muddatini tanlang."),
         "",
     ]
     for plan_key in _available_plan_keys_for_country(safe_country):
-        parts.append(f"• <b>{_plan_summary_label(plan_key, safe_country)}</b>")
+        parts.append(f"• <b>{_plan_summary_label(plan_key, safe_country, lang)}</b>")
     parts.append("")
-    parts.append("Нажмите на подходящий план.")
+    parts.append(_tr(lang, "Нажмите на подходящий план.", "Tap a suitable plan.", "Mos tarifni tanlang."))
     return "\n".join(parts).strip()
 
 
-def _method_keyboard(plan_key: str, country_code: str) -> InlineKeyboardMarkup:
+def _method_keyboard(plan_key: str, country_code: str, lang: str = "ru") -> InlineKeyboardMarkup:
     safe_country = _normalize_country_code(country_code)
     rows: List[List[InlineKeyboardButton]] = []
 
@@ -753,9 +878,9 @@ def _method_keyboard(plan_key: str, country_code: str) -> InlineKeyboardMarkup:
         if card_product:
             rows.append(
                 [
-                    InlineKeyboardButton(
-                        f"🟢 СБП — {_format_amount_label(card_product)}",
-                        callback_data=f"sbp:{safe_country}:{plan_key}",
+                        InlineKeyboardButton(
+                            f"{_tr(lang, '🟢 СБП', '🟢 SBP', '🟢 SBP')} — {_format_amount_label(card_product)}",
+                            callback_data=f"sbp:{safe_country}:{plan_key}",
                     )
                 ]
             )
@@ -763,7 +888,7 @@ def _method_keyboard(plan_key: str, country_code: str) -> InlineKeyboardMarkup:
                 rows.append(
                     [
                         InlineKeyboardButton(
-                            f"🔁 СБП автоплатёж — {_format_amount_label(card_product)}",
+                            f"{_tr(lang, '🔁 СБП автоплатёж', '🔁 SBP autopay', '🔁 SBP avtotolov')} — {_format_amount_label(card_product)}",
                             callback_data=f"sbp_auto:{safe_country}:{plan_key}",
                         )
                     ]
@@ -771,7 +896,7 @@ def _method_keyboard(plan_key: str, country_code: str) -> InlineKeyboardMarkup:
             rows.append(
                 [
                     InlineKeyboardButton(
-                        f"💳 По карте или SberPay — {_format_amount_label(card_product)}",
+                        f"{_tr(lang, '💳 По карте или SberPay', '💳 Card or SberPay', '💳 Karta yoki SberPay')} — {_format_amount_label(card_product)}",
                         callback_data=f"buy:{card_product['code']}",
                     )
                 ]
@@ -780,17 +905,17 @@ def _method_keyboard(plan_key: str, country_code: str) -> InlineKeyboardMarkup:
         if click_product:
             rows.append(
                 [
-                    InlineKeyboardButton(
-                        f"🇺🇿 CLICK / карта через CLICK — {_format_amount_label(click_product)}",
-                        callback_data=f"buy:{click_product['code']}",
-                    )
-                ]
-            )
+                        InlineKeyboardButton(
+                            f'{_tr(lang, "🇺🇿 CLICK / карта через CLICK", "🇺🇿 CLICK / card via CLICK", "🇺🇿 CLICK / CLICK orqali karta")} — {_format_amount_label(click_product)}',
+                            callback_data=f"buy:{click_product['code']}",
+                        )
+                    ]
+                )
         if card_product:
             rows.append(
                 [
                     InlineKeyboardButton(
-                        f"💳 Международная карта — {_format_amount_label(card_product)}",
+                        f"{_tr(lang, '💳 Международная карта', '💳 International card', '💳 Xalqaro karta')} — {_format_amount_label(card_product)}",
                         callback_data=f"buy:{card_product['code']}",
                     )
                 ]
@@ -800,19 +925,19 @@ def _method_keyboard(plan_key: str, country_code: str) -> InlineKeyboardMarkup:
             rows.append(
                 [
                     InlineKeyboardButton(
-                        f"💳 Международная карта — {_format_amount_label(card_product)}",
+                        f"{_tr(lang, '💳 Международная карта', '💳 International card', '💳 Xalqaro karta')} — {_format_amount_label(card_product)}",
                         callback_data=f"buy:{card_product['code']}",
                     )
                 ]
             )
 
-    rows.append([InlineKeyboardButton("⬅️ Назад к планам", callback_data=f"country:{safe_country}")])
+    rows.append([InlineKeyboardButton(_tr(lang, "⬅️ Назад к планам", "⬅️ Back to plans", "⬅️ Tariflarga qaytish"), callback_data=f"country:{safe_country}")])
     return InlineKeyboardMarkup(rows)
 
 
-def _format_methods_text(plan_key: str, country_code: str) -> str:
+def _format_methods_text(plan_key: str, country_code: str, lang: str = "ru") -> str:
     safe_country = _normalize_country_code(country_code)
-    title = PLAN_TITLES.get(plan_key, plan_key)
+    title = _plan_title(plan_key, lang)
     methods: List[str] = []
 
     card_product = _card_product_for_country(plan_key, safe_country)
@@ -820,28 +945,39 @@ def _format_methods_text(plan_key: str, country_code: str) -> str:
 
     if safe_country == "ru":
         if card_product:
-            methods.append(f"• СБП — {_format_amount_label(card_product)}")
+            methods.append(f"• {_tr(lang, 'СБП', 'SBP', 'SBP')} — {_format_amount_label(card_product)}")
             if SBP_AUTOPAY_ENABLED and str(plan_key) == SBP_AUTOPAY_PLAN_KEY:
-                methods.append(f"• СБП автоплатёж — {_format_amount_label(card_product)} / месяц")
-            methods.append(f"• По карте / SberPay — {_format_amount_label(card_product)}")
+                methods.append(
+                    f"• {_tr(lang, 'СБП автоплатёж', 'SBP autopay', 'SBP avtotolov')} — {_format_amount_label(card_product)} / {_tr(lang, 'месяц', 'month', 'oy')}"
+                )
+            methods.append(f"• {_tr(lang, 'По карте / SberPay', 'Card / SberPay', 'Karta / SberPay')} — {_format_amount_label(card_product)}")
     elif safe_country == "uz":
         if click_product:
-            methods.append(f"• CLICK (приложение) или карта через CLICK — {_format_amount_label(click_product)}")
+            methods.append(
+                f'• {_tr(lang, "CLICK (приложение) или карта через CLICK", "CLICK app or card via CLICK", "CLICK ilovasi yoki CLICK orqali karta")} — {_format_amount_label(click_product)}'
+            )
             if plan_key == CLICK_INTRO_PLAN_KEY and CLICK_INTRO_FIRST_PURCHASE_ONLY:
-                methods.append("• Пробная неделя доступна только для первой покупки")
+                methods.append(
+                    _tr(
+                        lang,
+                        "• Пробная неделя доступна только для первой покупки",
+                        "• Trial week is available only for the first purchase",
+                        "• Sinov haftasi faqat birinchi xarid uchun",
+                    )
+                )
         if card_product:
-            methods.append(f"• Международная карта — {_format_amount_label(card_product)}")
+            methods.append(f"• {_tr(lang, 'Международная карта', 'International card', 'Xalqaro karta')} — {_format_amount_label(card_product)}")
     else:
         if card_product:
-            methods.append(f"• Международная карта — {_format_amount_label(card_product)}")
+            methods.append(f"• {_tr(lang, 'Международная карта', 'International card', 'Xalqaro karta')} — {_format_amount_label(card_product)}")
 
     if not methods:
-        methods.append("• Способы оплаты временно недоступны")
+        methods.append(_tr(lang, "• Способы оплаты временно недоступны", "• Payment methods are temporarily unavailable", "• To'lov usullari vaqtincha mavjud emas"))
 
     return (
         f"<b>{title}</b>\n"
-        f"Страна: <b>{_country_label(safe_country)}</b>\n"
-        "Шаг 3 из 3: выберите способ оплаты.\n\n"
+        f"{_tr(lang, 'Страна', 'Country', 'Mamlakat')}: <b>{_country_label(safe_country, lang)}</b>\n"
+        + _tr(lang, "Шаг 3 из 3: выберите способ оплаты.\n\n", "Step 3 of 3: choose payment method.\n\n", "3 bosqichdan 3-qadam: to'lov usulini tanlang.\n\n")
         + "\n".join(methods)
     )
 
@@ -862,30 +998,30 @@ def _parse_country_plan_callback(data: str, prefix: str) -> Tuple[str, str]:
     return DEFAULT_COUNTRY_CODE, ""
 
 
-def _format_price_list(mode: str = "menu") -> str:
+def _format_price_list(mode: str = "menu", lang: str = "ru") -> str:
     products = _products_for_mode(mode)
     mode_l = str(mode or "menu").strip().lower()
     parts: List[str] = [
-        "<b>Тарифы AI Tarot</b>",
-        "Плати внутри Telegram и получи доступ сразу после оплаты.",
+        _tr(lang, "<b>Тарифы AI Tarot</b>", "<b>AI Tarot plans</b>", "<b>AI Tarot tariflari</b>"),
+        _tr(lang, "Плати внутри Telegram и получи доступ сразу после оплаты.", "Pay inside Telegram and get access right after payment.", "Telegram ichida to'lang va darhol kirishga ega bo'ling."),
         "",
     ]
     if str(mode).lower() in {"buy_credits", "credits", "buy"}:
         parts = [
-            "<b>Подключение безлимита</b>",
-            "Выберите период подписки:",
+            _tr(lang, "<b>Подключение безлимита</b>", "<b>Activate unlimited</b>", "<b>Cheksiz kirishni yoqing</b>"),
+            _tr(lang, "Выберите период подписки:", "Choose subscription period:", "Obuna muddatini tanlang:"),
             "",
         ]
     elif mode_l in {"card", "cards", "sberpay", "card_sberpay"}:
         parts = [
-            "<b>По карте или SberPay</b>",
-            "Выберите период подписки:",
+            _tr(lang, "<b>По карте или SberPay</b>", "<b>Card or SberPay</b>", "<b>Karta yoki SberPay</b>"),
+            _tr(lang, "Выберите период подписки:", "Choose subscription period:", "Obuna muddatini tanlang:"),
             "",
         ]
     elif mode_l in {"click", "uz", "uzbekistan", "click_card", "card_click", "clickcard"}:
         parts = [
-            "<b>Оплата через CLICK / картой через CLICK</b>",
-            "Выберите период подписки:",
+            _tr(lang, "<b>Оплата через CLICK / картой через CLICK</b>", "<b>CLICK payment / card via CLICK</b>", "<b>CLICK to'lovi / CLICK orqali karta</b>"),
+            _tr(lang, "Выберите период подписки:", "Choose subscription period:", "Obuna muddatini tanlang:"),
             "",
         ]
 
@@ -895,15 +1031,18 @@ def _format_price_list(mode: str = "menu") -> str:
         if hint:
             parts.append(hint)
         parts.append("")
-    parts.append("Нажми на подходящий план, чтобы получить счёт.")
+    parts.append(_tr(lang, "Нажми на подходящий план, чтобы получить счёт.", "Tap a suitable plan to get invoice.", "Hisob olish uchun mos tarifni bosing."))
     return "\n".join(parts).strip()
 
 
-def _price_keyboard(mode: str = "menu") -> InlineKeyboardMarkup:
+def _price_keyboard(mode: str = "menu", lang: str = "ru") -> InlineKeyboardMarkup:
     products = _products_for_mode(mode)
     rows: List[List[InlineKeyboardButton]] = []
     for product in products:
-        rows.append([InlineKeyboardButton(product["menu_label"], callback_data=f"buy:{product['code']}")])
+        label = str(product.get("menu_label") or "").strip()
+        if not label:
+            label = _plan_title(_plan_key_from_code(str(product.get("code") or "")), lang)
+        rows.append([InlineKeyboardButton(label, callback_data=f"buy:{product['code']}")])
     return InlineKeyboardMarkup(rows)
 
 
@@ -924,7 +1063,18 @@ def _bot_deeplink(mode: str) -> Optional[str]:
     return f"https://t.me/{username}"
 
 
-def _build_app_button(custom_text: Optional[str] = None) -> Optional[InlineKeyboardButton]:
+def _app_button_text(lang: str = "ru") -> str:
+    default_text = _tr(lang, "🚀 Открыть приложение", "🚀 Open app", "🚀 Ilovani ochish")
+    raw = str(APP_BUTTON_TEXT or "").strip()
+    if not raw:
+        return default_text
+    # Preserve custom env only for Russian locale to avoid mixed-language labels.
+    if _normalize_bot_language(lang) == "ru":
+        return raw
+    return default_text
+
+
+def _build_app_button(custom_text: Optional[str] = None, *, lang: str = "ru") -> Optional[InlineKeyboardButton]:
     """
     Кнопка открытия Mini App.
     Если https-домен (добавлен в BotFather Web App) → web_app кнопка.
@@ -935,7 +1085,7 @@ def _build_app_button(custom_text: Optional[str] = None) -> Optional[InlineKeybo
 
     url = APP_URL_RAW
 
-    text = str(custom_text or APP_BUTTON_TEXT).strip() or APP_BUTTON_TEXT
+    text = str(custom_text or _app_button_text(lang)).strip() or _app_button_text(lang)
     if url.startswith("https://t.me/"):
         return InlineKeyboardButton(text, url=url)
 
@@ -946,116 +1096,111 @@ def _build_app_button(custom_text: Optional[str] = None) -> Optional[InlineKeybo
     return None
 
 
-def _welcome_keyboard() -> InlineKeyboardMarkup:
+def _welcome_keyboard(lang: str = "ru") -> InlineKeyboardMarkup:
     rows: List[List[InlineKeyboardButton]] = []
-    app_btn = _build_app_button(APP_BUTTON_TEXT)
+    app_btn = _build_app_button(_app_button_text(lang), lang=lang)
     if app_btn:
         rows.append([app_btn])
     rows.append(
         [
-            InlineKeyboardButton("💎 Подключить подписку", callback_data="menu"),
-            InlineKeyboardButton("💬 Поддержка", callback_data="support"),
+            InlineKeyboardButton(_tr(lang, "💎 Подключить подписку", "💎 Buy subscription", "💎 Obuna olish"), callback_data="menu"),
+            InlineKeyboardButton(_tr(lang, "💬 Поддержка", "💬 Support", "💬 Yordam"), callback_data="support"),
         ]
     )
     rows.append(
         [
-            InlineKeyboardButton("📄 Соглашение", callback_data="doc:terms"),
-            InlineKeyboardButton("🔐 Политика", callback_data="doc:privacy"),
+            InlineKeyboardButton(_tr(lang, "📄 Соглашение", "📄 Terms", "📄 Kelishuv"), callback_data="doc:terms"),
+            InlineKeyboardButton(_tr(lang, "🔐 Политика", "🔐 Privacy", "🔐 Maxfiylik"), callback_data="doc:privacy"),
         ]
     )
-    rows.append([InlineKeyboardButton("ℹ️ Как начать", callback_data="howto")])
+    rows.append([InlineKeyboardButton(_tr(lang, "ℹ️ Как начать", "ℹ️ How to start", "ℹ️ Qanday boshlash"), callback_data="howto")])
     return InlineKeyboardMarkup(rows)
 
 
-def _start_open_keyboard() -> Optional[InlineKeyboardMarkup]:
-    app_btn = _build_app_button(APP_BUTTON_TEXT)
+def _start_open_keyboard(lang: str = "ru") -> Optional[InlineKeyboardMarkup]:
+    app_btn = _build_app_button(_app_button_text(lang), lang=lang)
     if not app_btn:
         return None
     return InlineKeyboardMarkup([[app_btn]])
 
 
-def _quick_reply_keyboard() -> Optional[ReplyKeyboardMarkup]:
+def _quick_reply_keyboard(lang: str = "ru") -> Optional[ReplyKeyboardMarkup]:
     rows: List[List[KeyboardButton]] = []
     webapp_url = _app_webapp_url()
+    app_text = _app_button_text(lang)
 
     if webapp_url:
-        rows.append([KeyboardButton(APP_BUTTON_TEXT, web_app=WebAppInfo(url=webapp_url))])
+        rows.append([KeyboardButton(app_text, web_app=WebAppInfo(url=webapp_url))])
     elif APP_URL_RAW:
-        rows.append([KeyboardButton(APP_BUTTON_TEXT)])
+        rows.append([KeyboardButton(app_text)])
 
-    rows.append([KeyboardButton("💎 Подключить подписку"), KeyboardButton("💬 Поддержка")])
-    rows.append([KeyboardButton("📄 Соглашение"), KeyboardButton("🔐 Политика")])
-    rows.append([KeyboardButton("ℹ️ Как начать")])
+    rows.append([KeyboardButton(_tr(lang, "💎 Подключить подписку", "💎 Buy subscription", "💎 Obuna olish")), KeyboardButton(_tr(lang, "💬 Поддержка", "💬 Support", "💬 Yordam"))])
+    rows.append([KeyboardButton(_tr(lang, "📄 Соглашение", "📄 Terms", "📄 Kelishuv")), KeyboardButton(_tr(lang, "🔐 Политика", "🔐 Privacy", "🔐 Maxfiylik"))])
+    rows.append([KeyboardButton(_tr(lang, "ℹ️ Как начать", "ℹ️ How to start", "ℹ️ Qanday boshlash"))])
     return ReplyKeyboardMarkup(
         rows,
         resize_keyboard=True,
         one_time_keyboard=False,
         is_persistent=True,
-        input_field_placeholder="Выберите действие",
+        input_field_placeholder=_tr(lang, "Выберите действие", "Choose action", "Harakatni tanlang"),
     )
 
 
-def _howto_text() -> str:
-    return (
-        "<b>Как быстро начать</b>\n\n"
-        "1) Нажмите <b>🚀 Открыть приложение</b>\n"
-        "2) Разрешите открытие мини‑приложения в Telegram\n"
-        "3) Задайте вопрос и выберите расклад\n\n"
-        "💡 Оплату можно открыть кнопкой <b>«💎 Подключить подписку»</b>.\n"
-        "💬 Поддержка: <b>/support</b>\n"
-        "📄 Соглашение: <b>/terms</b>\n"
-        "🔐 Политика: <b>/privacy</b>\n"
-        "🗑 Удаление данных: <b>/forgetme</b>"
+def _howto_text(lang: str = "ru") -> str:
+    return _tr(
+        lang,
+        "<b>Как быстро начать</b>\n\n1) Нажмите <b>🚀 Открыть приложение</b>\n2) Разрешите открытие мини‑приложения в Telegram\n3) Задайте вопрос и выберите расклад\n\n💡 Оплату можно открыть кнопкой <b>«💎 Подключить подписку»</b>.\n💬 Поддержка: <b>/support</b>\n📄 Соглашение: <b>/terms</b>\n🔐 Политика: <b>/privacy</b>\n🗑 Удаление данных: <b>/forgetme</b>",
+        "<b>How to start quickly</b>\n\n1) Tap <b>🚀 Open app</b>\n2) Allow mini app opening in Telegram\n3) Enter your question and choose spread\n\n💡 Open payment with <b>💎 Buy subscription</b>.\n💬 Support: <b>/support</b>\n📄 Terms: <b>/terms</b>\n🔐 Privacy: <b>/privacy</b>\n🗑 Delete data: <b>/forgetme</b>",
+        "<b>Tez boshlash</b>\n\n1) <b>🚀 Ilovani ochish</b> tugmasini bosing\n2) Telegramda mini ilovani ochishga ruxsat bering\n3) Savol kiriting va yoyilmani tanlang\n\n💡 To'lovni <b>💎 Obuna olish</b> tugmasi orqali oching.\n💬 Yordam: <b>/support</b>\n📄 Kelishuv: <b>/terms</b>\n🔐 Maxfiylik: <b>/privacy</b>\n🗑 Ma'lumotlarni o'chirish: <b>/forgetme</b>",
     )
 
 
-def _subscription_manage_text() -> str:
+def _subscription_manage_text(lang: str = "ru") -> str:
     if SBP_AUTOPAY_ENABLED:
-        return (
-            "<b>Управление подпиской</b>\n\n"
-            "Выберите действие:\n"
-            "• подключить/настроить СБП автоплатёж;\n"
-            "• запросить отмену подписки через поддержку;\n"
-            "• перейти к тарифам и оплате."
+        return _tr(
+            lang,
+            "<b>Управление подпиской</b>\n\nВыберите действие:\n• подключить/настроить СБП автоплатёж;\n• запросить отмену подписки через поддержку;\n• перейти к тарифам и оплате.",
+            "<b>Subscription management</b>\n\nChoose action:\n• connect/configure SBP autopay;\n• request cancellation via support;\n• open plans and payment.",
+            "<b>Obunani boshqarish</b>\n\nHarakatni tanlang:\n• SBP avtotolovni yoqish/sozlash;\n• yordam orqali bekor qilish so'rovi;\n• tariflar va to'lovga o'tish.",
         )
-    return (
-        "<b>Управление подпиской</b>\n\n"
-        "Выберите действие:\n"
-        "• запросить отмену подписки через поддержку;\n"
-        "• перейти к тарифам и оплате."
+    return _tr(
+        lang,
+        "<b>Управление подпиской</b>\n\nВыберите действие:\n• запросить отмену подписки через поддержку;\n• перейти к тарифам и оплате.",
+        "<b>Subscription management</b>\n\nChoose action:\n• request cancellation via support;\n• open plans and payment.",
+        "<b>Obunani boshqarish</b>\n\nHarakatni tanlang:\n• yordam orqali bekor qilish so'rovi;\n• tariflar va to'lovga o'tish.",
     )
 
 
-def _subscription_manage_keyboard() -> InlineKeyboardMarkup:
+def _subscription_manage_keyboard(lang: str = "ru") -> InlineKeyboardMarkup:
     rows: List[List[InlineKeyboardButton]] = []
     if SBP_AUTOPAY_ENABLED:
         rows.append(
             [
                 InlineKeyboardButton(
-                    "🔁 СБП автоплатёж",
+                    _tr(lang, "🔁 СБП автоплатёж", "🔁 SBP autopay", "🔁 SBP avtotolov"),
                     callback_data=f"sbp_auto:{SBP_AUTOPAY_PLAN_KEY}",
                 )
             ]
         )
-    rows.append([InlineKeyboardButton("🛑 Как отменить подписку", callback_data="sub_cancel")])
-    rows.append([InlineKeyboardButton("💳 Тарифы и оплата", callback_data="menu")])
+    rows.append([InlineKeyboardButton(_tr(lang, "🛑 Как отменить подписку", "🛑 How to cancel", "🛑 Qanday bekor qilish"), callback_data="sub_cancel")])
+    rows.append([InlineKeyboardButton(_tr(lang, "💳 Тарифы и оплата", "💳 Plans and payment", "💳 Tariflar va to'lov"), callback_data="menu")])
     return InlineKeyboardMarkup(rows)
 
 
-def _subscription_cancel_text() -> str:
-    return (
-        "🛑 <b>Отмена подписки</b>\n\n"
-        "Чтобы отменить подписку, напишите в поддержку одним сообщением:\n"
-        "например, «Прошу отменить подписку».\n\n"
-        "Ответ придёт сюда же, в этот чат."
+def _subscription_cancel_text(lang: str = "ru") -> str:
+    return _tr(
+        lang,
+        "🛑 <b>Отмена подписки</b>\n\nЧтобы отменить подписку, напишите в поддержку одним сообщением:\nнапример, «Прошу отменить подписку».\n\nОтвет придёт сюда же, в этот чат.",
+        "🛑 <b>Cancel subscription</b>\n\nTo cancel, send one support message, for example: “Please cancel my subscription”.\n\nThe response will come to this chat.",
+        "🛑 <b>Obunani bekor qilish</b>\n\nBekor qilish uchun yordamga bitta xabar yozing:\nmasalan, “Obunani bekor qiling”.\n\nJavob shu chatga keladi.",
     )
 
 
-def _subscription_cancel_keyboard() -> InlineKeyboardMarkup:
+def _subscription_cancel_keyboard(lang: str = "ru") -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         [
-            [InlineKeyboardButton("💬 Написать в поддержку", callback_data="support")],
-            [InlineKeyboardButton("⬅️ Назад к управлению подпиской", callback_data="sub_manage")],
+            [InlineKeyboardButton(_tr(lang, "💬 Написать в поддержку", "💬 Contact support", "💬 Yordamga yozish"), callback_data="support")],
+            [InlineKeyboardButton(_tr(lang, "⬅️ Назад к управлению подпиской", "⬅️ Back to subscription", "⬅️ Obuna boshqaruviga qaytish"), callback_data="sub_manage")],
         ]
     )
 
@@ -1065,31 +1210,38 @@ async def _send_legal_document(
     chat_id: int,
     context: ContextTypes.DEFAULT_TYPE,
     kind: str,
+    lang: str = "ru",
 ) -> None:
     kind_l = str(kind or "").strip().lower()
     if kind_l == "privacy":
         filename = "ai_taro_privacy_policy_draft.txt"
-        caption = "🔐 Политика конфиденциальности (черновик)"
+        caption = _tr(lang, "🔐 Политика конфиденциальности (черновик)", "🔐 Privacy policy (draft)", "🔐 Maxfiylik siyosati (qoralama)")
         text = PRIVACY_PLACEHOLDER_TEXT
     else:
         filename = "ai_taro_user_agreement_draft.txt"
-        caption = "📄 Пользовательское соглашение (черновик)"
+        caption = _tr(lang, "📄 Пользовательское соглашение (черновик)", "📄 Terms of service (draft)", "📄 Foydalanuvchi kelishuvi (qoralama)")
         text = TERMS_PLACEHOLDER_TEXT
 
     content = BytesIO(text.encode("utf-8"))
     content.name = filename
+    caption_suffix = _tr(
+        lang,
+        "Финальную версию заменим позже без изменения кнопок.",
+        "Final version will replace this later without changing buttons.",
+        "Yakuniy versiya keyinroq tugmalarni o'zgartirmasdan almashtiriladi.",
+    )
     await context.bot.send_document(
         chat_id=chat_id,
         document=InputFile(content, filename=filename),
-        caption=f"{caption}\nФинальную версию заменим позже без изменения кнопок.",
+        caption=f"{caption}\n{caption_suffix}",
     )
 
 
-def _forgetme_confirm_keyboard() -> InlineKeyboardMarkup:
+def _forgetme_confirm_keyboard(lang: str = "ru") -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         [
-            [InlineKeyboardButton("🗑 Да, удалить мои данные", callback_data="forgetme_confirm")],
-            [InlineKeyboardButton("Отмена", callback_data="forgetme_cancel")],
+            [InlineKeyboardButton(_tr(lang, "🗑 Да, удалить мои данные", "🗑 Yes, delete my data", "🗑 Ha, ma'lumotlarimni o'chiring"), callback_data="forgetme_confirm")],
+            [InlineKeyboardButton(_tr(lang, "Отмена", "Cancel", "Bekor qilish"), callback_data="forgetme_cancel")],
         ]
     )
 
@@ -1107,20 +1259,37 @@ def _cleanup_support_runtime_for_user(telegram_user_id: int) -> None:
 async def _forgetme_delete_user_data(*, telegram_user_id: int) -> Dict[str, Any]:
     if telegram_user_id <= 0:
         return {"ok": False, "reason": "invalid_user"}
-    async with SessionLocal() as db:
-        try:
-            q = await db.execute(select(User).where(User.telegram_id == int(telegram_user_id)))
-            row = q.scalar_one_or_none()
-            if not row:
-                return {"ok": True, "deleted": False}
-            await db.delete(row)
-            await db.commit()
-            _cleanup_support_runtime_for_user(int(telegram_user_id))
-            return {"ok": True, "deleted": True}
-        except Exception as exc:
-            await db.rollback()
-            logger.exception("forgetme failed for tg_user=%s: %s", telegram_user_id, exc)
-            return {"ok": False, "reason": "db_error", "error": str(exc)}
+    tg_user_id = int(telegram_user_id)
+    conn: Optional[asyncpg.Connection] = None
+    try:
+        # Important: bot handlers run in a dedicated event loop thread.
+        # Using a direct asyncpg connection here avoids cross-loop pool reuse
+        # from SessionLocal that may trigger "Future attached to a different loop".
+        dsn = _database_dsn_for_asyncpg()
+        conn = await asyncpg.connect(dsn=dsn)
+
+        async with conn.transaction():
+            deleted_main = await conn.fetchval(
+                "DELETE FROM users WHERE telegram_id = $1 RETURNING id",
+                tg_user_id,
+            )
+            # Additional personal traces that are not guaranteed to be linked by FK.
+            await conn.execute("DELETE FROM bot_open_users WHERE telegram_id = $1", tg_user_id)
+            await conn.execute("DELETE FROM bot_pm_bootstrap WHERE telegram_id = $1", tg_user_id)
+            await conn.execute("DELETE FROM support_tickets WHERE telegram_user_id = $1", tg_user_id)
+
+        _cleanup_support_runtime_for_user(tg_user_id)
+        _LANG_PREF_CACHE.pop(tg_user_id, None)
+        return {"ok": True, "deleted": bool(deleted_main)}
+    except Exception as exc:
+        logger.exception("forgetme failed for tg_user=%s: %s", tg_user_id, exc)
+        return {"ok": False, "reason": "db_error", "error": str(exc)}
+    finally:
+        if conn is not None:
+            try:
+                await conn.close()
+            except Exception:
+                pass
 
 
 def _support_target_enabled() -> bool:
@@ -1142,15 +1311,15 @@ def _build_support_ticket_id(user_id: int) -> str:
     return f"SUP-{stamp}-{int(user_id)}-{rnd}"
 
 
-def _support_user_reply_markup(ticket_id: Optional[str] = None) -> InlineKeyboardMarkup:
+def _support_user_reply_markup(ticket_id: Optional[str] = None, lang: str = "ru") -> InlineKeyboardMarkup:
     safe_ticket = str(ticket_id or "").strip()
     support_cb = f"support:{safe_ticket}" if safe_ticket else "support"
     close_cb = f"support_close:{safe_ticket}" if safe_ticket else "support_close"
     return InlineKeyboardMarkup(
         [
             [
-                InlineKeyboardButton("💬 Ответить", callback_data=support_cb),
-                InlineKeyboardButton("✅ Закрыть диалог", callback_data=close_cb),
+                InlineKeyboardButton(_tr(lang, "💬 Ответить", "💬 Reply", "💬 Javob berish"), callback_data=support_cb),
+                InlineKeyboardButton(_tr(lang, "✅ Закрыть диалог", "✅ Close chat", "✅ Dialogni yopish"), callback_data=close_cb),
             ]
         ]
     )
@@ -1476,19 +1645,63 @@ async def _ensure_bot_ui(context: ContextTypes.DEFAULT_TYPE) -> None:
     if _BOT_UI_CONFIGURED:
         return
     try:
-        await context.bot.set_my_commands(
-            [
-                BotCommand("start", "Начать"),
-                BotCommand("menu", "Тарифы и оплата"),
-                BotCommand("help", "Как начать"),
-                BotCommand("support", "Написать в поддержку"),
-                BotCommand("terms", "Пользовательское соглашение"),
-                BotCommand("privacy", "Политика конфиденциальности"),
-                BotCommand("forgetme", "Удалить персональные данные"),
-            ]
-        )
+        commands_ru = [
+            BotCommand("start", "Начать"),
+            BotCommand("menu", "Тарифы и оплата"),
+            BotCommand("help", "Как начать"),
+            BotCommand("support", "Написать в поддержку"),
+            BotCommand("terms", "Пользовательское соглашение"),
+            BotCommand("privacy", "Политика конфиденциальности"),
+            BotCommand("forgetme", "Удалить персональные данные"),
+        ]
+        commands_en = [
+            BotCommand("start", "Start"),
+            BotCommand("menu", "Plans and payment"),
+            BotCommand("help", "How to start"),
+            BotCommand("support", "Contact support"),
+            BotCommand("terms", "Terms of service"),
+            BotCommand("privacy", "Privacy policy"),
+            BotCommand("forgetme", "Delete personal data"),
+        ]
+        commands_uz = [
+            BotCommand("start", "Boshlash"),
+            BotCommand("menu", "Tariflar va to'lov"),
+            BotCommand("help", "Qanday boshlash"),
+            BotCommand("support", "Yordamga yozish"),
+            BotCommand("terms", "Foydalanuvchi kelishuvi"),
+            BotCommand("privacy", "Maxfiylik siyosati"),
+            BotCommand("forgetme", "Shaxsiy ma'lumotlarni o'chirish"),
+        ]
+
+        await context.bot.set_my_commands(commands_ru)
+        await context.bot.set_my_commands(commands_en, language_code="en")
+        await context.bot.set_my_commands(commands_uz, language_code="uz")
+
         await context.bot.set_my_short_description(BOT_SHORT_DESCRIPTION)
+        await context.bot.set_my_short_description(
+            "AI Tarot mini app with readings and AI interpretations.",
+            language_code="en",
+        )
+        await context.bot.set_my_short_description(
+            "AI Tarot mini ilovasi: yoyilmalar va AI talqinlari.",
+            language_code="uz",
+        )
+
         await context.bot.set_my_description(BOT_DESCRIPTION)
+        await context.bot.set_my_description(
+            (
+                "AI Tarot is a mini app with tarot spreads and AI interpretation.\n"
+                "To begin, press Start and tap “Open app”."
+            ),
+            language_code="en",
+        )
+        await context.bot.set_my_description(
+            (
+                "AI Tarot — yoyilmalar va AI talqinli mini ilova.\n"
+                "Boshlash uchun Start tugmasini bosib, “Ilovani ochish”ni tanlang."
+            ),
+            language_code="uz",
+        )
         webapp_url = _app_webapp_url()
         if webapp_url:
             await context.bot.set_chat_menu_button(
@@ -1504,12 +1717,40 @@ async def configure_bot_ui_at_startup(application: Application) -> None:
     await _ensure_bot_ui(SimpleNamespace(bot=application.bot))
 
 
-async def _send_start_panel(chat_id: int, context: ContextTypes.DEFAULT_TYPE) -> None:
-    start_inline_kb = _start_open_keyboard()
+def _start_panel_text(lang: str = "ru") -> str:
+    if _normalize_bot_language(lang) == "ru" and str(START_ONBOARDING_TEXT or "").strip():
+        return START_ONBOARDING_TEXT
+    return _tr(
+        lang,
+        START_ONBOARDING_TEXT,
+        (
+            "👋 <b>Welcome to AI Taro</b>\n\n"
+            "<b>Free:</b>\n"
+            "• daily card of the day\n"
+            "• <b>5 readings per month</b>\n\n"
+            "Need unlimited access? Tap <b>💎 Buy subscription</b>.\n"
+            "To begin, tap <b>🚀 Open app</b>.\n\n"
+            "By opening the app, you accept Terms and Privacy Policy."
+        ),
+        (
+            "👋 <b>AI Taroga xush kelibsiz</b>\n\n"
+            "<b>Bepul:</b>\n"
+            "• har kuni kun kartasi\n"
+            "• <b>oyiga 5 ta yoyilma</b>\n\n"
+            "Cheksiz kirish kerakmi? <b>💎 Obuna olish</b> tugmasini bosing.\n"
+            "Boshlash uchun <b>🚀 Ilovani ochish</b> tugmasini bosing.\n\n"
+            "Ilovani ochish orqali Kelishuv va Maxfiylik siyosatiga rozilik bildirasiz."
+        ),
+    )
+
+
+async def _send_start_panel(chat_id: int, context: ContextTypes.DEFAULT_TYPE, *, lang: str = "ru") -> None:
+    start_text = _start_panel_text(lang)
+    start_inline_kb = _start_open_keyboard(lang)
     if start_inline_kb:
         await context.bot.send_message(
             chat_id=chat_id,
-            text=START_ONBOARDING_TEXT,
+            text=start_text,
             parse_mode=ParseMode.HTML,
             reply_markup=start_inline_kb,
         )
@@ -1517,9 +1758,9 @@ async def _send_start_panel(chat_id: int, context: ContextTypes.DEFAULT_TYPE) ->
 
     await context.bot.send_message(
         chat_id=chat_id,
-        text=START_ONBOARDING_TEXT,
+        text=start_text,
         parse_mode=ParseMode.HTML,
-        reply_markup=_welcome_keyboard(),
+        reply_markup=_welcome_keyboard(lang),
     )
 
 
@@ -1725,23 +1966,24 @@ async def _send_menu(
     message=None,
     include_app_link: bool = False,
     mode: str = "menu",
+    lang: str = "ru",
 ) -> None:
     mode_l = str(mode or "menu").strip().lower()
     if mode_l in {"menu", "buy_credits", "credits", "buy", "country_menu"}:
-        text = _format_country_list()
-        markup = _country_keyboard()
+        text = _format_country_list(lang)
+        markup = _country_keyboard(lang)
     elif mode_l in {"click", "uz", "uzbekistan", "click_card", "card_click", "clickcard"}:
-        text = _format_plan_list("uz")
-        markup = _plans_keyboard("uz")
+        text = _format_plan_list("uz", lang)
+        markup = _plans_keyboard("uz", lang)
     elif mode_l in {"card", "cards", "sberpay", "card_sberpay", "ru", "russia"}:
-        text = _format_plan_list("ru")
-        markup = _plans_keyboard("ru")
+        text = _format_plan_list("ru", lang)
+        markup = _plans_keyboard("ru", lang)
     elif mode_l in {"kz", "by", "kg", "other"}:
-        text = _format_plan_list(mode_l)
-        markup = _plans_keyboard(mode_l)
+        text = _format_plan_list(mode_l, lang)
+        markup = _plans_keyboard(mode_l, lang)
     else:
-        text = _format_country_list()
-        markup = _country_keyboard()
+        text = _format_country_list(lang)
+        markup = _country_keyboard(lang)
 
     if message:
         await message.edit_text(text, reply_markup=markup, parse_mode=ParseMode.HTML)
@@ -1749,17 +1991,27 @@ async def _send_menu(
         await context.bot.send_message(chat_id=chat_id, text=text, reply_markup=markup, parse_mode=ParseMode.HTML)
 
         if include_app_link:
-            app_btn = _build_app_button()
+            app_btn = _build_app_button(lang=lang)
             if app_btn:
                 await context.bot.send_message(
                     chat_id=chat_id,
-                    text="Открой приложение AI Tarot в Telegram, чтобы привязать профиль и видеть свои покупки.",
+                    text=_tr(
+                        lang,
+                        "Открой приложение AI Tarot в Telegram, чтобы привязать профиль и видеть свои покупки.",
+                        "Open AI Tarot mini app in Telegram to link your profile and view purchases.",
+                        "Profilni bog'lash va xaridlarni ko'rish uchun Telegram ichida AI Tarot ilovasini oching.",
+                    ),
                     reply_markup=InlineKeyboardMarkup([[app_btn]]),
                 )
             else:
                 await context.bot.send_message(
                     chat_id=chat_id,
-                    text="⚠️ Не задан TELEGRAM_APP_URL — кнопка открытия мини-приложения не показана.",
+                    text=_tr(
+                        lang,
+                        "⚠️ Не задан TELEGRAM_APP_URL — кнопка открытия мини-приложения не показана.",
+                        "⚠️ TELEGRAM_APP_URL is not set, mini app button is hidden.",
+                        "⚠️ TELEGRAM_APP_URL sozlanmagan — mini ilova tugmasi yashirildi.",
+                    ),
                 )
 
 
@@ -1817,15 +2069,16 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
 
     logger.info("start: tg_user=%s bot_version=%s", getattr(update.effective_user, "id", None), BOT_VERSION)
+    lang = await _resolve_lang_from_update(update)
     mode = str((context.args or [""])[0] or "").strip().lower()
     await _track_bot_open(update=update, mode=mode)
     await _ensure_bot_ui(context)
 
     if mode in {"menu", "buy", "buy_credits", "credits"}:
-        await _send_menu(update.effective_chat.id, context, include_app_link=False, mode="menu")
+        await _send_menu(update.effective_chat.id, context, include_app_link=False, mode="menu", lang=lang)
         return
     if mode in {"card", "cards", "sberpay", "card_sberpay", "click", "uz", "uzbekistan", "click_card", "card_click", "clickcard"}:
-        await _send_menu(update.effective_chat.id, context, include_app_link=False, mode=mode)
+        await _send_menu(update.effective_chat.id, context, include_app_link=False, mode=mode, lang=lang)
         return
     if mode in {"support", "help_support"}:
         support_uid = int(getattr(update.effective_user, "id", 0) or 0)
@@ -1833,20 +2086,20 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         SUPPORT_PENDING_TICKET_BY_USER.pop(support_uid, None)
         await context.bot.send_message(
             chat_id=update.effective_chat.id,
-            text=(
-                "💬 Поддержка AI Taro\n\n"
-                "Напишите одним сообщением, с чем нужна помощь. "
-                "Мы отправим это в поддержку.\n\n"
-                "Для отмены напишите: отмена"
+            text=_tr(
+                lang,
+                "💬 Поддержка AI Taro\n\nНапишите одним сообщением, с чем нужна помощь. Мы отправим это в поддержку.\n\nДля отмены напишите: отмена",
+                "💬 AI Taro support\n\nSend one message describing your issue. We will forward it to support.\n\nTo cancel, send: cancel",
+                "💬 AI Taro yordami\n\nMuammoingizni bitta xabarda yozing. Uni yordamga yuboramiz.\n\nBekor qilish uchun: bekor",
             ),
         )
         return
     if mode in {"sub_manage", "manage_sub", "subscription_manage"}:
         await context.bot.send_message(
             chat_id=update.effective_chat.id,
-            text=_subscription_manage_text(),
+            text=_subscription_manage_text(lang),
             parse_mode=ParseMode.HTML,
-            reply_markup=_subscription_manage_keyboard(),
+            reply_markup=_subscription_manage_keyboard(lang),
         )
         return
     if mode in {"sub_cancel", "cancel_sub", "unsubscribe"}:
@@ -1855,50 +2108,52 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         SUPPORT_PENDING_TICKET_BY_USER.pop(support_uid, None)
         await context.bot.send_message(
             chat_id=update.effective_chat.id,
-            text=_subscription_cancel_text(),
+            text=_subscription_cancel_text(lang),
             parse_mode=ParseMode.HTML,
-            reply_markup=_subscription_cancel_keyboard(),
+            reply_markup=_subscription_cancel_keyboard(lang),
         )
         return
     if mode in {"terms", "agreement", "user_agreement"}:
-        await _send_legal_document(chat_id=update.effective_chat.id, context=context, kind="terms")
+        await _send_legal_document(chat_id=update.effective_chat.id, context=context, kind="terms", lang=lang)
         return
     if mode in {"privacy", "policy"}:
-        await _send_legal_document(chat_id=update.effective_chat.id, context=context, kind="privacy")
+        await _send_legal_document(chat_id=update.effective_chat.id, context=context, kind="privacy", lang=lang)
         return
     if mode in {"forgetme", "delete_me", "delete_data"}:
         await context.bot.send_message(
             chat_id=update.effective_chat.id,
-            text=(
-                "🗑 <b>Удаление персональных данных</b>\n\n"
-                "Это действие удалит ваш профиль, историю раскладов, персональную память,\n"
-                "историю обращений в поддержку и связанные платежные записи в AI Taro.\n\n"
-                "Действие необратимо. Продолжить?"
+            text=_tr(
+                lang,
+                "🗑 <b>Удаление персональных данных</b>\n\nЭто действие удалит ваш профиль, историю раскладов, персональную память,\nисторию обращений в поддержку и связанные платежные записи в AI Taro.\n\nДействие необратимо. Продолжить?",
+                "🗑 <b>Delete personal data</b>\n\nThis action will delete your profile, reading history, memory,\nsupport tickets, and related payment records in AI Taro.\n\nThis cannot be undone. Continue?",
+                "🗑 <b>Shaxsiy ma'lumotlarni o'chirish</b>\n\nBu amal profilingiz, yoyilmalar tarixi, xotira,\nyordam murojaatlari va AI Tarodagi to'lov yozuvlarini o'chiradi.\n\nBu qaytarilmaydi. Davom etilsinmi?",
             ),
             parse_mode=ParseMode.HTML,
-            reply_markup=_forgetme_confirm_keyboard(),
+            reply_markup=_forgetme_confirm_keyboard(lang),
         )
         return
 
-    await _send_start_panel(update.effective_chat.id, context)
+    await _send_start_panel(update.effective_chat.id, context, lang=lang)
 
 
 async def menu_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not update.effective_chat:
         return
     await _ensure_bot_ui(context)
-    await _send_menu(update.effective_chat.id, context, include_app_link=False, mode="menu")
+    lang = await _resolve_lang_from_update(update)
+    await _send_menu(update.effective_chat.id, context, include_app_link=False, mode="menu", lang=lang)
 
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not update.effective_chat:
         return
     await _ensure_bot_ui(context)
+    lang = await _resolve_lang_from_update(update)
     await context.bot.send_message(
         chat_id=update.effective_chat.id,
-        text=_howto_text(),
+        text=_howto_text(lang),
         parse_mode=ParseMode.HTML,
-        reply_markup=_welcome_keyboard(),
+        reply_markup=_welcome_keyboard(lang),
     )
 
 
@@ -1906,17 +2161,18 @@ async def support_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     if not update.effective_chat:
         return
     await _ensure_bot_ui(context)
+    lang = await _resolve_lang_from_update(update)
     user_id = int(getattr(update.effective_user, "id", 0) or 0)
     if user_id > 0:
         SUPPORT_PENDING_USERS.add(user_id)
         SUPPORT_PENDING_TICKET_BY_USER.pop(user_id, None)
     await context.bot.send_message(
         chat_id=update.effective_chat.id,
-        text=(
-            "💬 Поддержка AI Taro\n\n"
-            "Напишите одним сообщением, с чем нужна помощь.\n"
-            "Мы передадим запрос в поддержку.\n\n"
-            "Для отмены напишите: отмена"
+        text=_tr(
+            lang,
+            "💬 Поддержка AI Taro\n\nНапишите одним сообщением, с чем нужна помощь.\nМы передадим запрос в поддержку.\n\nДля отмены напишите: отмена",
+            "💬 AI Taro support\n\nSend one message describing your issue.\nWe will forward it to support.\n\nTo cancel, send: cancel",
+            "💬 AI Taro yordami\n\nMuammoingizni bitta xabarda yozing.\nSo'rovingizni yordamga yuboramiz.\n\nBekor qilish uchun: bekor",
         ),
     )
 
@@ -1925,30 +2181,33 @@ async def terms_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     if not update.effective_chat:
         return
     await _ensure_bot_ui(context)
-    await _send_legal_document(chat_id=update.effective_chat.id, context=context, kind="terms")
+    lang = await _resolve_lang_from_update(update)
+    await _send_legal_document(chat_id=update.effective_chat.id, context=context, kind="terms", lang=lang)
 
 
 async def privacy_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not update.effective_chat:
         return
     await _ensure_bot_ui(context)
-    await _send_legal_document(chat_id=update.effective_chat.id, context=context, kind="privacy")
+    lang = await _resolve_lang_from_update(update)
+    await _send_legal_document(chat_id=update.effective_chat.id, context=context, kind="privacy", lang=lang)
 
 
 async def forgetme_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not update.effective_chat:
         return
     await _ensure_bot_ui(context)
+    lang = await _resolve_lang_from_update(update)
     await context.bot.send_message(
         chat_id=update.effective_chat.id,
-        text=(
-            "🗑 <b>Удаление персональных данных</b>\n\n"
-            "Это действие удалит ваш профиль, историю раскладов, персональную память,\n"
-            "историю обращений в поддержку и связанные платежные записи в AI Taro.\n\n"
-            "Действие необратимо. Продолжить?"
+        text=_tr(
+            lang,
+            "🗑 <b>Удаление персональных данных</b>\n\nЭто действие удалит ваш профиль, историю раскладов, персональную память,\nисторию обращений в поддержку и связанные платежные записи в AI Taro.\n\nДействие необратимо. Продолжить?",
+            "🗑 <b>Delete personal data</b>\n\nThis action will delete your profile, reading history, memory,\nsupport tickets, and related payment records in AI Taro.\n\nThis cannot be undone. Continue?",
+            "🗑 <b>Shaxsiy ma'lumotlarni o'chirish</b>\n\nBu amal profilingiz, yoyilmalar tarixi, xotira,\nyordam murojaatlari va AI Tarodagi to'lov yozuvlarini o'chiradi.\n\nBu qaytarilmaydi. Davom etilsinmi?",
         ),
         parse_mode=ParseMode.HTML,
-        reply_markup=_forgetme_confirm_keyboard(),
+        reply_markup=_forgetme_confirm_keyboard(lang),
     )
 
 
@@ -1976,10 +2235,16 @@ async def reply_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         await context.bot.send_message(chat_id=update.effective_chat.id, text="Введите текст ответа после telegram_id.")
         return
     try:
+        target_lang = await _lang_from_user_db(target_tg_id, fallback="ru")
         await context.bot.send_message(
             chat_id=target_tg_id,
-            text=f"💬 Ответ поддержки AI Taro:\n\n{text}",
-            reply_markup=_support_user_reply_markup(),
+            text=_tr(
+                target_lang,
+                f"💬 Ответ поддержки AI Taro:\n\n{text}",
+                f"💬 AI Taro support reply:\n\n{text}",
+                f"💬 AI Taro yordam javobi:\n\n{text}",
+            ),
+            reply_markup=_support_user_reply_markup(lang=target_lang),
         )
         await context.bot.send_message(chat_id=update.effective_chat.id, text="Ответ отправлен пользователю.")
     except Exception as exc:
@@ -1993,15 +2258,17 @@ async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     query = update.callback_query
     if not query:
         return
+    lang = await _resolve_lang_from_user(query.from_user)
     await _safe_answer_query(query)
     if query.message:
-        await _send_menu(query.message.chat.id, context, message=query.message, include_app_link=False, mode="menu")
+        await _send_menu(query.message.chat.id, context, message=query.message, include_app_link=False, mode="menu", lang=lang)
 
 
 async def country_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
     if not query:
         return
+    lang = await _resolve_lang_from_user(query.from_user)
     await _safe_answer_query(query)
     if not query.message:
         return
@@ -2009,8 +2276,8 @@ async def country_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     data = str(query.data or "").strip().lower()
     if data == "country_menu":
         await query.message.edit_text(
-            _format_country_list(),
-            reply_markup=_country_keyboard(),
+            _format_country_list(lang),
+            reply_markup=_country_keyboard(lang),
             parse_mode=ParseMode.HTML,
         )
         return
@@ -2018,8 +2285,8 @@ async def country_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     _, _, code = data.partition(":")
     safe_country = _normalize_country_code(code)
     await query.message.edit_text(
-        _format_plan_list(safe_country),
-        reply_markup=_plans_keyboard(safe_country),
+        _format_plan_list(safe_country, lang),
+        reply_markup=_plans_keyboard(safe_country, lang),
         parse_mode=ParseMode.HTML,
     )
 
@@ -2028,12 +2295,13 @@ async def howto_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     query = update.callback_query
     if not query:
         return
+    lang = await _resolve_lang_from_user(query.from_user)
     await _safe_answer_query(query)
     if query.message:
         await query.message.reply_text(
-            _howto_text(),
+            _howto_text(lang),
             parse_mode=ParseMode.HTML,
-            reply_markup=_welcome_keyboard(),
+            reply_markup=_welcome_keyboard(lang),
         )
 
 
@@ -2041,6 +2309,7 @@ async def support_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     query = update.callback_query
     if not query:
         return
+    lang = await _resolve_lang_from_user(query.from_user)
     await _safe_answer_query(query)
     user_id = int(getattr(query.from_user, "id", 0) or 0)
     data = str(query.data or "").strip()
@@ -2055,11 +2324,21 @@ async def support_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     if query.message:
         if ticket_id:
             await query.message.reply_text(
-                f"💬 Продолжим диалог по тикету {ticket_id}.\nНапишите ответ одним сообщением.\nДля отмены напишите: отмена"
+                _tr(
+                    lang,
+                    f"💬 Продолжим диалог по тикету {ticket_id}.\nНапишите ответ одним сообщением.\nДля отмены напишите: отмена",
+                    f"💬 Continue ticket {ticket_id}.\nSend your reply in one message.\nTo cancel, send: cancel",
+                    f"💬 {ticket_id} tiketi bo'yicha davom etamiz.\nJavobingizni bitta xabarda yozing.\nBekor qilish uchun: bekor",
+                )
             )
         else:
             await query.message.reply_text(
-                "💬 Напишите одним сообщением, с чем нужна помощь.\nДля отмены напишите: отмена"
+                _tr(
+                    lang,
+                    "💬 Напишите одним сообщением, с чем нужна помощь.\nДля отмены напишите: отмена",
+                    "💬 Send one message describing your issue.\nTo cancel, send: cancel",
+                    "💬 Muammoingizni bitta xabarda yozing.\nBekor qilish uchun: bekor",
+                )
             )
 
 
@@ -2067,12 +2346,13 @@ async def sub_manage_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
     query = update.callback_query
     if not query:
         return
+    lang = await _resolve_lang_from_user(query.from_user)
     await _safe_answer_query(query)
     if query.message:
         await query.message.reply_text(
-            _subscription_manage_text(),
+            _subscription_manage_text(lang),
             parse_mode=ParseMode.HTML,
-            reply_markup=_subscription_manage_keyboard(),
+            reply_markup=_subscription_manage_keyboard(lang),
         )
 
 
@@ -2080,6 +2360,7 @@ async def sub_cancel_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
     query = update.callback_query
     if not query:
         return
+    lang = await _resolve_lang_from_user(query.from_user)
     await _safe_answer_query(query)
     user_id = int(getattr(query.from_user, "id", 0) or 0)
     if user_id > 0:
@@ -2087,9 +2368,9 @@ async def sub_cancel_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
         SUPPORT_PENDING_TICKET_BY_USER.pop(user_id, None)
     if query.message:
         await query.message.reply_text(
-            _subscription_cancel_text(),
+            _subscription_cancel_text(lang),
             parse_mode=ParseMode.HTML,
-            reply_markup=_subscription_cancel_keyboard(),
+            reply_markup=_subscription_cancel_keyboard(lang),
         )
 
 
@@ -2097,6 +2378,7 @@ async def support_close_callback(update: Update, context: ContextTypes.DEFAULT_T
     query = update.callback_query
     if not query:
         return
+    lang = await _resolve_lang_from_user(query.from_user)
     await _safe_answer_query(query)
     user_id = int(getattr(query.from_user, "id", 0) or 0)
     data = str(query.data or "").strip()
@@ -2126,11 +2408,21 @@ async def support_close_callback(update: Update, context: ContextTypes.DEFAULT_T
             pass
         if ticket_id:
             await query.message.reply_text(
-                f"Диалог по тикету {ticket_id} закрыт.\nЕсли понадобится, нажмите «💬 Поддержка» или введите /support."
+                _tr(
+                    lang,
+                    f"Диалог по тикету {ticket_id} закрыт.\nЕсли понадобится, нажмите «💬 Поддержка» или введите /support.",
+                    f"Ticket {ticket_id} is closed.\nIf needed, tap “💬 Support” or send /support.",
+                    f"{ticket_id} tiketi yopildi.\nKerak bo'lsa “💬 Yordam” tugmasini bosing yoki /support yozing.",
+                )
             )
         else:
             await query.message.reply_text(
-                "Диалог с поддержкой закрыт.\nЕсли понадобится, нажмите «💬 Поддержка» или введите /support."
+                _tr(
+                    lang,
+                    "Диалог с поддержкой закрыт.\nЕсли понадобится, нажмите «💬 Поддержка» или введите /support.",
+                    "Support chat is closed.\nIf needed, tap “💬 Support” or send /support.",
+                    "Yordam dialogi yopildi.\nKerak bo'lsa “💬 Yordam” tugmasini bosing yoki /support yozing.",
+                )
             )
 
 
@@ -2140,8 +2432,9 @@ async def doc_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         return
     await _safe_answer_query(query)
     kind = "privacy" if str(query.data).endswith("privacy") else "terms"
+    lang = await _resolve_lang_from_user(query.from_user)
     if query.message:
-        await _send_legal_document(chat_id=query.message.chat.id, context=context, kind=kind)
+        await _send_legal_document(chat_id=query.message.chat.id, context=context, kind=kind, lang=lang)
 
 
 async def forgetme_confirm_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -2149,19 +2442,32 @@ async def forgetme_confirm_callback(update: Update, context: ContextTypes.DEFAUL
     if not query:
         return
     await _safe_answer_query(query)
+    lang = await _resolve_lang_from_user(query.from_user)
     tg_user_id = int(getattr(query.from_user, "id", 0) or 0)
     result = await _forgetme_delete_user_data(telegram_user_id=tg_user_id)
 
     text = ""
     if result.get("ok") and result.get("deleted"):
-        text = (
-            "✅ Данные удалены.\n\n"
-            "Если захотите вернуться, нажмите /start и заново пройдите вход."
+        text = _tr(
+            lang,
+            "✅ Данные удалены.\n\nЕсли захотите вернуться, нажмите /start и заново пройдите вход.",
+            "✅ Data deleted.\n\nIf you want to return, tap /start and sign in again.",
+            "✅ Ma'lumotlar o'chirildi.\n\nQaytmoqchi bo'lsangiz, /start ni bosing va qayta kiring.",
         )
     elif result.get("ok"):
-        text = "Данные не найдены. Возможно, профиль уже был удалён ранее."
+        text = _tr(
+            lang,
+            "Данные не найдены. Возможно, профиль уже был удалён ранее.",
+            "Data not found. The profile may have been deleted earlier.",
+            "Ma'lumotlar topilmadi. Profil avvalroq o'chirilgan bo'lishi mumkin.",
+        )
     else:
-        text = "Не удалось удалить данные сейчас. Попробуйте ещё раз позже или напишите в /support."
+        text = _tr(
+            lang,
+            "Не удалось удалить данные сейчас. Попробуйте ещё раз позже или напишите в /support.",
+            "Could not delete data right now. Try again later or contact /support.",
+            "Hozir ma'lumotlarni o'chirib bo'lmadi. Keyinroq qayta urinib ko'ring yoki /support ga yozing.",
+        )
 
     if query.message:
         try:
@@ -2175,11 +2481,12 @@ async def forgetme_cancel_callback(update: Update, context: ContextTypes.DEFAULT
     if not query:
         return
     await _safe_answer_query(query)
+    lang = await _resolve_lang_from_user(query.from_user)
     if query.message:
         try:
-            await query.message.edit_text("Удаление данных отменено.")
+            await query.message.edit_text(_tr(lang, "Удаление данных отменено.", "Data deletion canceled.", "Ma'lumotlarni o'chirish bekor qilindi."))
         except Exception:
-            await query.message.reply_text("Удаление данных отменено.")
+            await query.message.reply_text(_tr(lang, "Удаление данных отменено.", "Data deletion canceled.", "Ma'lumotlarni o'chirish bekor qilindi."))
 
 
 async def text_fallback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -2192,25 +2499,41 @@ async def text_fallback_handler(update: Update, context: ContextTypes.DEFAULT_TY
         return
 
     await _ensure_bot_ui(context)
+    lang = await _resolve_lang_from_user(message.from_user)
 
     user_id = int(getattr(message.from_user, "id", 0) or 0)
     if user_id > 0 and user_id in SUPPORT_PENDING_USERS:
         if text in {"отмена", "cancel", "/cancel"}:
             SUPPORT_PENDING_USERS.discard(user_id)
             SUPPORT_PENDING_TICKET_BY_USER.pop(user_id, None)
-            await context.bot.send_message(chat_id=message.chat.id, text="Запрос в поддержку отменён.")
+            await context.bot.send_message(
+                chat_id=message.chat.id,
+                text=_tr(lang, "Запрос в поддержку отменён.", "Support request canceled.", "Yordam so'rovi bekor qilindi."),
+            )
             return
 
         if text in {
             "💳 тарифы и оплата",
+            "💳 plans and payment",
+            "💳 tariflar va to'lov",
             "💎 подключить подписку",
+            "💎 buy subscription",
+            "💎 obuna olish",
             "🚀 начать",
             "🚀 начать ai taro",
             "🚀 открыть ai taro",
             "🚀 открыть приложение",
+            "🚀 open app",
+            "🚀 ilovani ochish",
             "ℹ️ как начать",
+            "ℹ️ how to start",
+            "ℹ️ qanday boshlash",
             "📄 соглашение",
+            "📄 terms",
+            "📄 kelishuv",
             "🔐 политика",
+            "🔐 privacy",
+            "🔐 maxfiylik",
         }:
             SUPPORT_PENDING_USERS.discard(user_id)
             SUPPORT_PENDING_TICKET_BY_USER.pop(user_id, None)
@@ -2243,86 +2566,132 @@ async def text_fallback_handler(update: Update, context: ContextTypes.DEFAULT_TY
                 await context.bot.send_message(
                     chat_id=message.chat.id,
                     text=(
-                        f"✅ Запрос отправлен в поддержку.\n"
-                        f"Тикет: <code>{escape(ticket_id)}</code>\n"
-                        + ("Ответ придёт сюда же в этот чат." if is_new_ticket else "Сообщение добавлено в существующий диалог.")
+                        f"{_tr(lang, '✅ Запрос отправлен в поддержку.', '✅ Request sent to support.', '✅ So‘rov yordamga yuborildi.')}\n"
+                        f"{_tr(lang, 'Тикет', 'Ticket', 'Tiket')}: <code>{escape(ticket_id)}</code>\n"
+                        + (
+                            _tr(
+                                lang,
+                                "Ответ придёт сюда же в этот чат.",
+                                "The response will come to this chat.",
+                                "Javob shu chatga keladi.",
+                            )
+                            if is_new_ticket
+                            else _tr(
+                                lang,
+                                "Сообщение добавлено в существующий диалог.",
+                                "Message added to the existing thread.",
+                                "Xabar mavjud muloqotga qo'shildi.",
+                            )
+                        )
                     ),
                     parse_mode=ParseMode.HTML,
                 )
             else:
                 await context.bot.send_message(
                     chat_id=message.chat.id,
-                    text=(
-                        "Не удалось отправить запрос в поддержку.\n"
-                        "Попробуйте ещё раз позже или напишите /support."
+                    text=_tr(
+                        lang,
+                        "Не удалось отправить запрос в поддержку.\nПопробуйте ещё раз позже или напишите /support.",
+                        "Could not send support request.\nTry again later or contact /support.",
+                        "Yordam so'rovini yuborib bo'lmadi.\nKeyinroq qayta urinib ko'ring yoki /support ga yozing.",
                     ),
                 )
             return
 
-    if text == "💎 подключить подписку" or "тариф" in text or "оплат" in text or "price" in text:
-        await _send_menu(message.chat.id, context, include_app_link=False, mode="menu")
+    if (
+        text in {"💎 подключить подписку", "💎 buy subscription", "💎 obuna olish", "💳 тарифы и оплата", "💳 plans and payment", "💳 tariflar va to'lov"}
+        or "тариф" in text
+        or "оплат" in text
+        or "price" in text
+        or "payment" in text
+        or "tarif" in text
+        or "to'lov" in text
+        or "tolov" in text
+    ):
+        await _send_menu(message.chat.id, context, include_app_link=False, mode="menu", lang=lang)
         return
 
-    if "поддерж" in text or text in {"support", "/support", "💬 поддержка"}:
+    if "поддерж" in text or "support" in text or "yordam" in text or text in {"/support", "💬 поддержка", "💬 support", "💬 yordam"}:
         SUPPORT_PENDING_USERS.add(user_id)
         SUPPORT_PENDING_TICKET_BY_USER.pop(user_id, None)
         await context.bot.send_message(
             chat_id=message.chat.id,
-            text="💬 Напишите одним сообщением, с чем нужна помощь.\nДля отмены напишите: отмена",
+            text=_tr(
+                lang,
+                "💬 Напишите одним сообщением, с чем нужна помощь.\nДля отмены напишите: отмена",
+                "💬 Send one message describing your issue.\nTo cancel, send: cancel",
+                "💬 Muammoingizni bitta xabarda yozing.\nBekor qilish uchun: bekor",
+            ),
         )
         return
 
-    if "соглаш" in text or text in {"📄 соглашение", "/terms", "terms"}:
-        await _send_legal_document(chat_id=message.chat.id, context=context, kind="terms")
+    if "соглаш" in text or "terms" in text or "kelishuv" in text or text in {"📄 соглашение", "📄 terms", "📄 kelishuv", "/terms"}:
+        await _send_legal_document(chat_id=message.chat.id, context=context, kind="terms", lang=lang)
         return
 
-    if "политик" in text or text in {"🔐 политика", "/privacy", "privacy"}:
-        await _send_legal_document(chat_id=message.chat.id, context=context, kind="privacy")
+    if "политик" in text or "privacy" in text or "maxfiy" in text or text in {"🔐 политика", "🔐 privacy", "🔐 maxfiylik", "/privacy"}:
+        await _send_legal_document(chat_id=message.chat.id, context=context, kind="privacy", lang=lang)
         return
 
     if (
         "удалить данные" in text
-        or text in {"/forgetme", "forgetme", "delete me", "delete data", "🗑 удалить данные"}
+        or "delete data" in text
+        or "delete me" in text
+        or "ma'lumot" in text
+        or text in {"/forgetme", "forgetme", "🗑 удалить данные", "🗑 delete data", "🗑 ma'lumotlarni o'chirish"}
     ):
         await context.bot.send_message(
             chat_id=message.chat.id,
-            text=(
-                "🗑 <b>Удаление персональных данных</b>\n\n"
-                "Это действие удалит ваш профиль, историю раскладов, персональную память,\n"
-                "историю обращений в поддержку и связанные платежные записи в AI Taro.\n\n"
-                "Действие необратимо. Продолжить?"
+            text=_tr(
+                lang,
+                "🗑 <b>Удаление персональных данных</b>\n\nЭто действие удалит ваш профиль, историю раскладов, персональную память,\nисторию обращений в поддержку и связанные платежные записи в AI Taro.\n\nДействие необратимо. Продолжить?",
+                "🗑 <b>Delete personal data</b>\n\nThis action will delete your profile, reading history, memory,\nsupport tickets, and related payment records in AI Taro.\n\nThis cannot be undone. Continue?",
+                "🗑 <b>Shaxsiy ma'lumotlarni o'chirish</b>\n\nBu amal profilingiz, yoyilmalar tarixi, xotira,\nyordam murojaatlari va AI Tarodagi to'lov yozuvlarini o'chiradi.\n\nBu qaytarilmaydi. Davom etilsinmi?",
             ),
             parse_mode=ParseMode.HTML,
-            reply_markup=_forgetme_confirm_keyboard(),
+            reply_markup=_forgetme_confirm_keyboard(lang),
         )
         return
 
-    if "как начать" in text or "помощ" in text or text in {"help", "start", "старт", "начать", "ℹ️ как начать"}:
+    if (
+        "как начать" in text
+        or "помощ" in text
+        or "how to start" in text
+        or "qanday boshlash" in text
+        or text in {"help", "start", "старт", "начать", "ℹ️ как начать", "ℹ️ how to start", "ℹ️ qanday boshlash"}
+    ):
         await context.bot.send_message(
             chat_id=message.chat.id,
-            text=_howto_text(),
+            text=_howto_text(lang),
             parse_mode=ParseMode.HTML,
-            reply_markup=_welcome_keyboard(),
+            reply_markup=_welcome_keyboard(lang),
         )
         return
 
     if (
         "открыть" in text
         or "прилож" in text
-        or text in {"🚀 открыть ai taro", "🚀 начать", "🚀 начать ai taro", "🚀 открыть приложение"}
+        or "open app" in text
+        or "ilova" in text
+        or text in {"🚀 открыть ai taro", "🚀 начать", "🚀 начать ai taro", "🚀 открыть приложение", "🚀 open app", "🚀 ilovani ochish"}
     ):
         await context.bot.send_message(
             chat_id=message.chat.id,
-            text=START_ONBOARDING_TEXT,
+            text=_start_panel_text(lang),
             parse_mode=ParseMode.HTML,
-            reply_markup=_welcome_keyboard(),
+            reply_markup=_welcome_keyboard(lang),
         )
         return
 
     await context.bot.send_message(
         chat_id=message.chat.id,
-        text="Нажмите «🚀 Открыть приложение», чтобы сразу перейти в мини‑приложение.",
-        reply_markup=_welcome_keyboard(),
+        text=_tr(
+            lang,
+            "Нажмите «🚀 Открыть приложение», чтобы сразу перейти в мини‑приложение.",
+            "Tap “🚀 Open app” to go directly to the mini app.",
+            "Mini ilovaga o'tish uchun “🚀 Ilovani ochish” tugmasini bosing.",
+        ),
+        reply_markup=_welcome_keyboard(lang),
     )
 
 
@@ -2330,6 +2699,7 @@ async def plan_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     query = update.callback_query
     if not query or not query.data:
         return
+    lang = await _resolve_lang_from_user(query.from_user)
     await _safe_answer_query(query)
 
     country_code, plan_key = _parse_country_plan_callback(query.data, "plan")
@@ -2339,18 +2709,32 @@ async def plan_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
             country_code = DEFAULT_COUNTRY_CODE
         else:
             if query.message:
-                await query.message.reply_text("Этот план временно недоступен. Выберите другой.")
+                await query.message.reply_text(
+                    _tr(
+                        lang,
+                        "Этот план временно недоступен. Выберите другой.",
+                        "This plan is temporarily unavailable. Please choose another.",
+                        "Bu tarif vaqtincha mavjud emas. Boshqasini tanlang.",
+                    )
+                )
             return
 
     if plan_key not in _available_plan_keys():
         if query.message:
-            await query.message.reply_text("Этот план временно недоступен. Выберите другой.")
+            await query.message.reply_text(
+                _tr(
+                    lang,
+                    "Этот план временно недоступен. Выберите другой.",
+                    "This plan is temporarily unavailable. Please choose another.",
+                    "Bu tarif vaqtincha mavjud emas. Boshqasini tanlang.",
+                )
+            )
         return
 
     if query.message:
         await query.message.edit_text(
-            _format_methods_text(plan_key, country_code),
-            reply_markup=_method_keyboard(plan_key, country_code),
+            _format_methods_text(plan_key, country_code, lang),
+            reply_markup=_method_keyboard(plan_key, country_code, lang),
             parse_mode=ParseMode.HTML,
         )
 
@@ -2359,6 +2743,7 @@ async def sbp_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     query = update.callback_query
     if not query or not query.data:
         return
+    lang = await _resolve_lang_from_user(query.from_user)
     await _safe_answer_query(query)
 
     country_code, plan_key = _parse_country_plan_callback(query.data, "sbp")
@@ -2366,29 +2751,55 @@ async def sbp_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     card_product = _card_product_for_country(plan_key, country_code)
     if not card_product:
         if query.message:
-            await query.message.reply_text("СБП для этого плана временно недоступен.")
+            await query.message.reply_text(
+                _tr(
+                    lang,
+                    "СБП для этого плана временно недоступен.",
+                    "SBP is temporarily unavailable for this plan.",
+                    "Bu tarif uchun SBP vaqtincha mavjud emas.",
+                )
+            )
         return
 
     tg_user_id = int(getattr(query.from_user, "id", 0) or 0)
     if tg_user_id <= 0:
         if query.message:
-            await query.message.reply_text("Не удалось определить профиль Telegram. Попробуйте ещё раз.")
+            await query.message.reply_text(
+                _tr(
+                    lang,
+                    "Не удалось определить профиль Telegram. Попробуйте ещё раз.",
+                    "Could not detect your Telegram profile. Please try again.",
+                    "Telegram profilingizni aniqlab bo'lmadi. Qayta urinib ko'ring.",
+                )
+            )
         return
 
     payment_link = _build_sbp_payment_link(tg_user_id=tg_user_id, plan_key=plan_key)
     if not payment_link:
         if query.message:
-            await query.message.reply_text("СБП временно недоступен. Попробуйте позже.")
+            await query.message.reply_text(
+                _tr(
+                    lang,
+                    "СБП временно недоступен. Попробуйте позже.",
+                    "SBP is temporarily unavailable. Please try later.",
+                    "SBP vaqtincha mavjud emas. Keyinroq urinib ko'ring.",
+                )
+            )
         return
 
     rows: List[List[InlineKeyboardButton]] = [
-        [InlineKeyboardButton("🟢 Открыть оплату СБП", url=payment_link)],
-        [InlineKeyboardButton("⬅️ Назад к способам оплаты", callback_data=f"plan:{country_code}:{plan_key}")],
+        [InlineKeyboardButton(_tr(lang, "🟢 Открыть оплату СБП", "🟢 Open SBP payment", "🟢 SBP to'lovini ochish"), url=payment_link)],
+        [InlineKeyboardButton(_tr(lang, "⬅️ Назад к способам оплаты", "⬅️ Back to payment methods", "⬅️ To'lov usullariga qaytish"), callback_data=f"plan:{country_code}:{plan_key}")],
     ]
     text = (
-        f"<b>СБП — {PLAN_TITLES.get(plan_key, plan_key)}</b>\n"
-        f"Сумма: {_format_amount_label(card_product)}\n\n"
-        "Нажмите кнопку ниже — откроется ссылка на оплату через СБП."
+        f"<b>{_tr(lang, 'СБП', 'SBP', 'SBP')} — {_plan_title(plan_key, lang)}</b>\n"
+        f"{_tr(lang, 'Сумма', 'Amount', 'Summa')}: {_format_amount_label(card_product)}\n\n"
+        + _tr(
+            lang,
+            "Нажмите кнопку ниже — откроется ссылка на оплату через СБП.",
+            "Tap the button below to open the SBP payment link.",
+            "Pastdagi tugmani bosing — SBP to'lov havolasi ochiladi.",
+        )
     )
 
     if query.message:
@@ -2404,6 +2815,7 @@ async def sbp_auto_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     query = update.callback_query
     if not query or not query.data:
         return
+    lang = await _resolve_lang_from_user(query.from_user)
     await _safe_answer_query(query)
 
     country_code, plan_key = _parse_country_plan_callback(query.data, "sbp_auto")
@@ -2411,34 +2823,66 @@ async def sbp_auto_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     card_product = _card_product_for_country(plan_key, country_code)
     if not card_product:
         if query.message:
-            await query.message.reply_text("СБП автоплатёж для этого плана временно недоступен.")
+            await query.message.reply_text(
+                _tr(
+                    lang,
+                    "СБП автоплатёж для этого плана временно недоступен.",
+                    "SBP autopay is temporarily unavailable for this plan.",
+                    "Bu tarif uchun SBP avtotolov vaqtincha mavjud emas.",
+                )
+            )
         return
     if not SBP_AUTOPAY_ENABLED or plan_key != SBP_AUTOPAY_PLAN_KEY:
         if query.message:
-            await query.message.reply_text("СБП автоплатёж сейчас доступен только для ежемесячного плана.")
+            await query.message.reply_text(
+                _tr(
+                    lang,
+                    "СБП автоплатёж сейчас доступен только для ежемесячного плана.",
+                    "SBP autopay is currently available only for the monthly plan.",
+                    "SBP avtotolov hozircha faqat oylik tarif uchun mavjud.",
+                )
+            )
         return
 
     tg_user_id = int(getattr(query.from_user, "id", 0) or 0)
     if tg_user_id <= 0:
         if query.message:
-            await query.message.reply_text("Не удалось определить профиль Telegram. Попробуйте ещё раз.")
+            await query.message.reply_text(
+                _tr(
+                    lang,
+                    "Не удалось определить профиль Telegram. Попробуйте ещё раз.",
+                    "Could not detect your Telegram profile. Please try again.",
+                    "Telegram profilingizni aniqlab bo'lmadi. Qayta urinib ko'ring.",
+                )
+            )
         return
 
     payment_link = _build_sbp_autopay_link(tg_user_id=tg_user_id, plan_key=plan_key)
     if not payment_link:
         if query.message:
-            await query.message.reply_text("СБП автоплатёж временно недоступен. Попробуйте позже.")
+            await query.message.reply_text(
+                _tr(
+                    lang,
+                    "СБП автоплатёж временно недоступен. Попробуйте позже.",
+                    "SBP autopay is temporarily unavailable. Please try later.",
+                    "SBP avtotolov vaqtincha mavjud emas. Keyinroq urinib ko'ring.",
+                )
+            )
         return
 
     rows: List[List[InlineKeyboardButton]] = [
-        [InlineKeyboardButton("🔁 Подключить СБП автоплатёж", url=payment_link)],
-        [InlineKeyboardButton("⬅️ Назад к способам оплаты", callback_data=f"plan:{country_code}:{plan_key}")],
+        [InlineKeyboardButton(_tr(lang, "🔁 Подключить СБП автоплатёж", "🔁 Enable SBP autopay", "🔁 SBP avtotolovni yoqish"), url=payment_link)],
+        [InlineKeyboardButton(_tr(lang, "⬅️ Назад к способам оплаты", "⬅️ Back to payment methods", "⬅️ To'lov usullariga qaytish"), callback_data=f"plan:{country_code}:{plan_key}")],
     ]
     text = (
-        f"<b>СБП автоплатёж — {PLAN_TITLES.get(plan_key, plan_key)}</b>\n"
-        f"Сумма: {_format_amount_label(card_product)} / месяц\n\n"
-        "Первый платёж пройдёт сейчас. После подтверждения ЮKassa сохранит метод оплаты, "
-        "и продление будет списываться автоматически раз в 30 дней."
+        f"<b>{_tr(lang, 'СБП автоплатёж', 'SBP autopay', 'SBP avtotolov')} — {_plan_title(plan_key, lang)}</b>\n"
+        f"{_tr(lang, 'Сумма', 'Amount', 'Summa')}: {_format_amount_label(card_product)} / {_tr(lang, 'месяц', 'month', 'oy')}\n\n"
+        + _tr(
+            lang,
+            "Первый платёж пройдёт сейчас. После подтверждения ЮKassa сохранит метод оплаты, и продление будет списываться автоматически раз в 30 дней.",
+            "The first payment is charged now. After confirmation, YooKassa saves the payment method and renews automatically every 30 days.",
+            "Birinchi to'lov hozir yechiladi. Tasdiqdan keyin YooKassa to'lov usulini saqlaydi va har 30 kunda avtomatik yechadi.",
+        )
     )
 
     if query.message:
@@ -2454,6 +2898,7 @@ async def buy_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     query = update.callback_query
     if not query or not query.data:
         return
+    lang = await _resolve_lang_from_user(query.from_user)
     await _safe_answer_query(query)
 
     parts = query.data.split(":", 1)
@@ -2464,7 +2909,14 @@ async def buy_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     product = _get_product(product_code)
     if not product:
         if query.message:
-            await query.message.reply_text("Этот план временно недоступен. Попробуйте другой вариант.")
+            await query.message.reply_text(
+                _tr(
+                    lang,
+                    "Этот план временно недоступен. Попробуйте другой вариант.",
+                    "This plan is temporarily unavailable. Please try another option.",
+                    "Bu tarif vaqtincha mavjud emas. Boshqa variantni tanlang.",
+                )
+            )
         return
 
     chat_id = query.message.chat.id if query.message else None
@@ -2481,15 +2933,24 @@ async def buy_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         if already_used_intro:
             if query.message:
                 await query.message.reply_text(
-                    "Пробная неделя уже была использована на этом аккаунте. "
-                    "Выберите 2 недели, месяц или год."
+                    _tr(
+                        lang,
+                        "Пробная неделя уже была использована на этом аккаунте. Выберите 2 недели, месяц или год.",
+                        "Trial week has already been used on this account. Choose 2 weeks, month, or year.",
+                        "Bu akkauntda sinov haftasi allaqachon ishlatilgan. 2 hafta, oy yoki yilni tanlang.",
+                    )
                 )
             return
 
     if _is_card_provider_mode(provider_mode) and not PROVIDER_TOKEN:
         if query.message:
             await query.message.reply_text(
-                "Оплата картой временно недоступна. Выберите другой способ оплаты."
+                _tr(
+                    lang,
+                    "Оплата картой временно недоступна. Выберите другой способ оплаты.",
+                    "Card payment is temporarily unavailable. Please choose another method.",
+                    "Karta orqali to'lov vaqtincha mavjud emas. Boshqa usulni tanlang.",
+                )
             )
         logger.error("TELEGRAM_PROVIDER_TOKEN is not set for card provider product=%s mode=%s", product_code, provider_mode)
         return
@@ -2515,28 +2976,38 @@ async def buy_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         if not payment_link_app:
             if query.message:
                 await query.message.reply_text(
-                    "Оплата через CLICK временно недоступна. Выберите другой способ оплаты."
+                    _tr(
+                        lang,
+                        "Оплата через CLICK временно недоступна. Выберите другой способ оплаты.",
+                        "CLICK payment is temporarily unavailable. Please choose another method.",
+                        "CLICK orqali to'lov vaqtincha mavjud emas. Boshqa usulni tanlang.",
+                    )
                 )
             logger.error("CLICK payment link is not available for product=%s", product_code)
             return
         if query.message:
+            plan_title = _plan_title(plan_key, lang)
             rows = [
-                [InlineKeyboardButton("🇺🇿 Открыть CLICK", url=payment_link_app)],
+                [InlineKeyboardButton(_tr(lang, "🇺🇿 Открыть CLICK", "🇺🇿 Open CLICK", "🇺🇿 CLICKni ochish"), url=payment_link_app)],
                 [
                     InlineKeyboardButton(
-                        "💳 Оплатить картой через CLICK",
+                        _tr(lang, "💳 Оплатить картой через CLICK", "💳 Pay by card via CLICK", "💳 CLICK orqali karta bilan to'lash"),
                         url=(payment_link_card or payment_link_app),
                     )
                 ],
-                [InlineKeyboardButton("⬅️ Назад к способам оплаты", callback_data=f"plan:uz:{plan_key}")],
+                [InlineKeyboardButton(_tr(lang, "⬅️ Назад к способам оплаты", "⬅️ Back to payment methods", "⬅️ To'lov usullariga qaytish"), callback_data=f"plan:uz:{plan_key}")],
             ]
             await query.message.reply_text(
                 (
-                    f"<b>Оплата через CLICK</b>\n"
-                    f"Тариф: {escape(str(product.get('title') or product_code))}\n"
-                    f"Сумма: {_format_amount_label(product)}\n\n"
-                    "Нажмите кнопку ниже и завершите оплату в приложении CLICK "
-                    "или сразу откройте форму оплаты картой."
+                    f"<b>{_tr(lang, 'Оплата через CLICK', 'Payment via CLICK', 'CLICK orqali toʻlov')}</b>\n"
+                    f"{_tr(lang, 'Тариф', 'Plan', 'Tarif')}: {escape(plan_title)}\n"
+                    f"{_tr(lang, 'Сумма', 'Amount', 'Summa')}: {_format_amount_label(product)}\n\n"
+                    + _tr(
+                        lang,
+                        "Нажмите кнопку ниже и завершите оплату в приложении CLICK или сразу откройте форму оплаты картой.",
+                        "Tap a button below and complete payment in CLICK app, or open card payment form directly.",
+                        "Pastdagi tugmani bosing va CLICK ilovasida to'lovni yakunlang yoki karta to'lovi formasini oching.",
+                    )
                 ),
                 reply_markup=InlineKeyboardMarkup(rows),
                 parse_mode=ParseMode.HTML,
@@ -2558,15 +3029,29 @@ async def buy_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     }
 
     label = product.get("title") or product_code
-    if len(label) > 32:
-        label = label[:32]
+    plan_title = _plan_title(plan_key, lang) if plan_key else ""
+    if plan_title:
+        label = f"{_tr(lang, 'Подписка', 'Subscription', 'Obuna')} {plan_title}"
+    if len(str(label)) > 32:
+        label = str(label)[:32]
 
     prices = [LabeledPrice(label=label, amount=int(product["amount"]))]
 
+    invoice_title = (
+        f"AI Tarot • {plan_title}"
+        if plan_title
+        else (product.get("title") or "AI Tarot")
+    )
+    invoice_desc = _tr(
+        lang,
+        "Подписка AI Tarot",
+        "AI Tarot subscription",
+        "AI Tarot obunasi",
+    )
     invoice_kwargs: Dict[str, Any] = {
         "chat_id": chat_id,
-        "title": product.get("title") or "AI Tarot",
-        "description": product.get("description") or "AI Tarot",
+        "title": invoice_title,
+        "description": invoice_desc,
         "payload": payload,
         "currency": currency,
         "prices": prices,
@@ -2590,7 +3075,14 @@ async def buy_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     else:
         logger.error("Unsupported provider_mode=%s for product=%s", provider_mode, product_code)
         if query.message:
-            await query.message.reply_text("Этот способ оплаты сейчас недоступен. Выберите другой вариант.")
+            await query.message.reply_text(
+                _tr(
+                    lang,
+                    "Этот способ оплаты сейчас недоступен. Выберите другой вариант.",
+                    "This payment method is currently unavailable. Please choose another option.",
+                    "Bu to'lov usuli hozircha mavjud emas. Boshqa variantni tanlang.",
+                )
+            )
         ORDERS[payload]["status"] = "failed"
         ORDERS[payload]["error"] = f"unsupported_provider_mode:{provider_mode}"
         return
@@ -2611,18 +3103,34 @@ async def buy_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         ORDERS[payload]["status"] = "failed"
         ORDERS[payload]["error"] = str(exc)
         if query.message:
-            await query.message.reply_text("Не удалось сформировать счёт. Попробуйте ещё раз позже.")
+            await query.message.reply_text(
+                _tr(
+                    lang,
+                    "Не удалось сформировать счёт. Попробуйте ещё раз позже.",
+                    "Could not create invoice. Please try again later.",
+                    "Hisob yaratib bo'lmadi. Keyinroq qayta urinib ko'ring.",
+                )
+            )
 
 
 async def precheckout_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.pre_checkout_query
     if not query:
         return
+    lang = await _resolve_lang_from_user(query.from_user)
 
     payload = str(query.invoice_payload or "")
     product = _product_from_payload(payload)
     if not product:
-        await query.answer(ok=False, error_message="Заказ не найден. Пожалуйста, сформируйте счёт заново.")
+        await query.answer(
+            ok=False,
+            error_message=_tr(
+                lang,
+                "Заказ не найден. Пожалуйста, сформируйте счёт заново.",
+                "Order not found. Please create a new invoice.",
+                "Buyurtma topilmadi. Iltimos, yangi hisob yarating.",
+            ),
+        )
         return
 
     expected_amount = int(product.get("amount") or -1)
@@ -2639,7 +3147,15 @@ async def precheckout_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
             expected_amount,
             expected_currency,
         )
-        await query.answer(ok=False, error_message="Данные заказа не совпадают. Сформируйте счёт заново.")
+        await query.answer(
+            ok=False,
+            error_message=_tr(
+                lang,
+                "Данные заказа не совпадают. Сформируйте счёт заново.",
+                "Order data mismatch. Please create a new invoice.",
+                "Buyurtma ma'lumotlari mos kelmadi. Yangi hisob yarating.",
+            ),
+        )
         return
 
     logger.info(
@@ -2674,26 +3190,35 @@ def _format_subscription_confirmation(
     *,
     active_until: Optional[datetime] = None,
     days_added: int = 0,
+    lang: str = "ru",
 ) -> str:
+    plan_key = _plan_key_from_code(str(product.get("code") or ""))
+    plan_title = _plan_title(plan_key, lang) if plan_key else str(product.get("menu_label") or product.get("title") or product.get("code") or "")
     until = _to_utc(active_until)
     if until:
         expires_text = until.strftime("%d.%m.%Y")
-        return (
-            f"Готово! Подписка «{product.get('menu_label') or product.get('title') or product['code']}» активна. "
-            f"Доступ действует до {expires_text}."
+        return _tr(
+            lang,
+            f"Готово! Подписка «{plan_title}» активна. Доступ действует до {expires_text}.",
+            f"Done! “{plan_title}” subscription is active. Access is valid until {expires_text}.",
+            f"Tayyor! “{plan_title}” obunasi faol. Kirish {expires_text} gacha amal qiladi.",
         )
-    return (
-        f"Готово! Подписка «{product.get('menu_label') or product.get('title') or product['code']}» активна. "
-        f"Добавлено {max(0, int(days_added or 0))} дней."
+    return _tr(
+        lang,
+        f"Готово! Подписка «{plan_title}» активна. Добавлено {max(0, int(days_added or 0))} дней.",
+        f"Done! “{plan_title}” subscription is active. Added {max(0, int(days_added or 0))} days.",
+        f"Tayyor! “{plan_title}” obunasi faol. {max(0, int(days_added or 0))} kun qo'shildi.",
     )
 
 
-def _format_credits_confirmation(*, credits_added: int, balance: int) -> str:
+def _format_credits_confirmation(*, credits_added: int, balance: int, lang: str = "ru") -> str:
     added = max(0, int(credits_added or 0))
     bal = max(0, int(balance or 0))
-    return (
-        f"Оплата прошла успешно! Начислено {added} платных раскладов, текущий баланс: {bal}. "
-        f"Открой приложение или мини-апп AI Tarot и начни расклады."
+    return _tr(
+        lang,
+        f"Оплата прошла успешно! Начислено {added} платных раскладов, текущий баланс: {bal}. Открой приложение или мини-апп AI Tarot и начни расклады.",
+        f"Payment successful! Added {added} paid readings, current balance: {bal}. Open AI Tarot app and continue.",
+        f"To'lov muvaffaqiyatli! {added} ta pullik yoyilma qo'shildi, joriy balans: {bal}. AI Tarot ilovasini ochib davom eting.",
     )
 
 
@@ -2701,6 +3226,7 @@ async def successful_payment_handler(update: Update, context: ContextTypes.DEFAU
     message = update.message
     if not message or not message.successful_payment:
         return
+    lang = await _resolve_lang_from_user(message.from_user)
 
     payment = message.successful_payment
     payload = payment.invoice_payload
@@ -2732,7 +3258,14 @@ async def successful_payment_handler(update: Update, context: ContextTypes.DEFAU
     tg_user_id = getattr(message.from_user, "id", None) or (order or {}).get("tg_user_id")
 
     if not product or not tg_user_id:
-        await message.reply_text("Платёж подтверждён! Открой приложение AI Tarot и начни расклады.")
+        await message.reply_text(
+            _tr(
+                lang,
+                "Платёж подтверждён! Открой приложение AI Tarot и начни расклады.",
+                "Payment confirmed! Open AI Tarot app and continue reading.",
+                "To'lov tasdiqlandi! AI Tarot ilovasini ochib yoyilmalarni davom ettiring.",
+            )
+        )
         return
 
     applied = await _activate_purchase_for_user(
@@ -2746,13 +3279,25 @@ async def successful_payment_handler(update: Update, context: ContextTypes.DEFAU
     )
 
     if applied.get("duplicate"):
-        await message.reply_text("Платёж уже был обработан ранее. Доступ в приложении уже активен.")
+        await message.reply_text(
+            _tr(
+                lang,
+                "Платёж уже был обработан ранее. Доступ в приложении уже активен.",
+                "This payment was already processed. Access in the app is already active.",
+                "Bu to'lov avvalroq qayta ishlangan. Ilovadagi kirish allaqachon faol.",
+            )
+        )
         return
 
     if not applied.get("applied"):
         logger.error("Payment confirmed but DB apply failed: payload=%s result=%s", payload, applied)
         await message.reply_text(
-            "Платёж подтверждён, но активация задержалась. Напишите в поддержку и укажите время платежа."
+            _tr(
+                lang,
+                "Платёж подтверждён, но активация задержалась. Напишите в поддержку и укажите время платежа.",
+                "Payment confirmed, but activation is delayed. Contact support and provide payment time.",
+                "To'lov tasdiqlandi, lekin faollashtirish kechikdi. Yordamga yozing va to'lov vaqtini yuboring.",
+            )
         )
         return
 
@@ -2761,11 +3306,13 @@ async def successful_payment_handler(update: Update, context: ContextTypes.DEFAU
             product,
             active_until=applied.get("subscription_until"),
             days_added=int(applied.get("subscription_days") or 0),
+            lang=lang,
         )
     else:
         text = _format_credits_confirmation(
             credits_added=int(applied.get("credits_added") or 0),
             balance=int(applied.get("balance") or 0),
+            lang=lang,
         )
 
     await message.reply_text(text)

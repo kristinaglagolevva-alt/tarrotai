@@ -6451,3 +6451,498 @@ button.profile-link-row {
   min-height: 92px;
   align-items: center;
 }
+
+/* ================================================================================================
+   [NATAL] NAV PAGE + FLOW
+================================================================================================ */
+.nav-page[data-page='natal'] {
+  padding-top: 0;
+  gap: 8px;
+}
+
+.nav-page[data-page='natal'] .subtab-toolbar {
+  margin-top: -10px;
+  margin-bottom: 4px;
+}
+
+.natal-shell {
+  width: var(--block-w);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding-bottom: calc(18px + env(safe-area-inset-bottom, 0px));
+}
+
+.natal-head {
+  border-radius: 20px;
+  padding: 16px 16px 14px;
+  border: 1px solid rgba(184, 210, 255, 0.24);
+  background:
+    radial-gradient(180px 84px at 18% -8%, rgba(182, 214, 255, 0.22), transparent 70%),
+    linear-gradient(180deg, rgba(58, 82, 147, 0.44), rgba(30, 49, 100, 0.48));
+  box-shadow:
+    0 24px 54px rgba(2, 8, 24, 0.44),
+    0 1px 0 rgba(255, 255, 255, 0.2) inset,
+    0 -12px 20px rgba(255, 255, 255, 0.05) inset;
+  backdrop-filter: blur(24px) saturate(1.45);
+  -webkit-backdrop-filter: blur(24px) saturate(1.45);
+}
+
+.natal-head h2 {
+  margin: 0;
+  font-size: 34px;
+  line-height: 1.02;
+  letter-spacing: -0.02em;
+  color: rgba(244, 251, 255, 0.96);
+}
+
+.natal-head p {
+  margin: 10px 0 0;
+  color: rgba(205, 223, 255, 0.9);
+  font-size: 14px;
+  line-height: 1.35;
+}
+
+.natal-progress {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.natal-progress__dot {
+  height: 6px;
+  border-radius: 999px;
+  background: rgba(137, 163, 214, 0.24);
+  transition: background-color 180ms ease, box-shadow 180ms ease;
+}
+
+.natal-progress__dot.is-active {
+  background: linear-gradient(90deg, rgba(112, 160, 255, 0.92), rgba(144, 109, 255, 0.92));
+  box-shadow: 0 0 12px rgba(121, 145, 255, 0.42);
+}
+
+.natal-card,
+.natal-result-hero,
+.natal-wheel-card,
+.natal-table-card,
+.natal-planets-card {
+  border-radius: 22px;
+  border: 1px solid rgba(184, 210, 255, 0.22);
+  background:
+    radial-gradient(240px 110px at 0% 0%, rgba(193, 222, 255, 0.16), transparent 72%),
+    linear-gradient(180deg, rgba(47, 70, 132, 0.44), rgba(29, 47, 98, 0.5));
+  box-shadow:
+    0 24px 52px rgba(2, 7, 24, 0.42),
+    0 1px 0 rgba(255, 255, 255, 0.2) inset,
+    0 -12px 20px rgba(255, 255, 255, 0.05) inset;
+  backdrop-filter: blur(24px) saturate(1.45);
+  -webkit-backdrop-filter: blur(24px) saturate(1.45);
+}
+
+.natal-card {
+  padding: 16px;
+}
+
+.natal-card h3,
+.natal-planets-card h3 {
+  margin: 0;
+  color: rgba(241, 248, 255, 0.98);
+  font-size: 30px;
+  line-height: 1.02;
+  letter-spacing: -0.02em;
+}
+
+.natal-card p {
+  margin: 10px 0 0;
+  color: rgba(199, 219, 252, 0.9);
+  font-size: 14px;
+  line-height: 1.35;
+}
+
+.natal-input {
+  width: 100%;
+  margin-top: 12px;
+  border: 1px solid rgba(160, 193, 255, 0.26);
+  background: rgba(15, 31, 76, 0.56);
+  color: rgba(239, 246, 255, 0.96);
+  border-radius: 14px;
+  min-height: 48px;
+  padding: 10px 14px;
+  font-size: 17px;
+  letter-spacing: -0.01em;
+  outline: none;
+}
+
+.natal-input::placeholder {
+  color: rgba(176, 201, 245, 0.65);
+}
+
+.natal-link-btn {
+  margin-top: 10px;
+  border: 0;
+  background: transparent;
+  color: rgba(151, 177, 255, 0.92);
+  font-size: 14px;
+  font-weight: 620;
+}
+
+.natal-suggest-list {
+  margin-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.natal-suggest-item {
+  text-align: left;
+  border: 1px solid rgba(165, 195, 255, 0.22);
+  background: rgba(17, 34, 81, 0.45);
+  color: rgba(224, 237, 255, 0.95);
+  min-height: 42px;
+  border-radius: 12px;
+  padding: 8px 12px;
+  font-size: 15px;
+}
+
+.natal-gender-grid {
+  margin-top: 12px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.natal-gender-btn {
+  border: 1px solid rgba(170, 198, 255, 0.24);
+  background: rgba(20, 37, 84, 0.44);
+  color: rgba(223, 236, 255, 0.95);
+  border-radius: 18px;
+  min-height: 82px;
+  font-size: 18px;
+  font-weight: 650;
+}
+
+.natal-gender-btn.is-active {
+  border-color: rgba(143, 185, 255, 0.56);
+  box-shadow: 0 0 0 1px rgba(158, 194, 255, 0.22) inset, 0 0 18px rgba(123, 150, 255, 0.38);
+  background: linear-gradient(140deg, rgba(86, 116, 197, 0.62), rgba(72, 97, 176, 0.52));
+}
+
+.natal-chip-list {
+  margin-top: 12px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.natal-chip-list.is-grid .natal-chip {
+  flex: 1 1 calc(50% - 8px);
+}
+
+.natal-chip {
+  border: 1px solid rgba(170, 198, 255, 0.24);
+  background: rgba(19, 35, 82, 0.46);
+  color: rgba(221, 235, 255, 0.95);
+  border-radius: 12px;
+  padding: 10px 12px;
+  min-height: 44px;
+  font-size: 15px;
+  text-align: left;
+}
+
+.natal-chip.is-active {
+  border-color: rgba(144, 186, 255, 0.58);
+  background: linear-gradient(110deg, rgba(85, 119, 203, 0.62), rgba(70, 98, 178, 0.58));
+  box-shadow: 0 0 16px rgba(116, 153, 255, 0.38);
+}
+
+.natal-step-actions {
+  margin-top: 14px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.35fr);
+  gap: 10px;
+}
+
+.natal-ghost-btn,
+.natal-primary-btn {
+  min-height: 50px;
+  border-radius: 14px;
+  font-size: 17px;
+  font-weight: 640;
+  letter-spacing: -0.01em;
+}
+
+.natal-ghost-btn {
+  border: 1px solid rgba(167, 196, 250, 0.3);
+  background: rgba(16, 34, 82, 0.44);
+  color: rgba(219, 234, 255, 0.94);
+}
+
+.natal-primary-btn {
+  border: 1px solid rgba(165, 194, 255, 0.5);
+  color: rgba(246, 252, 255, 0.98);
+  background:
+    linear-gradient(95deg, rgba(95, 140, 255, 0.95), rgba(131, 109, 255, 0.92));
+  box-shadow: 0 14px 32px rgba(58, 95, 190, 0.46);
+}
+
+.natal-primary-btn:disabled,
+.natal-ghost-btn:disabled {
+  opacity: 0.45;
+}
+
+.natal-card--generating {
+  text-align: center;
+  padding: 28px 16px;
+}
+
+.natal-loader {
+  position: relative;
+  width: 86px;
+  height: 86px;
+  margin: 0 auto 14px;
+  display: grid;
+  place-items: center;
+}
+
+.natal-loader__ring {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  border: 3px solid rgba(134, 167, 238, 0.2);
+  border-top-color: rgba(141, 177, 255, 0.98);
+}
+
+.natal-loader.is-busy .natal-loader__ring {
+  animation: natal-spin 1s linear infinite;
+}
+
+.natal-loader > span {
+  color: rgba(227, 240, 255, 0.95);
+  font-size: 20px;
+}
+
+.natal-result-hero {
+  padding: 14px;
+}
+
+.natal-result-hero__user {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.natal-result-hero__avatar {
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-size: 28px;
+  color: rgba(245, 251, 255, 0.96);
+  border: 1px solid rgba(177, 208, 255, 0.36);
+  background: radial-gradient(circle at 28% 24%, rgba(170, 198, 255, 0.42), rgba(76, 94, 169, 0.38));
+}
+
+.natal-result-hero__name {
+  font-size: 24px;
+  font-weight: 780;
+  color: rgba(243, 249, 255, 0.98);
+  line-height: 1.1;
+}
+
+.natal-result-hero__line {
+  margin-top: 4px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  color: rgba(214, 230, 255, 0.95);
+  font-size: 16px;
+}
+
+.natal-metrics {
+  margin-top: 14px;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.natal-metric__ring {
+  --pct: 70%;
+  width: 72px;
+  height: 72px;
+  margin: 0 auto 8px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: conic-gradient(rgba(122, 196, 255, 0.95) var(--pct), rgba(106, 138, 199, 0.22) 0);
+  position: relative;
+}
+
+.natal-metric__ring::before {
+  content: '';
+  position: absolute;
+  inset: 8px;
+  border-radius: 50%;
+  background: rgba(14, 29, 72, 0.9);
+}
+
+.natal-metric__ring > span {
+  position: relative;
+  z-index: 1;
+  font-size: 16px;
+  font-weight: 760;
+  color: rgba(241, 248, 255, 0.96);
+}
+
+.natal-metric__label {
+  text-align: center;
+  font-size: 13px;
+  color: rgba(207, 224, 251, 0.9);
+}
+
+.natal-result-tabs {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  border-radius: 14px;
+  border: 1px solid rgba(162, 192, 249, 0.22);
+  overflow: hidden;
+  background: rgba(17, 33, 76, 0.5);
+}
+
+.natal-result-tabs__btn {
+  min-height: 44px;
+  border: 0;
+  background: transparent;
+  color: rgba(171, 194, 234, 0.92);
+  font-size: 17px;
+  font-weight: 700;
+}
+
+.natal-result-tabs__btn.is-active {
+  color: rgba(245, 251, 255, 0.98);
+  background: linear-gradient(95deg, rgba(90, 126, 214, 0.78), rgba(88, 109, 201, 0.82));
+}
+
+.natal-wheel-card,
+.natal-table-card,
+.natal-planets-card {
+  padding: 14px;
+}
+
+.natal-wheel {
+  width: min(100%, 360px);
+  margin: 0 auto;
+  aspect-ratio: 1;
+  border-radius: 50%;
+  position: relative;
+  border: 1px solid rgba(172, 198, 246, 0.28);
+  background:
+    radial-gradient(circle at center, rgba(18, 33, 79, 0.92) 0 34%, rgba(37, 58, 122, 0.72) 35% 60%, rgba(58, 80, 160, 0.56) 61% 100%);
+}
+
+.natal-wheel__mark {
+  position: absolute;
+  inset: 0;
+  transform: rotate(calc(var(--i) * 30deg));
+  display: flex;
+  justify-content: center;
+  pointer-events: none;
+}
+
+.natal-wheel__mark > span {
+  margin-top: 10px;
+  font-size: 20px;
+  color: rgba(225, 238, 255, 0.95);
+  text-shadow: 0 0 12px rgba(123, 152, 224, 0.5);
+}
+
+.natal-wheel__center {
+  position: absolute;
+  inset: 34% 34%;
+  border-radius: 50%;
+  border: 1px solid rgba(174, 201, 252, 0.25);
+  background: rgba(15, 28, 69, 0.92);
+  display: grid;
+  place-items: center;
+  text-align: center;
+  padding: 8px;
+}
+
+.natal-wheel__center-title {
+  font-size: 12px;
+  color: rgba(179, 202, 245, 0.86);
+}
+
+.natal-wheel__center-meta {
+  margin-top: 3px;
+  font-size: 13px;
+  color: rgba(236, 245, 255, 0.95);
+  font-weight: 650;
+}
+
+.natal-table {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.natal-table__head,
+.natal-table__row {
+  display: grid;
+  grid-template-columns: 1.2fr 1fr .45fr .62fr;
+  gap: 8px;
+}
+
+.natal-table__head {
+  font-size: 12px;
+  font-weight: 700;
+  color: rgba(171, 197, 240, 0.94);
+  padding: 0 2px 4px;
+}
+
+.natal-table__row {
+  padding: 8px 2px;
+  border-top: 1px solid rgba(165, 195, 250, 0.14);
+  color: rgba(226, 238, 255, 0.96);
+  font-size: 14px;
+}
+
+.natal-planets-card h3 {
+  font-size: 24px;
+}
+
+.natal-planet-list {
+  margin-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.natal-planet-row {
+  border-radius: 12px;
+  border: 1px solid rgba(167, 193, 245, 0.18);
+  background: rgba(16, 31, 74, 0.52);
+  padding: 10px 12px;
+}
+
+.natal-planet-row__name {
+  color: rgba(239, 246, 255, 0.98);
+  font-size: 17px;
+  font-weight: 730;
+}
+
+.natal-planet-row__desc {
+  margin-top: 4px;
+  color: rgba(189, 211, 248, 0.9);
+  font-size: 14px;
+  line-height: 1.32;
+}
+
+@keyframes natal-spin {
+  to { transform: rotate(360deg); }
+}
+
+@media (max-width: 430px) {
+  .natal-head h2 { font-size: 30px; }
+  .natal-card h3 { font-size: 27px; }
+}

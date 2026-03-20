@@ -2,7 +2,7 @@
    [1] ИМПОРТЫ
 ================================================================================================= */
 
-import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, startTransition, useEffect, useMemo, useRef, useState } from 'react'
 import './App.css'
 import {
   telegramAuth,
@@ -500,6 +500,16 @@ const readLanguageManualFlag = (): boolean => {
   }
 }
 
+const isNgrokPreviewHost = (): boolean => {
+  try {
+    const host = String(window.location.hostname || '').trim().toLowerCase()
+    if (!host) return false
+    return host.endsWith('.ngrok-free.app') || host.endsWith('.ngrok.app')
+  } catch {
+    return false
+  }
+}
+
 const UI_TEXT: Record<AppLanguage, Record<string, string>> = {
   ru: {
     appSubtitle: 'Мудрость карт и искусственного интеллекта',
@@ -626,12 +636,20 @@ const UI_TEXT: Record<AppLanguage, Record<string, string>> = {
 type NatalGender = 'male' | 'female'
 type NatalStep = 'birth_date' | 'birth_time' | 'birth_place' | 'gender' | 'goals' | 'interests' | 'generating' | 'result'
 type NatalResultTab = 'wheel' | 'table'
+type NatalMetricTone = 'sky' | 'mint' | 'violet'
+type NatalPlanetId = 'sun' | 'moon' | 'mercury' | 'venus' | 'mars' | 'jupiter' | 'saturn' | 'uranus' | 'neptune' | 'pluto'
+type NatalPlanetGroup = 'mind' | 'social' | 'higher'
 
 type LocalizedOption = {
   id: string
   ru: string
   en: string
   uz: string
+}
+
+type NatalPickerOption = {
+  value: number
+  label: string
 }
 
 type ZodiacSign = {
@@ -644,14 +662,28 @@ type ZodiacSign = {
   startDay: number
 }
 
-type NatalMetric = { label: string; value: number }
-type NatalPlanet = { name: string; sign: string; degree: number; house: number; description: string }
+type NatalMetric = { id: string; label: string; value: number; tone: NatalMetricTone }
+type NatalPlanet = {
+  id: NatalPlanetId
+  name: string
+  symbol: string
+  signId: string
+  sign: string
+  signSymbol: string
+  degree: number
+  house: number
+  description: string
+  group: NatalPlanetGroup
+}
 
 type NatalProfileData = {
   name: string
   sun: string
   moon: string
   asc: string
+  sunSignId: string
+  moonSignId: string
+  ascSignId: string
   metrics: NatalMetric[]
   planets: NatalPlanet[]
   birthDate: string
@@ -681,13 +713,66 @@ const ZODIAC_SIGNS: ZodiacSign[] = [
   { id: 'sagittarius', symbol: '♐', ru: 'Стрелец', en: 'Sagittarius', uz: 'O‘qotar', startMonth: 11, startDay: 22 },
 ]
 
+const ZODIAC_WHEEL_ORDER = [
+  'aries',
+  'taurus',
+  'gemini',
+  'cancer',
+  'leo',
+  'virgo',
+  'libra',
+  'scorpio',
+  'sagittarius',
+  'capricorn',
+  'aquarius',
+  'pisces',
+] as const
+
+const ZODIAC_THEME: Record<string, { avatar: string; planetA: string; planetB: string; chip: string }> = {
+  aries: { avatar: '♈', planetA: '#FF8A5B', planetB: '#F04F6A', chip: '#F0657C' },
+  taurus: { avatar: '♉', planetA: '#E1B34A', planetB: '#A46C28', chip: '#C28A35' },
+  gemini: { avatar: '♊', planetA: '#FFD66B', planetB: '#8F6AEF', chip: '#8C79F6' },
+  cancer: { avatar: '♋', planetA: '#FFD0AE', planetB: '#B56FFF', chip: '#7C7DFF' },
+  leo: { avatar: '♌', planetA: '#FFB347', planetB: '#FF6B3C', chip: '#FF8A3D' },
+  virgo: { avatar: '♍', planetA: '#B4E089', planetB: '#5D9D4E', chip: '#67AD66' },
+  libra: { avatar: '♎', planetA: '#BEE5FF', planetB: '#88A2FF', chip: '#7BA6FF' },
+  scorpio: { avatar: '♏', planetA: '#FF6D9E', planetB: '#7D3BC7', chip: '#C56BFF' },
+  sagittarius: { avatar: '♐', planetA: '#C7C8D3', planetB: '#7F879F', chip: '#9FA7C6' },
+  capricorn: { avatar: '♑', planetA: '#A5D3C6', planetB: '#4D8D7D', chip: '#67A291' },
+  aquarius: { avatar: '♒', planetA: '#63D8FF', planetB: '#3D6BFF', chip: '#5FA8FF' },
+  pisces: { avatar: '♓', planetA: '#8FD8FF', planetB: '#55B3C9', chip: '#73C6D9' },
+}
+
+const NATAL_PLANETS = [
+  { id: 'sun', symbol: '☉', ru: 'Солнце', en: 'Sun', uz: 'Quyosh', group: 'mind', colors: ['#FAD961', '#F76B1C'] },
+  { id: 'moon', symbol: '☽', ru: 'Луна', en: 'Moon', uz: 'Oy', group: 'mind', colors: ['#F7F4ED', '#B7C0D9'] },
+  { id: 'mercury', symbol: '☿', ru: 'Меркурий', en: 'Mercury', uz: 'Merkuriy', group: 'mind', colors: ['#F4C18A', '#D17F47'] },
+  { id: 'venus', symbol: '♀', ru: 'Венера', en: 'Venus', uz: 'Venera', group: 'mind', colors: ['#F7C766', '#E28A29'] },
+  { id: 'mars', symbol: '♂', ru: 'Марс', en: 'Mars', uz: 'Mars', group: 'mind', colors: ['#F39742', '#C85A26'] },
+  { id: 'jupiter', symbol: '♃', ru: 'Юпитер', en: 'Jupiter', uz: 'Yupiter', group: 'social', colors: ['#E0B97A', '#9B6B39'] },
+  { id: 'saturn', symbol: '♄', ru: 'Сатурн', en: 'Saturn', uz: 'Saturn', group: 'social', colors: ['#E4C36E', '#9D7B28'] },
+  { id: 'uranus', symbol: '♅', ru: 'Уран', en: 'Uranus', uz: 'Uran', group: 'higher', colors: ['#63C5FF', '#3577FF'] },
+  { id: 'neptune', symbol: '♆', ru: 'Нептун', en: 'Neptune', uz: 'Neptun', group: 'higher', colors: ['#4FA7FF', '#1D5BE1'] },
+  { id: 'pluto', symbol: '♇', ru: 'Плутон', en: 'Pluto', uz: 'Pluton', group: 'higher', colors: ['#F1F3F8', '#8D94A8'] },
+] as const satisfies ReadonlyArray<{
+  id: NatalPlanetId
+  symbol: string
+  ru: string
+  en: string
+  uz: string
+  group: NatalPlanetGroup
+  colors: [string, string]
+}>
+
 const NATAL_GOALS: LocalizedOption[] = [
   { id: 'future', ru: 'Узнать будущее', en: 'See future trends', uz: "Kelajak yo'nalishini bilish" },
-  { id: 'self', ru: 'Понять себя', en: 'Understand myself', uz: "O'zimni yaxshiroq tushunish" },
+  { id: 'self', ru: 'Понять себя и других людей', en: 'Understand myself and others', uz: "O'zimni va boshqalarni tushunish" },
   { id: 'strength', ru: 'Раскрыть сильные стороны', en: 'Unlock strengths', uz: 'Kuchli tomonlarni ochish' },
-  { id: 'love', ru: 'Найти гармонию в любви', en: 'Improve love life', uz: 'Muhabbatda uyg‘unlik topish' },
-  { id: 'money', ru: 'Усилить денежный поток', en: 'Boost finances', uz: 'Moliyaviy oqimni kuchaytirish' },
-  { id: 'career', ru: 'Сделать карьерный шаг', en: 'Move in career', uz: 'Karyerada o‘sish' },
+  { id: 'perfect_match', ru: 'Найти идеальную пару', en: 'Find the ideal partner', uz: 'Mos juftlikni topish' },
+  { id: 'money', ru: 'Привлечь финансовое благополучие', en: 'Attract financial wellbeing', uz: 'Moliyaviy farovonlikni jalb qilish' },
+  { id: 'relationship', ru: 'Улучшить отношения в паре', en: 'Improve relationships', uz: 'Munosabatlarni yaxshilash' },
+  { id: 'compatibility', ru: 'Проверить любовную совместимость', en: 'Check love compatibility', uz: 'Sevgi mosligini tekshirish' },
+  { id: 'friends', ru: 'Укрепить дружеские связи', en: 'Strengthen friendships', uz: "Do'stlik rishtalarini mustahkamlash" },
 ]
 
 const NATAL_INTERESTS: LocalizedOption[] = [
@@ -711,6 +796,84 @@ const NATAL_CITY_OPTIONS: LocalizedOption[] = [
 ]
 
 const localizeOption = (opt: LocalizedOption, lang: AppLanguage): string => (lang === 'en' ? opt.en : lang === 'uz' ? opt.uz : opt.ru)
+const localizePlanetName = (planet: (typeof NATAL_PLANETS)[number], lang: AppLanguage): string =>
+  lang === 'en' ? planet.en : lang === 'uz' ? planet.uz : planet.ru
+const planetDefById = (id: NatalPlanetId) => NATAL_PLANETS.find((planet) => planet.id === id) || NATAL_PLANETS[0]
+const zodiacById = (id: string): ZodiacSign => ZODIAC_SIGNS.find((sign) => sign.id === id) || ZODIAC_SIGNS[0]
+const zodiacTheme = (id: string) => ZODIAC_THEME[id] || ZODIAC_THEME.aries
+const zodiacOrderIndex = (id: string) => {
+  const idx = ZODIAC_WHEEL_ORDER.indexOf(id as (typeof ZODIAC_WHEEL_ORDER)[number])
+  return idx >= 0 ? idx : 0
+}
+
+const daysInMonth = (year: number, month: number): number => new Date(year, month, 0).getDate()
+
+const renderNatalGenderIcon = (gender: NatalGender) => {
+  if (gender === 'male') {
+    return (
+      <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+        <path d="M14 4h6m0 0v6m0-6-5.2 5.2" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" />
+        <circle cx="10" cy="14" r="5.6" stroke="currentColor" strokeWidth="1.9" />
+      </svg>
+    )
+  }
+  return (
+    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <circle cx="12" cy="9.2" r="5.2" stroke="currentColor" strokeWidth="1.9" />
+      <path d="M12 14.4V21m-3.4-3.3h6.8" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" />
+    </svg>
+  )
+}
+
+const renderNatalInterestIcon = (id: string) => {
+  switch (id) {
+    case 'money':
+      return (
+        <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <rect x="4" y="6" width="16" height="12" rx="2.6" stroke="currentColor" strokeWidth="1.8" />
+          <circle cx="12" cy="12" r="2.4" stroke="currentColor" strokeWidth="1.8" />
+          <path d="M6.8 9.1h.01M17.2 14.9h.01" stroke="currentColor" strokeWidth="2.1" strokeLinecap="round" />
+        </svg>
+      )
+    case 'business':
+      return (
+        <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <path d="M8 7V5.8A1.8 1.8 0 0 1 9.8 4h4.4A1.8 1.8 0 0 1 16 5.8V7" stroke="currentColor" strokeWidth="1.8" />
+          <rect x="4" y="7" width="16" height="12" rx="2.6" stroke="currentColor" strokeWidth="1.8" />
+          <path d="M4 12h16" stroke="currentColor" strokeWidth="1.8" />
+        </svg>
+      )
+    case 'love':
+      return (
+        <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <path d="M12 19.5s-6.8-4.1-8.4-8c-1.1-2.7.3-5.8 3.4-6.6 2-.5 3.8.2 5 1.8 1.2-1.6 3-2.3 5-1.8 3.1.8 4.5 3.9 3.4 6.6-1.6 3.9-8.4 8-8.4 8Z" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" />
+        </svg>
+      )
+    case 'friends':
+      return (
+        <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <circle cx="8" cy="10" r="2.6" stroke="currentColor" strokeWidth="1.8" />
+          <circle cx="16" cy="9" r="2.2" stroke="currentColor" strokeWidth="1.8" />
+          <path d="M4.5 18c.5-2.3 2.3-3.8 5-3.8s4.5 1.5 5 3.8M13.8 18c.3-1.6 1.6-2.8 3.7-2.8 1 0 1.8.2 2.5.7" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+        </svg>
+      )
+    case 'family':
+      return (
+        <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <path d="m4 18 8-12 8 12" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+          <path d="M8.5 18v-4.2a3.5 3.5 0 1 1 7 0V18" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+        </svg>
+      )
+    case 'career':
+    default:
+      return (
+        <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <path d="M12 5.2 16.5 8v8L12 18.8 7.5 16V8L12 5.2Z" stroke="currentColor" strokeWidth="1.8" />
+          <path d="M12 5.2V18.8M7.5 8 12 10.6 16.5 8" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      )
+  }
+}
 
 const normalizeSeed = (seed: string): number => {
   let h = 2166136261
@@ -762,39 +925,54 @@ const buildNatalProfile = (params: {
   const ascSign = ZODIAC_SIGNS[hashInt(`${seedBase}:asc`, 0, ZODIAC_SIGNS.length - 1)]
 
   const metricLabels = {
-    ru: ['Адаптивность', 'Воля', 'Интуиция'],
-    en: ['Adaptability', 'Willpower', 'Intuition'],
-    uz: ['Moslashuvchanlik', 'Iroda', 'Intuitsiya'],
+    ru: [
+      { id: 'adaptability', label: 'Адаптивность', tone: 'sky' as const },
+      { id: 'persistence', label: 'Упрямство', tone: 'mint' as const },
+      { id: 'impulsivity', label: 'Импульсивность', tone: 'violet' as const },
+    ],
+    en: [
+      { id: 'adaptability', label: 'Adaptability', tone: 'sky' as const },
+      { id: 'persistence', label: 'Persistence', tone: 'mint' as const },
+      { id: 'impulsivity', label: 'Impulsivity', tone: 'violet' as const },
+    ],
+    uz: [
+      { id: 'adaptability', label: 'Moslashuvchanlik', tone: 'sky' as const },
+      { id: 'persistence', label: 'Qatʼiyat', tone: 'mint' as const },
+      { id: 'impulsivity', label: 'Impulsivlik', tone: 'violet' as const },
+    ],
   } as const
 
-  const metrics: NatalMetric[] = metricLabels[lang].map((label, idx) => ({
-    label,
+  const metrics: NatalMetric[] = metricLabels[lang].map((metric, idx) => ({
+    id: metric.id,
+    label: metric.label,
+    tone: metric.tone,
     value: hashInt(`${seedBase}:metric:${idx}`, 58, 91),
   }))
 
-  const planetNames = {
-    ru: ['Солнце', 'Луна', 'Меркурий', 'Венера', 'Марс', 'Юпитер', 'Сатурн', 'Уран', 'Нептун', 'Плутон'],
-    en: ['Sun', 'Moon', 'Mercury', 'Venus', 'Mars', 'Jupiter', 'Saturn', 'Uranus', 'Neptune', 'Pluto'],
-    uz: ['Quyosh', 'Oy', 'Merkuriy', 'Venera', 'Mars', 'Yupiter', 'Saturn', 'Uran', 'Neptun', 'Pluton'],
-  } as const
-
   const descriptionTemplates = {
-    ru: (planet: string, sign: string) => `${planet} в знаке ${sign} усиливает личные паттерны и задаёт ваш ритм решений.`,
-    en: (planet: string, sign: string) => `${planet} in ${sign} amplifies core patterns and shapes your decision rhythm.`,
-    uz: (planet: string, sign: string) => `${planet} ${sign} belgisida sizning asosiy xulq yo‘nalishingizni kuchaytiradi.`,
+    ru: (planet: string, sign: string) => `${planet} в знаке ${sign} задаёт устойчивый сценарий поведения и показывает, как вы реагируете на ключевые жизненные темы.`,
+    en: (planet: string, sign: string) => `${planet} in ${sign} sets a stable behavioural pattern and shows how you react to your main life themes.`,
+    uz: (planet: string, sign: string) => `${planet} ${sign} belgisida sizning asosiy hayotiy mavzularga qanday javob berishingizni ko'rsatadi.`,
   } as const
 
-  const planets: NatalPlanet[] = planetNames[lang].map((planet, idx) => {
-    const sign = ZODIAC_SIGNS[hashInt(`${seedBase}:planet-sign:${idx}`, 0, ZODIAC_SIGNS.length - 1)]
+  const planets: NatalPlanet[] = NATAL_PLANETS.map((planetDef, idx) => {
+    const forcedSign = planetDef.id === 'sun' ? sunSign : planetDef.id === 'moon' ? moonSign : null
+    const sign = forcedSign || ZODIAC_SIGNS[hashInt(`${seedBase}:planet-sign:${idx}`, 0, ZODIAC_SIGNS.length - 1)]
     const degree = hashInt(`${seedBase}:planet-degree:${idx}`, 0, 2999) / 100
     const house = hashInt(`${seedBase}:planet-house:${idx}`, 1, 12)
     const signLabel = zodiacLabel(sign, lang)
+    const planetName = localizePlanetName(planetDef, lang)
     return {
-      name: planet,
+      id: planetDef.id,
+      name: planetName,
+      symbol: planetDef.symbol,
+      signId: sign.id,
       sign: `${sign.symbol} ${signLabel}`,
+      signSymbol: sign.symbol,
       degree,
       house,
-      description: descriptionTemplates[lang](planet, signLabel),
+      group: planetDef.group,
+      description: descriptionTemplates[lang](planetName, signLabel),
     }
   })
 
@@ -803,6 +981,9 @@ const buildNatalProfile = (params: {
     sun: `${sunSign.symbol} ${zodiacLabel(sunSign, lang)}`,
     moon: `${moonSign.symbol} ${zodiacLabel(moonSign, lang)}`,
     asc: `${ascSign.symbol} ${zodiacLabel(ascSign, lang)}`,
+    sunSignId: sunSign.id,
+    moonSignId: moonSign.id,
+    ascSignId: ascSign.id,
     metrics,
     planets,
     birthDate,
@@ -822,6 +1003,7 @@ const readStoredNatalProfile = (): NatalProfileData | null => {
     const parsed = JSON.parse(raw) as NatalProfileData
     if (!parsed || typeof parsed !== 'object') return null
     if (!Array.isArray(parsed.metrics) || !Array.isArray(parsed.planets)) return null
+    if (!parsed.birthDate || !parsed.birthPlace) return null
     return parsed
   } catch {
     return null
@@ -1710,6 +1892,8 @@ const [token, setToken] = useState<string | null>(() => {
   return readStoredJwt()
 })
 
+const isNgrokPreview = useMemo(() => isNgrokPreviewHost(), [])
+
 const [isLanguageManual, setIsLanguageManual] = useState<boolean>(() => readLanguageManualFlag())
 
 const [appLanguage, setAppLanguage] = useState<AppLanguage>(() => {
@@ -1778,9 +1962,12 @@ const [natalGender, setNatalGender] = useState<NatalGender | ''>('')
 const [natalGoals, setNatalGoals] = useState<string[]>([])
 const [natalInterests, setNatalInterests] = useState<string[]>([])
 const [natalGenerating, setNatalGenerating] = useState(false)
+const [natalGenerationProgress, setNatalGenerationProgress] = useState(19)
 const [natalResultTab, setNatalResultTab] = useState<NatalResultTab>('wheel')
 const [natalProfile, setNatalProfile] = useState<NatalProfileData | null>(() => readStoredNatalProfile())
 const [natalStep, setNatalStep] = useState<NatalStep>(() => (readStoredNatalProfile() ? 'result' : 'birth_date'))
+const [showNatalExplain, setShowNatalExplain] = useState(true)
+const natalPickerRefs = useRef<Record<string, HTMLDivElement | null>>({})
 
 const [question, setQuestion] = useState('')
 const topics = useMemo(() => buildTopics(appLanguage), [appLanguage])
@@ -1870,6 +2057,18 @@ useEffect(() => {
   }
 
   const runAuth = async () => {
+    if (isNgrokPreview) {
+      safe(() => {
+        clearStoredJwt()
+        setToken(null)
+        setUser(null)
+        setBilling(null)
+        setAuthStatus('ready')
+        setAuthError('')
+      })
+      return
+    }
+
     safe(() => {
       setAuthStatus('loading')
       setAuthError('')
@@ -2030,7 +2229,7 @@ useEffect(() => {
     mounted = false
   }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-}, [token, authRetryNonce, isLanguageManual])/* =============================================================================================
+}, [token, authRetryNonce, isLanguageManual, isNgrokPreview])/* =============================================================================================
      [9] БАЗОВОЕ СОСТОЯНИЕ UI
   ============================================================================================= */
 
@@ -3544,6 +3743,8 @@ useEffect(() => {
   ============================================================================================= */
 
   type NavTab = 'main' | 'natal' | 'history' | 'profile'
+  const NATAL_UI_ENABLED = false
+  const HOME_NAV_TABS: NavTab[] = NATAL_UI_ENABLED ? ['main', 'natal', 'history', 'profile'] : ['main', 'history', 'profile']
 
   const [navTab, setNavTab] = useState<NavTab>('main')
   const prevNavTabRef = useRef<NavTab>('main')
@@ -3551,9 +3752,9 @@ useEffect(() => {
 
   const NAV_INDEX = useMemo(() => {
     const map = new Map<NavTab, number>()
-    ;(['main', 'natal', 'history', 'profile'] as NavTab[]).forEach((t, i) => map.set(t, i))
+    HOME_NAV_TABS.forEach((t, i) => map.set(t, i))
     return map
-  }, [])
+  }, [HOME_NAV_TABS])
 
   const navActiveIndex = NAV_INDEX.get(navTab) ?? 0
   const navPrevIndex = NAV_INDEX.get(navPrev) ?? 0
@@ -3607,6 +3808,12 @@ useEffect(() => {
     setNavTab(next)
   }
 
+  useEffect(() => {
+    if (!NATAL_UI_ENABLED && navTab === 'natal') {
+      onPickNav('main')
+    }
+  }, [NATAL_UI_ENABLED, navTab])
+
   const goToMainTab = () => {
     if (navTab === 'main') return
     onPickNav('main')
@@ -3637,10 +3844,256 @@ useEffect(() => {
     if (natalStep === 'birth_time') return !!natalBirthTime
     if (natalStep === 'birth_place') return !!String(natalBirthPlace || '').trim()
     if (natalStep === 'gender') return !!natalGender
-    if (natalStep === 'goals') return natalGoals.length > 0
-    if (natalStep === 'interests') return natalInterests.length > 0
+    if (natalStep === 'goals') return true
+    if (natalStep === 'interests') return true
     return false
   })()
+
+  const natalMonthOptions = useMemo<NatalPickerOption[]>(
+    () =>
+      [
+        lx('Января', 'January', 'Yanvar'),
+        lx('Февраля', 'February', 'Fevral'),
+        lx('Марта', 'March', 'Mart'),
+        lx('Апреля', 'April', 'Aprel'),
+        lx('Мая', 'May', 'May'),
+        lx('Июня', 'June', 'Iyun'),
+        lx('Июля', 'July', 'Iyul'),
+        lx('Августа', 'August', 'Avgust'),
+        lx('Сентября', 'September', 'Sentyabr'),
+        lx('Октября', 'October', 'Oktyabr'),
+        lx('Ноября', 'November', 'Noyabr'),
+        lx('Декабря', 'December', 'Dekabr'),
+      ].map((label, idx) => ({ value: idx + 1, label })),
+    [appLanguage],
+  )
+
+  const defaultNatalDate = '1996-01-01'
+  const safeNatalBirthDate = /^\d{4}-\d{2}-\d{2}$/.test(natalBirthDate) ? natalBirthDate : defaultNatalDate
+  const [safeNatalYear, safeNatalMonth, safeNatalDay] = safeNatalBirthDate.split('-').map((part) => Number(part))
+  const safeNatalBirthTime = /^\d{2}:\d{2}$/.test(natalBirthTime) ? natalBirthTime : '12:00'
+  const [safeNatalHour, safeNatalMinute] = safeNatalBirthTime.split(':').map((part) => Number(part))
+  const natalYearOptions = useMemo<NatalPickerOption[]>(
+    () => Array.from({ length: new Date().getFullYear() - 1940 + 1 }, (_, idx) => ({ value: 1940 + idx, label: String(1940 + idx) })),
+    [],
+  )
+  const natalDayOptions = useMemo<NatalPickerOption[]>(
+    () => Array.from({ length: daysInMonth(safeNatalYear, safeNatalMonth) }, (_, idx) => ({ value: idx + 1, label: String(idx + 1) })),
+    [safeNatalMonth, safeNatalYear],
+  )
+  const natalHourOptions = useMemo<NatalPickerOption[]>(
+    () => Array.from({ length: 24 }, (_, idx) => ({ value: idx, label: String(idx).padStart(2, '0') })),
+    [],
+  )
+  const natalMinuteOptions = useMemo<NatalPickerOption[]>(
+    () => Array.from({ length: 60 }, (_, idx) => ({ value: idx, label: String(idx).padStart(2, '0') })),
+    [],
+  )
+
+  useEffect(() => {
+    if (natalStep === 'birth_date' && !natalBirthDate) {
+      setNatalBirthDate(defaultNatalDate)
+    }
+    if (natalStep === 'birth_time' && !natalBirthTime) {
+      setNatalBirthTime('12:00')
+    }
+  }, [natalBirthDate, natalBirthTime, natalStep])
+
+  useEffect(() => {
+    if (natalStep !== 'generating') return
+    setNatalGenerationProgress(19)
+    const timer = window.setInterval(() => {
+      setNatalGenerationProgress((prev) => {
+        if (prev >= 92) return prev
+        return Math.min(92, prev + (prev < 46 ? 7 : prev < 72 ? 5 : 3))
+      })
+    }, 220)
+    return () => window.clearInterval(timer)
+  }, [natalStep])
+
+  const setNatalPickerRef = (key: string) => (node: HTMLDivElement | null) => {
+    natalPickerRefs.current[key] = node
+  }
+
+  const syncNatalPicker = (key: string, index: number, behavior: ScrollBehavior = 'auto') => {
+    const node = natalPickerRefs.current[key]
+    if (!node) return
+    const top = clamp(index, 0, Number.MAX_SAFE_INTEGER) * 52
+    if (Math.abs(node.scrollTop - top) < 2) return
+    node.scrollTo({ top, behavior })
+  }
+
+  useEffect(() => {
+    syncNatalPicker('birth-day', natalDayOptions.findIndex((item) => item.value === safeNatalDay))
+    syncNatalPicker('birth-month', natalMonthOptions.findIndex((item) => item.value === safeNatalMonth))
+    syncNatalPicker('birth-year', natalYearOptions.findIndex((item) => item.value === safeNatalYear))
+    syncNatalPicker('birth-hour', natalHourOptions.findIndex((item) => item.value === safeNatalHour))
+    syncNatalPicker('birth-minute', natalMinuteOptions.findIndex((item) => item.value === safeNatalMinute))
+  }, [
+    natalDayOptions,
+    natalHourOptions,
+    natalMinuteOptions,
+    natalMonthOptions,
+    natalStep,
+    natalYearOptions,
+    safeNatalDay,
+    safeNatalHour,
+    safeNatalMinute,
+    safeNatalMonth,
+    safeNatalYear,
+  ])
+
+  const updateNatalBirthDate = (day: number, month: number, year: number) => {
+    const safeDay = clamp(day, 1, daysInMonth(year, month))
+    setNatalBirthDate(`${String(year).padStart(4, '0')}-${String(month).padStart(2, '0')}-${String(safeDay).padStart(2, '0')}`)
+  }
+
+  const updateNatalBirthTime = (hour: number, minute: number) => {
+    setNatalBirthTime(`${String(clamp(hour, 0, 23)).padStart(2, '0')}:${String(clamp(minute, 0, 59)).padStart(2, '0')}`)
+  }
+
+  const renderNatalPickerColumn = ({
+    pickerKey,
+    options,
+    selectedValue,
+    onValueChange,
+    wide = false,
+  }: {
+    pickerKey: string
+    options: NatalPickerOption[]
+    selectedValue: number
+    onValueChange: (value: number) => void
+    wide?: boolean
+  }) => {
+    const selectedIndex = Math.max(0, options.findIndex((option) => option.value === selectedValue))
+    return (
+      <div className={`natal-wheel-picker__col ${wide ? 'is-wide' : ''}`}>
+        <div
+          className="natal-wheel-picker__viewport"
+          ref={setNatalPickerRef(pickerKey)}
+          onScroll={(event) => {
+            const nextIndex = clamp(Math.round(event.currentTarget.scrollTop / 52), 0, options.length - 1)
+            const nextValue = options[nextIndex]?.value
+            if (typeof nextValue === 'number' && nextValue !== selectedValue) {
+              onValueChange(nextValue)
+            }
+          }}
+        >
+          <div className="natal-wheel-picker__pad" aria-hidden="true" />
+          {options.map((option, idx) => (
+            <button
+              key={`${pickerKey}:${option.value}`}
+              type="button"
+              className={`natal-wheel-picker__item ${idx === selectedIndex ? 'is-active' : ''}`}
+              onClick={() => {
+                onValueChange(option.value)
+                syncNatalPicker(pickerKey, idx, 'smooth')
+              }}
+            >
+              {option.label}
+            </button>
+          ))}
+          <div className="natal-wheel-picker__pad" aria-hidden="true" />
+        </div>
+        <div className="natal-wheel-picker__focus" aria-hidden="true" />
+      </div>
+    )
+  }
+
+  const natalSunPlanet = natalProfile?.planets.find((planet) => planet.id === 'sun') || null
+  const natalMoonPlanet = natalProfile?.planets.find((planet) => planet.id === 'moon') || null
+  const natalMindPlanets = (natalProfile?.planets || []).filter((planet) => ['mercury', 'venus', 'mars'].includes(planet.id))
+  const natalSocialPlanets = (natalProfile?.planets || []).filter((planet) => ['jupiter', 'saturn'].includes(planet.id))
+  const natalHigherPlanets = (natalProfile?.planets || []).filter((planet) => ['uranus', 'neptune', 'pluto'].includes(planet.id))
+
+  const natalBigThreeCards = natalProfile
+    ? [
+        natalSunPlanet
+          ? {
+              id: 'sun',
+              title: natalSunPlanet.name,
+              value: natalSunPlanet.sign,
+              symbol: natalSunPlanet.symbol,
+              signId: natalSunPlanet.signId,
+            }
+          : null,
+        natalMoonPlanet
+          ? {
+              id: 'moon',
+              title: natalMoonPlanet.name,
+              value: natalMoonPlanet.sign,
+              symbol: natalMoonPlanet.symbol,
+              signId: natalMoonPlanet.signId,
+            }
+          : null,
+        {
+          id: 'asc',
+          title: lx('Асцендент', 'Ascendant', 'Ascendant'),
+          value: natalProfile.asc,
+          symbol: 'Asc',
+          signId: natalProfile.ascSignId,
+        },
+      ].filter(Boolean) as Array<{ id: string; title: string; value: string; symbol: string; signId: string }>
+    : []
+
+  const natalWheelSigns = useMemo(() => {
+    if (!natalProfile) return []
+    const ascIdx = zodiacOrderIndex(natalProfile.ascSignId)
+    return ZODIAC_WHEEL_ORDER.map((signId, idx) => {
+      const sign = zodiacById(signId)
+      const displayAngle = (idx - ascIdx) * 30 + 180
+      return { ...sign, displayAngle }
+    })
+  }, [natalProfile])
+
+  const natalWheelPlanets = useMemo(() => {
+    if (!natalProfile) return []
+    const ascIdx = zodiacOrderIndex(natalProfile.ascSignId)
+    return natalProfile.planets.map((planet) => {
+      const signIdx = zodiacOrderIndex(planet.signId)
+      const baseAngle = (signIdx - ascIdx) * 30 + 180
+      const degreeOffset = (planet.degree / 30) * 30
+      return {
+        ...planet,
+        angle: baseAngle + degreeOffset,
+      }
+    })
+  }, [natalProfile])
+
+  const renderNatalPlanetCard = (planet: NatalPlanet) => {
+    const planetDef = planetDefById(planet.id)
+    const signTheme = zodiacTheme(planet.signId)
+    return (
+      <article key={`${planet.id}:${planet.house}`} className="natal-planet-card">
+        <div
+          className="natal-planet-card__orb"
+          style={
+            {
+              ['--planet-a' as any]: planetDef.colors[0],
+              ['--planet-b' as any]: planetDef.colors[1],
+            } as Record<string, string>
+          }
+        >
+          <span>{planet.symbol}</span>
+          <div
+            className="natal-planet-card__badge"
+            style={{ ['--badge-color' as any]: signTheme.chip } as Record<string, string>}
+          >
+            {planet.signSymbol}
+          </div>
+        </div>
+        <div className="natal-planet-card__body">
+          <div className="natal-planet-card__title">{planet.name}</div>
+          <div className="natal-planet-card__subtitle">{planet.sign}</div>
+          <div className="natal-planet-card__meta">
+            <span>{lx('Дом', 'House', 'Uy')} {planet.house}</span>
+            <span>{planet.degree.toFixed(2)}°</span>
+          </div>
+          <div className="natal-planet-card__desc">{planet.description}</div>
+        </div>
+      </article>
+    )
+  }
 
   const resetNatalFlow = () => {
     setNatalStep('birth_date')
@@ -3650,6 +4103,7 @@ useEffect(() => {
   const runNatalGeneration = () => {
     const name = String(user?.first_name || user?.username || 'AI Taro').trim()
     setNatalGenerating(true)
+    setNatalGenerationProgress(19)
     setNatalStep('generating')
     window.setTimeout(() => {
       const nextProfile = buildNatalProfile({
@@ -3664,6 +4118,7 @@ useEffect(() => {
       })
       setNatalProfile(nextProfile)
       setNatalGenerating(false)
+      setNatalGenerationProgress(100)
       setNatalStep('result')
       setNatalResultTab('wheel')
     }, 1300)
@@ -4265,11 +4720,15 @@ useEffect(() => {
       closeHomeTour()
       return
     }
-    setHomeTourIndex((i) => Math.min(homeTourSteps.length - 1, i + 1))
+    startTransition(() => {
+      setHomeTourIndex((i) => Math.min(homeTourSteps.length - 1, i + 1))
+    })
   }
 
   const prevHomeTourStep = () => {
-    setHomeTourIndex((i) => Math.max(0, i - 1))
+    startTransition(() => {
+      setHomeTourIndex((i) => Math.max(0, i - 1))
+    })
   }
 
   useEffect(() => {
@@ -4287,8 +4746,10 @@ useEffect(() => {
       seen = localStorage.getItem(key) === '1'
     } catch {}
     if (seen) return
-    setHomeTourIndex(0)
-    setShowHomeTour(true)
+    startTransition(() => {
+      setHomeTourIndex(0)
+      setShowHomeTour(true)
+    })
   }, [authStatus, view, navTab, user?.telegram_id])
 
   useEffect(() => {
@@ -4299,9 +4760,16 @@ useEffect(() => {
     if (!target) return
     window.setTimeout(() => {
       try {
-        target.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'nearest' })
+        const rect = target.getBoundingClientRect()
+        const topSafe = Math.max(84, Number(window.visualViewport?.offsetTop || 0) + 84)
+        const bottomSafe = window.innerHeight - 96
+        const fullyVisible = rect.top >= topSafe && rect.bottom <= bottomSafe
+        if (!fullyVisible) {
+          // Keep onboarding step switches snappy: smooth scrolling here causes visible lag.
+          target.scrollIntoView({ behavior: 'auto', block: 'center', inline: 'nearest' })
+        }
       } catch {}
-    }, 90)
+    }, 40)
   }, [showHomeTour, homeTourIndex, view, navTab])
 
   useEffect(() => {
@@ -4397,14 +4865,12 @@ useEffect(() => {
     const contentNode = contentRef.current
     window.addEventListener('resize', schedule)
     window.addEventListener('orientationchange', schedule)
-    window.addEventListener('scroll', schedule, true)
     contentNode?.addEventListener('scroll', schedule, { passive: true })
 
     return () => {
       if (raf) window.cancelAnimationFrame(raf)
       window.removeEventListener('resize', schedule)
       window.removeEventListener('orientationchange', schedule)
-      window.removeEventListener('scroll', schedule, true)
       contentNode?.removeEventListener('scroll', schedule as EventListener)
     }
   }, [showHomeTour, homeTourIndex, view, navTab, keyboardInset])
@@ -7568,19 +8034,21 @@ useEffect(() => {
                   </div>
 
                   <div className="home-head__actions" aria-label={lx('Навигация', 'Navigation', 'Navigatsiya')}>
-                    <button
-                      type="button"
-                      className="home-head__action"
-                      onClick={toggleNatalTab}
-                      aria-label={t('natalChart')}
-                      title={t('natalChart')}
-                    >
-                      <svg viewBox="0 0 24 24" aria-hidden="true">
-                        <circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" strokeWidth="1.8" />
-                        <path d="M12 4v16M4 12h16" fill="none" stroke="currentColor" strokeWidth="1.4" opacity=".85" />
-                        <circle cx="12" cy="12" r="2.3" fill="currentColor" />
-                      </svg>
-                    </button>
+                    {NATAL_UI_ENABLED && (
+                      <button
+                        type="button"
+                        className="home-head__action"
+                        onClick={toggleNatalTab}
+                        aria-label={t('natalChart')}
+                        title={t('natalChart')}
+                      >
+                        <svg viewBox="0 0 24 24" aria-hidden="true">
+                          <circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" strokeWidth="1.8" />
+                          <path d="M12 4v16M4 12h16" fill="none" stroke="currentColor" strokeWidth="1.4" opacity=".85" />
+                          <circle cx="12" cy="12" r="2.3" fill="currentColor" />
+                        </svg>
+                      </button>
+                    )}
 
                     <button
                       type="button"
@@ -7612,7 +8080,7 @@ useEffect(() => {
                 </>
               ) : (
                 <div className="home-head__center-title" aria-live="polite">
-                  {navTab === 'profile' ? t('profile') : navTab === 'natal' ? t('natalChart') : t('history')}
+                  {navTab === 'profile' ? t('profile') : t('history')}
                 </div>
               )}
             </div>
@@ -7781,6 +8249,7 @@ useEffect(() => {
 
                 </div>
 
+                {NATAL_UI_ENABLED && (
                 <div className="nav-page" data-page="natal">
                   <div className="subtab-toolbar">
                     <button
@@ -7808,9 +8277,9 @@ useEffect(() => {
                       <h2>{t('natalChart')}</h2>
                       <p>
                         {lx(
-                          'Ваш персональный астрологический профиль с красивой визуализацией и понятными выводами.',
-                          'Your personal astrological profile with a clean visual map and practical insights.',
-                          "Shaxsiy astro profilingiz: chiroyli vizual xarita va aniq tushunarli xulosalar.",
+                          'Персональный астрологический профиль в эстетике полноценного premium-сервиса.',
+                          'A personal astrological profile with a premium product feel.',
+                          "Premium uslubdagi shaxsiy astrologik profilingiz.",
                         )}
                       </p>
                     </div>
@@ -7824,55 +8293,93 @@ useEffect(() => {
                     )}
 
                     {(natalStep === 'birth_date' || natalStep === 'birth_time' || natalStep === 'birth_place' || natalStep === 'gender' || natalStep === 'goals' || natalStep === 'interests') && (
-                      <section className="natal-card">
+                      <section className={`natal-screen natal-screen--${natalStep}`}>
                         {natalStep === 'birth_date' && (
                           <>
-                            <h3>{lx('Дата рождения', 'Birth date', "Tug'ilgan sana")}</h3>
-                            <p>{lx('Дата нужна для определения солнечного знака и базовой астрокарты.', 'Needed to detect your Sun sign and core map.', "Quyosh belgisini va asosiy xaritani aniqlash uchun kerak.")}</p>
-                            <input
-                              className="natal-input"
-                              type="date"
-                              value={natalBirthDate}
-                              onChange={(e) => setNatalBirthDate(e.target.value)}
-                              max={new Date().toISOString().slice(0, 10)}
-                            />
+                            <div className="natal-screen__copy natal-screen__copy--center">
+                              <h3>{lx('Дата рождения', 'Birth date', "Tug‘ilgan sana")}</h3>
+                              <p>
+                                {lx(
+                                  'Дата рождения важна для определения вашего знака Зодиака.',
+                                  'Birth date is needed to detect your zodiac sign.',
+                                  "Tug‘ilgan sana zodiak belgingizni aniqlash uchun kerak.",
+                                )}
+                              </p>
+                            </div>
+                            <div className="natal-wheel-picker natal-wheel-picker--date">
+                              {renderNatalPickerColumn({
+                                pickerKey: 'birth-day',
+                                options: natalDayOptions,
+                                selectedValue: safeNatalDay,
+                                onValueChange: (value) => updateNatalBirthDate(value, safeNatalMonth, safeNatalYear),
+                              })}
+                              {renderNatalPickerColumn({
+                                pickerKey: 'birth-month',
+                                options: natalMonthOptions,
+                                selectedValue: safeNatalMonth,
+                                onValueChange: (value) => updateNatalBirthDate(safeNatalDay, value, safeNatalYear),
+                                wide: true,
+                              })}
+                              {renderNatalPickerColumn({
+                                pickerKey: 'birth-year',
+                                options: natalYearOptions,
+                                selectedValue: safeNatalYear,
+                                onValueChange: (value) => updateNatalBirthDate(safeNatalDay, safeNatalMonth, value),
+                              })}
+                            </div>
                           </>
                         )}
 
                         {natalStep === 'birth_time' && (
                           <>
-                            <h3>{lx('Время рождения', 'Birth time', "Tug'ilgan vaqt")}</h3>
-                            <p>{lx('Время уточняет дома и асцендент. Если не знаете, можно пропустить.', 'Birth time improves houses and Ascendant. You can skip if unknown.', "Vaqt uylar va ascendantni aniqlashtiradi. Bilmasangiz, o'tkazib yuborish mumkin.")}</p>
-                            <input
-                              className="natal-input"
-                              type="time"
-                              value={natalBirthTime}
-                              onChange={(e) => setNatalBirthTime(e.target.value || '12:00')}
-                            />
-                            <button
-                              type="button"
-                              className="natal-link-btn"
-                              onClick={() => {
-                                setNatalBirthTime('12:00')
-                                nextNatalStep()
-                              }}
-                            >
-                              {lx('Я не знаю', "I don't know", 'Bilmayman')}
-                            </button>
+                            <div className="natal-screen__copy natal-screen__copy--center">
+                              <h3>{lx('Время рождения', 'Birth time', "Tug‘ilgan vaqt")}</h3>
+                              <p>
+                                {lx(
+                                  'Время рождения уточняет астрологические детали и влияние планет.',
+                                  'Birth time refines astrological details and planetary influence.',
+                                  "Tug‘ilgan vaqt astrologik tafsilotlar va sayyoralar ta’sirini aniqlashtiradi.",
+                                )}
+                              </p>
+                            </div>
+                            <div className="natal-wheel-picker natal-wheel-picker--time">
+                              {renderNatalPickerColumn({
+                                pickerKey: 'birth-hour',
+                                options: natalHourOptions,
+                                selectedValue: safeNatalHour,
+                                onValueChange: (value) => updateNatalBirthTime(value, safeNatalMinute),
+                              })}
+                              {renderNatalPickerColumn({
+                                pickerKey: 'birth-minute',
+                                options: natalMinuteOptions,
+                                selectedValue: safeNatalMinute,
+                                onValueChange: (value) => updateNatalBirthTime(safeNatalHour, value),
+                              })}
+                            </div>
                           </>
                         )}
 
                         {natalStep === 'birth_place' && (
                           <>
-                            <h3>{lx('Место рождения', 'Birth place', "Tug'ilgan joy")}</h3>
-                            <p>{lx('Город помогает корректно посчитать домовую сетку.', 'City helps calculate your house grid correctly.', "Shahar uylarning to'g'ri hisoblanishiga yordam beradi.")}</p>
-                            <input
-                              className="natal-input"
-                              type="text"
-                              value={natalBirthPlace}
-                              onChange={(e) => setNatalBirthPlace(e.target.value)}
-                              placeholder={lx('Введите город', 'Enter city', 'Shaharni kiriting')}
-                            />
+                            <div className="natal-screen__copy">
+                              <h3>{lx('Место рождения', 'Birth place', "Tug‘ilgan joy")}</h3>
+                              <p>
+                                {lx(
+                                  'Город нужен для корректного расчёта домов и локальных координат.',
+                                  'City is needed for houses and local coordinates.',
+                                  "Shahar uylar va lokal koordinatalarni to‘g‘ri hisoblash uchun kerak.",
+                                )}
+                              </p>
+                            </div>
+                            <div className="natal-search">
+                              <input
+                                className="natal-input"
+                                type="text"
+                                value={natalBirthPlace}
+                                onChange={(e) => setNatalBirthPlace(e.target.value)}
+                                placeholder={lx('Введите город', 'Enter city', 'Shaharni kiriting')}
+                              />
+                            </div>
                             <div className="natal-suggest-list">
                               {natalCitySuggestions.map((city) => (
                                 <button
@@ -7890,22 +8397,32 @@ useEffect(() => {
 
                         {natalStep === 'gender' && (
                           <>
-                            <h3>{lx('Ваш пол', 'Your gender', 'Jinsingiz')}</h3>
-                            <p>{lx('Нужен для персонализации языка описаний.', 'Used for tone personalization in descriptions.', "Tavsif ohangini shaxsiylashtirish uchun kerak.")}</p>
+                            <div className="natal-screen__copy natal-screen__copy--center">
+                              <h3>{lx('Ваш пол', 'Your gender', 'Jinsingiz')}</h3>
+                              <p>
+                                {lx(
+                                  'Пол необходим для персонализации астрологического профиля.',
+                                  'Gender is used to personalize the astrological profile.',
+                                  "Jins astrologik profilni shaxsiylashtirish uchun kerak.",
+                                )}
+                              </p>
+                            </div>
                             <div className="natal-gender-grid">
                               <button
                                 type="button"
                                 className={`natal-gender-btn ${natalGender === 'male' ? 'is-active' : ''}`}
                                 onClick={() => setNatalGender('male')}
                               >
-                                ♂ {lx('Мужской', 'Male', 'Erkak')}
+                                <span className="natal-gender-btn__icon">{renderNatalGenderIcon('male')}</span>
+                                <span className="natal-gender-btn__label">{lx('Мужской', 'Male', 'Erkak')}</span>
                               </button>
                               <button
                                 type="button"
                                 className={`natal-gender-btn ${natalGender === 'female' ? 'is-active' : ''}`}
                                 onClick={() => setNatalGender('female')}
                               >
-                                ♀ {lx('Женский', 'Female', 'Ayol')}
+                                <span className="natal-gender-btn__icon">{renderNatalGenderIcon('female')}</span>
+                                <span className="natal-gender-btn__label">{lx('Женский', 'Female', 'Ayol')}</span>
                               </button>
                             </div>
                           </>
@@ -7913,17 +8430,28 @@ useEffect(() => {
 
                         {natalStep === 'goals' && (
                           <>
-                            <h3>{lx('Ваши цели', 'Your goals', 'Maqsadlaringiz')}</h3>
-                            <p>{lx('Выберите до 3 целей, чтобы подстроить интерпретацию.', 'Pick up to 3 goals to tune interpretation.', "Talqinni moslashtirish uchun 3 tagacha maqsad tanlang.")}</p>
-                            <div className="natal-chip-list">
+                            <div className="natal-screen__copy">
+                              <h3>{lx('Ваши цели', 'Your goals', 'Maqsadlaringiz')}</h3>
+                              <p>
+                                {lx(
+                                  'Выберите цели, которых хотите достичь с помощью астрологии, чтобы персонализировать приложение.',
+                                  'Pick the goals you want to reach with astrology to personalize the app.',
+                                  "Ilovani moslashtirish uchun astrologiya yordamida erishmoqchi bo‘lgan maqsadlarni tanlang.",
+                                )}
+                              </p>
+                            </div>
+                            <div className="natal-goal-list">
                               {natalGoalsLocalized.map((goal) => (
                                 <button
                                   key={goal.id}
                                   type="button"
-                                  className={`natal-chip ${natalGoals.includes(goal.id) ? 'is-active' : ''}`}
+                                  className={`natal-goal-item ${natalGoals.includes(goal.id) ? 'is-active' : ''}`}
                                   onClick={() => setNatalGoals((prev) => toggleNatalPick(prev, goal.id, 3))}
                                 >
-                                  {goal.label}
+                                  <span className="natal-goal-item__box" aria-hidden="true">
+                                    {natalGoals.includes(goal.id) ? '✓' : ''}
+                                  </span>
+                                  <span>{goal.label}</span>
                                 </button>
                               ))}
                             </div>
@@ -7932,42 +8460,82 @@ useEffect(() => {
 
                         {natalStep === 'interests' && (
                           <>
-                            <h3>{lx('Интересы', 'Interests', 'Qiziqishlar')}</h3>
-                            <p>{lx('Выберите темы, на которые сделать акцент.', 'Choose topics to focus your reports on.', "Hisobotda urg'u beriladigan mavzularni tanlang.")}</p>
-                            <div className="natal-chip-list is-grid">
+                            <div className="natal-screen__copy natal-screen__copy--center">
+                              <h3>{lx('Интересы', 'Interests', 'Qiziqishlar')}</h3>
+                              <p>
+                                {lx(
+                                  'Что вас больше всего интересует в жизни?',
+                                  'What interests you the most in life?',
+                                  "Hayotda sizni eng ko‘p nima qiziqtiradi?",
+                                )}
+                              </p>
+                            </div>
+                            <div className="natal-interest-grid">
                               {natalInterestsLocalized.map((interest) => (
                                 <button
                                   key={interest.id}
                                   type="button"
-                                  className={`natal-chip ${natalInterests.includes(interest.id) ? 'is-active' : ''}`}
+                                  className={`natal-interest-item ${natalInterests.includes(interest.id) ? 'is-active' : ''}`}
                                   onClick={() => setNatalInterests((prev) => toggleNatalPick(prev, interest.id, 4))}
                                 >
-                                  {interest.label}
+                                  <span className="natal-interest-item__icon">{renderNatalInterestIcon(interest.id)}</span>
+                                  <span className="natal-interest-item__label">{interest.label}</span>
                                 </button>
                               ))}
                             </div>
                           </>
                         )}
 
-                        <div className="natal-step-actions">
-                          <button type="button" className="natal-ghost-btn" onClick={prevNatalStep} disabled={natalStepIndex === 0}>
-                            {lx('Назад', 'Back', 'Orqaga')}
-                          </button>
+                        <div className="natal-step-actions natal-step-actions--wizard">
+                          {natalStepIndex > 0 ? (
+                            <button type="button" className="natal-ghost-btn" onClick={prevNatalStep}>
+                              {lx('Назад', 'Back', 'Orqaga')}
+                            </button>
+                          ) : (
+                            <div />
+                          )}
                           <button type="button" className="natal-primary-btn" onClick={nextNatalStep} disabled={!canNatalContinue}>
                             {lx('Продолжить', 'Continue', 'Davom etish')}
                           </button>
                         </div>
+                        {(natalStep === 'birth_time' || natalStep === 'goals' || natalStep === 'interests') && (
+                          <button
+                            type="button"
+                            className="natal-link-btn natal-link-btn--bottom"
+                            onClick={() => {
+                              if (natalStep === 'birth_time') {
+                                setNatalBirthTime('12:00')
+                              }
+                              nextNatalStep()
+                            }}
+                          >
+                            {lx('Пропустить', 'Skip', "O‘tkazib yuborish")}
+                          </button>
+                        )}
                       </section>
                     )}
 
                     {natalStep === 'generating' && (
-                      <section className="natal-card natal-card--generating">
-                        <div className={`natal-loader ${natalGenerating ? 'is-busy' : ''}`}>
-                          <div className="natal-loader__ring" />
-                          <span>✦</span>
+                      <section className={`natal-screen natal-screen--generating ${natalGenerating ? 'is-busy' : ''}`}>
+                        <div className="natal-generating">
+                          <div className="natal-generating__ring" style={{ ['--pct' as any]: `${natalGenerationProgress}%` }}>
+                            <span>{natalGenerationProgress}%</span>
+                          </div>
+                          <div className="natal-generating__steps">
+                            {[
+                              lx('Анализ вашей натальной карты…', 'Analysing your natal chart…', 'Natal kartangiz tahlil qilinmoqda…'),
+                              lx('Расчёт астрологических влияний', 'Calculating astrological influences', 'Astrologik ta’sirlar hisoblanmoqda'),
+                              lx('Настройка анализа совместимости', 'Tuning compatibility layer', 'Moslik tahlili sozlanmoqda'),
+                              lx('Подготовка персонального профиля', 'Preparing your profile', 'Shaxsiy profilingiz tayyorlanmoqda'),
+                              lx('Финальная сборка результата', 'Finalising result', 'Yakuniy natija tayyorlanmoqda'),
+                            ].map((item, idx) => (
+                              <div key={item} className={`natal-generating__step ${natalGenerationProgress > idx * 18 ? 'is-active' : ''}`}>
+                                <span className="natal-generating__step-mark">✓</span>
+                                <span>{item}</span>
+                              </div>
+                            ))}
+                          </div>
                         </div>
-                        <h3>{lx('Собираем натальную карту', 'Building your natal chart', "Natal kartani tayyorlayapmiz")}</h3>
-                        <p>{lx('Проверяем сигнатуры планет, дома и ключевые акценты профиля…', 'Checking planetary signatures, houses and profile focus points…', "Sayyoralar signaturasi, uylar va asosiy urg'ular tekshirilmoqda…")}</p>
                       </section>
                     )}
 
@@ -7975,19 +8543,36 @@ useEffect(() => {
                       <>
                         <section className="natal-result-hero">
                           <div className="natal-result-hero__user">
-                            <div className="natal-result-hero__avatar">{resolveZodiacByDate(natalProfile.birthDate).symbol}</div>
-                            <div>
+                            <div
+                              className="natal-result-hero__avatar"
+                              style={
+                                {
+                                  ['--avatar-a' as any]: zodiacTheme(natalProfile.sunSignId).planetA,
+                                  ['--avatar-b' as any]: zodiacTheme(natalProfile.sunSignId).planetB,
+                                } as Record<string, string>
+                              }
+                            >
+                              <span className="natal-result-hero__avatar-glyph">{zodiacTheme(natalProfile.sunSignId).avatar}</span>
+                            </div>
+                            <div className="natal-result-hero__copy">
                               <div className="natal-result-hero__name">{natalProfile.name}</div>
+                              <div className="natal-result-hero__subtitle">
+                                {lx(
+                                  'Ваш астропортрет на основе даты, времени и места рождения',
+                                  'Your astro profile based on birth date, time and place',
+                                  "Tug‘ilgan sana, vaqt va joy asosidagi astro profilingiz",
+                                )}
+                              </div>
                               <div className="natal-result-hero__line">
-                                <span>{natalProfile.sun}</span>
-                                <span>{natalProfile.moon}</span>
-                                <span>Asc {natalProfile.asc}</span>
+                                <span className="natal-result-hero__pill">{natalProfile.sun}</span>
+                                <span className="natal-result-hero__pill">{natalProfile.moon}</span>
+                                <span className="natal-result-hero__pill">Asc {natalProfile.asc}</span>
                               </div>
                             </div>
                           </div>
                           <div className="natal-metrics">
                             {natalProfile.metrics.map((metric) => (
-                              <div key={metric.label} className="natal-metric">
+                              <div key={metric.label} className={`natal-metric natal-metric--${metric.tone}`}>
                                 <div
                                   className="natal-metric__ring"
                                   style={{ ['--pct' as any]: `${metric.value}%` }}
@@ -8000,63 +8585,160 @@ useEffect(() => {
                           </div>
                         </section>
 
-                        <div className="natal-result-tabs" role="tablist" aria-label={lx('Режим отображения', 'Display mode', "Ko'rish rejimi")}>
-                          <button type="button" className={`natal-result-tabs__btn ${natalResultTab === 'wheel' ? 'is-active' : ''}`} onClick={() => setNatalResultTab('wheel')}>
-                            {lx('Круг', 'Wheel', 'Doira')}
-                          </button>
-                          <button type="button" className={`natal-result-tabs__btn ${natalResultTab === 'table' ? 'is-active' : ''}`} onClick={() => setNatalResultTab('table')}>
-                            {lx('Таблица', 'Table', 'Jadval')}
-                          </button>
-                        </div>
+                        <section className="natal-card natal-card--result">
+                          <div className="natal-result-tabs" role="tablist" aria-label={lx('Режим отображения', 'Display mode', "Ko'rish rejimi")}>
+                            <button type="button" className={`natal-result-tabs__btn ${natalResultTab === 'wheel' ? 'is-active' : ''}`} onClick={() => setNatalResultTab('wheel')}>
+                              {lx('Круг', 'Wheel', 'Doira')}
+                            </button>
+                            <button type="button" className={`natal-result-tabs__btn ${natalResultTab === 'table' ? 'is-active' : ''}`} onClick={() => setNatalResultTab('table')}>
+                              {lx('Таблица', 'Table', 'Jadval')}
+                            </button>
+                          </div>
 
-                        {natalResultTab === 'wheel' ? (
-                          <section className="natal-wheel-card">
-                            <div className="natal-wheel">
-                              {ZODIAC_SIGNS.map((sign, idx) => (
-                                <div key={sign.id} className="natal-wheel__mark" style={{ ['--i' as any]: idx }}>
-                                  <span>{sign.symbol}</span>
+                          {natalResultTab === 'wheel' ? (
+                            <div className="natal-wheel-card">
+                              <div className="natal-wheel">
+                                <div className="natal-wheel__axis natal-wheel__axis--horizontal" />
+                                <div className="natal-wheel__axis natal-wheel__axis--vertical" />
+                                <div className="natal-wheel__labels natal-wheel__labels--angles">
+                                  <span className="natal-wheel__anchor natal-wheel__anchor--ac">AC</span>
+                                  <span className="natal-wheel__anchor natal-wheel__anchor--dc">DC</span>
+                                  <span className="natal-wheel__anchor natal-wheel__anchor--mc">MC</span>
+                                  <span className="natal-wheel__anchor natal-wheel__anchor--ic">IC</span>
                                 </div>
-                              ))}
-                              <div className="natal-wheel__center">
-                                <div className="natal-wheel__center-title">{lx('Личное ядро', 'Core self', "Shaxsiy yadro")}</div>
-                                <div className="natal-wheel__center-meta">{natalProfile.sun}</div>
+                                <div className="natal-wheel__labels natal-wheel__labels--houses">
+                                  {Array.from({ length: 12 }).map((_, idx) => (
+                                    <span
+                                      key={`house-${idx + 1}`}
+                                      className="natal-wheel__house"
+                                      style={{ ['--angle' as any]: `${idx * 30 + 180}deg` } as Record<string, string>}
+                                    >
+                                      {idx + 1}
+                                    </span>
+                                  ))}
+                                </div>
+                                {natalWheelSigns.map((sign) => (
+                                  <div
+                                    key={sign.id}
+                                    className="natal-wheel__mark"
+                                    style={{ ['--angle' as any]: `${sign.displayAngle}deg` } as Record<string, string>}
+                                  >
+                                    <span>{sign.symbol}</span>
+                                  </div>
+                                ))}
+                                {natalWheelPlanets.map((planet, idx) => (
+                                  <div
+                                    key={`${planet.id}:${planet.house}:${idx}`}
+                                    className="natal-wheel__planet"
+                                    style={
+                                      {
+                                        ['--angle' as any]: `${planet.angle}deg`,
+                                        ['--orbit' as any]: `${32 + (idx % 3) * 7}%`,
+                                        ['--planet-a' as any]: planetDefById(planet.id).colors[0],
+                                        ['--planet-b' as any]: planetDefById(planet.id).colors[1],
+                                      } as Record<string, string>
+                                    }
+                                  >
+                                    <span>{planet.symbol}</span>
+                                  </div>
+                                ))}
+                                <div className="natal-wheel__center" />
                               </div>
                             </div>
-                          </section>
-                        ) : (
-                          <section className="natal-table-card">
-                            <div className="natal-table">
-                              <div className="natal-table__head">
-                                <span>{lx('Планета', 'Planet', 'Sayyora')}</span>
-                                <span>{lx('Знак', 'Sign', 'Belgi')}</span>
-                                <span>{lx('Дом', 'House', 'Uy')}</span>
-                                <span>{lx('Градус', 'Degree', 'Gradus')}</span>
-                              </div>
-                              {natalProfile.planets.map((planet) => (
-                                <div key={`${planet.name}:${planet.house}`} className="natal-table__row">
-                                  <span>{planet.name}</span>
-                                  <span>{planet.sign}</span>
-                                  <span>{planet.house}</span>
-                                  <span>{planet.degree.toFixed(2)}°</span>
+                          ) : (
+                            <div className="natal-table-card">
+                              <div className="natal-table">
+                                <div className="natal-table__head">
+                                  <span>{lx('Имя', 'Name', 'Nomi')}</span>
+                                  <span>{lx('Знак', 'Sign', 'Belgi')}</span>
+                                  <span>{lx('Д', 'H', 'Uy')}</span>
+                                  <span>{lx('Градус', 'Degree', 'Gradus')}</span>
                                 </div>
-                              ))}
+                                {natalProfile.planets.map((planet) => (
+                                  <div key={`${planet.name}:${planet.house}`} className="natal-table__row">
+                                    <span>{planet.symbol} {planet.name}</span>
+                                    <span>{planet.sign}</span>
+                                    <span>{planet.house}</span>
+                                    <span>{planet.degree.toFixed(2)}°</span>
+                                  </div>
+                                ))}
+                              </div>
                             </div>
-                          </section>
-                        )}
+                          )}
+                        </section>
 
-                        <section className="natal-planets-card">
-                          <h3>{lx('Ключевые влияния', 'Key influences', "Asosiy ta'sirlar")}</h3>
-                          <div className="natal-planet-list">
-                            {natalProfile.planets.slice(0, 6).map((planet) => (
-                              <article key={`${planet.name}:desc`} className="natal-planet-row">
-                                <div className="natal-planet-row__name">{planet.name}</div>
-                                <div className="natal-planet-row__desc">{planet.description}</div>
-                              </article>
-                            ))}
+                        <section className="natal-explain-card">
+                          <button
+                            type="button"
+                            className="natal-explain-card__toggle"
+                            onClick={() => setShowNatalExplain((prev) => !prev)}
+                            aria-expanded={showNatalExplain}
+                          >
+                            <span>{lx('Как мы читаем вашу натальную карту', 'How we read your natal chart', "Natal kartangizni qanday o'qiymiz")}</span>
+                            <span className={`natal-explain-card__chevron ${showNatalExplain ? 'is-open' : ''}`}>⌄</span>
+                          </button>
+                          {showNatalExplain && (
+                            <div className="natal-explain-card__body">
+                              {lx(
+                                'Разбор строится на дате, времени и месте рождения. Мы собираем большую тройку, позиции планет по знакам и домам, а затем превращаем это в понятный психологический портрет.',
+                                'The reading is built from birth date, time and place. We combine your big three, planetary positions by signs and houses, and turn that into a readable psychological profile.',
+                                "Tahlil tug'ilgan sana, vaqt va joyga asoslanadi. Katta uchlik, sayyoralar joylashuvi va uylar asosida tushunarli psixologik profil yig'iladi.",
+                              )}
+                            </div>
+                          )}
+                        </section>
+
+                        <section className="natal-big-three-card">
+                          <div className="natal-section-title">
+                            {lx('Большая тройка — Личное Я', 'Big three — core self', 'Katta uchlik — shaxsiy qism')}
+                          </div>
+                          <div className="natal-big-three-card__grid">
+                            {natalBigThreeCards.map((item) => {
+                              const theme = zodiacTheme(item.signId)
+                              return (
+                                <article
+                                  key={item.id}
+                                  className="natal-big-three-item"
+                                  style={
+                                    {
+                                      ['--big-three-a' as any]: theme.planetA,
+                                      ['--big-three-b' as any]: theme.planetB,
+                                    } as Record<string, string>
+                                  }
+                                >
+                                  <div className="natal-big-three-item__orb">{item.symbol}</div>
+                                  <div className="natal-big-three-item__title">{item.title}</div>
+                                  <div className="natal-big-three-item__value">{item.value}</div>
+                                </article>
+                              )
+                            })}
                           </div>
                         </section>
 
-                        <div className="natal-step-actions">
+                        <section className="natal-planets-card">
+                          <div className="natal-planet-group">
+                            <h3>{lx('Разум и эмоции', 'Mind and emotions', 'Aql va hissiyotlar')}</h3>
+                            <div className="natal-planet-list">
+                              {natalMindPlanets.map((planet) => renderNatalPlanetCard(planet))}
+                            </div>
+                          </div>
+
+                          <div className="natal-planet-group">
+                            <h3>{lx('Социальная сфера', 'Social sphere', 'Ijtimoiy qatlam')}</h3>
+                            <div className="natal-planet-list">
+                              {natalSocialPlanets.map((planet) => renderNatalPlanetCard(planet))}
+                            </div>
+                          </div>
+
+                          <div className="natal-planet-group">
+                            <h3>{lx('Высшие влияния', 'Higher influences', "Yuqori ta'sirlar")}</h3>
+                            <div className="natal-planet-list">
+                              {natalHigherPlanets.map((planet) => renderNatalPlanetCard(planet))}
+                            </div>
+                          </div>
+                        </section>
+
+                        <div className="natal-step-actions natal-step-actions--result">
                           <button type="button" className="natal-ghost-btn" onClick={resetNatalFlow}>
                             {lx('Изменить данные', 'Edit data', "Ma'lumotni o'zgartirish")}
                           </button>
@@ -8068,6 +8750,7 @@ useEffect(() => {
                     )}
                   </div>
                 </div>
+                )}
 
                 <div className="nav-page" data-page="history">
                   <div className="history-wrap">

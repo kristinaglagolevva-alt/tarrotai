@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections import deque
 import hashlib
 import hmac
 import json
@@ -21,7 +22,7 @@ except Exception:  # Python 3.8 fallback
     from backports.zoneinfo import ZoneInfo, ZoneInfoNotFoundError  # type: ignore
 
 import httpx
-from fastapi import FastAPI, Depends, HTTPException, Header, UploadFile, File, Form, Query
+from fastapi import FastAPI, Depends, HTTPException, Header, UploadFile, File, Form, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, RedirectResponse
 from pydantic import BaseModel, Field
@@ -32,7 +33,9 @@ from dotenv import load_dotenv
 
 from db import engine, get_db, Base, SessionLocal
 from models import (
+    BotOpenUser,
     BotPmBootstrap,
+    BotPmBootstrapAudit,
     User,
     CardOfDay,
     Reading,
@@ -516,6 +519,203 @@ app.add_middleware(
     allow_methods=["GET", "POST", "OPTIONS"],
     allow_headers=["Authorization", "Content-Type", "Accept", "Origin", "X-Requested-With"],
 )
+
+# ============================ API ALERTS ============================
+_API_ALERT_WINDOW_SEC = max(60, _safe_env_int("API_ALERT_WINDOW_SEC", 300))
+_API_ALERT_COOLDOWN_SEC = max(60, _safe_env_int("API_ALERT_COOLDOWN_SEC", 900))
+_API_ALERT_MIN_REQUESTS = max(5, _safe_env_int("API_ALERT_MIN_REQUESTS", 20))
+_API_ALERT_AUTH_5XX_THRESHOLD = min(1.0, max(0.0, _safe_env_float("API_ALERT_AUTH_5XX_THRESHOLD", 0.02)))
+_API_ALERT_READING_5XX_THRESHOLD = min(1.0, max(0.0, _safe_env_float("API_ALERT_READING_5XX_THRESHOLD", 0.01)))
+_API_ALERT_AUTH_401_403_THRESHOLD = min(
+    1.0, max(0.0, _safe_env_float("API_ALERT_AUTH_401_403_THRESHOLD", 0.20))
+)
+
+_API_ALERT_RULES: Dict[tuple[str, str], Dict[str, Any]] = {
+    ("POST", "/auth/telegram"): {
+        "metric": "auth_telegram",
+        "threshold": _API_ALERT_AUTH_5XX_THRESHOLD,
+    },
+    ("POST", "/reading"): {
+        "metric": "reading",
+        "threshold": _API_ALERT_READING_5XX_THRESHOLD,
+    },
+}
+
+_API_ALERT_STATE: Dict[str, Dict[str, Any]] = {
+    "auth_telegram": {"all": deque(), "err": deque(), "last_sent_ts": 0.0},
+    "reading": {"all": deque(), "err": deque(), "last_sent_ts": 0.0},
+}
+_API_ALERT_AUTH_401_403_STATE: Dict[str, Any] = {
+    "all": deque(),
+    "err": deque(),
+    "last_sent_ts": 0.0,
+}
+
+
+def _api_alert_trim(metric_state: Dict[str, Any], now_ts: float) -> None:
+    cutoff = now_ts - float(_API_ALERT_WINDOW_SEC)
+    all_q: deque = metric_state["all"]
+    err_q: deque = metric_state["err"]
+    while all_q and float(all_q[0]) < cutoff:
+        all_q.popleft()
+    while err_q and float(err_q[0][0]) < cutoff:
+        err_q.popleft()
+
+
+def _api_alert_record(*, method: str, path: str, status_code: int) -> Optional[Dict[str, Any]]:
+    rule = _API_ALERT_RULES.get((str(method or "").upper(), str(path or "")))
+    if not rule:
+        return None
+    metric = str(rule["metric"])
+    threshold = float(rule["threshold"])
+    if threshold <= 0:
+        return None
+
+    now_ts = time.time()
+    state = _API_ALERT_STATE[metric]
+    state["all"].append(now_ts)
+    if int(status_code) >= 500:
+        state["err"].append((now_ts, int(status_code)))
+    _api_alert_trim(state, now_ts)
+
+    total = int(len(state["all"]))
+    errors = int(len(state["err"]))
+    if total < _API_ALERT_MIN_REQUESTS or errors <= 0:
+        return None
+
+    rate = float(errors) / float(total)
+    if rate < threshold:
+        return None
+
+    last_sent_ts = float(state.get("last_sent_ts") or 0.0)
+    if now_ts - last_sent_ts < float(_API_ALERT_COOLDOWN_SEC):
+        return None
+    state["last_sent_ts"] = now_ts
+
+    by_code: Dict[int, int] = {}
+    for _, code in list(state["err"]):
+        by_code[int(code)] = int(by_code.get(int(code), 0) + 1)
+
+    return {
+        "metric": metric,
+        "method": str(method).upper(),
+        "path": str(path),
+        "threshold": threshold,
+        "window_sec": int(_API_ALERT_WINDOW_SEC),
+        "total": total,
+        "errors": errors,
+        "rate": rate,
+        "by_code": by_code,
+        "at_utc": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC"),
+    }
+
+
+def _api_alert_record_auth_401_403(*, method: str, path: str, status_code: int) -> Optional[Dict[str, Any]]:
+    if str(method or "").upper() != "POST" or str(path or "") != "/auth/telegram":
+        return None
+    threshold = float(_API_ALERT_AUTH_401_403_THRESHOLD)
+    if threshold <= 0:
+        return None
+
+    now_ts = time.time()
+    state = _API_ALERT_AUTH_401_403_STATE
+    state["all"].append(now_ts)
+    code_i = int(status_code or 0)
+    if code_i in {401, 403}:
+        state["err"].append((now_ts, code_i))
+    _api_alert_trim(state, now_ts)
+
+    total = int(len(state["all"]))
+    errors = int(len(state["err"]))
+    if total < _API_ALERT_MIN_REQUESTS or errors <= 0:
+        return None
+
+    rate = float(errors) / float(total)
+    if rate < threshold:
+        return None
+
+    last_sent_ts = float(state.get("last_sent_ts") or 0.0)
+    if now_ts - last_sent_ts < float(_API_ALERT_COOLDOWN_SEC):
+        return None
+    state["last_sent_ts"] = now_ts
+
+    by_code: Dict[int, int] = {}
+    for _, code in list(state["err"]):
+        by_code[int(code)] = int(by_code.get(int(code), 0) + 1)
+
+    return {
+        "metric": "auth_telegram_401_403",
+        "method": "POST",
+        "path": "/auth/telegram",
+        "threshold": threshold,
+        "window_sec": int(_API_ALERT_WINDOW_SEC),
+        "total": total,
+        "errors": errors,
+        "rate": rate,
+        "by_code": by_code,
+        "alert_name": "API auth 401/403 alert",
+        "rate_label": "401/403 rate",
+        "at_utc": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC"),
+    }
+
+
+async def _api_alert_notify(payload: Dict[str, Any]) -> None:
+    if not bool(SUPPORT_INBOX_BOT_TOKEN) or SUPPORT_INBOX_CHAT_ID is None:
+        return
+    by_code: Dict[int, int] = dict(payload.get("by_code") or {})
+    codes_line = ", ".join(f"{code}:{cnt}" for code, cnt in sorted(by_code.items())) or "n/a"
+    rate_pct = float(payload.get("rate") or 0.0) * 100.0
+    threshold_pct = float(payload.get("threshold") or 0.0) * 100.0
+    window_sec = int(payload.get("window_sec") or _API_ALERT_WINDOW_SEC)
+    alert_name = str(payload.get("alert_name") or "API 5xx alert")
+    rate_label = str(payload.get("rate_label") or "5xx rate")
+    text = (
+        f"🚨 {alert_name}\n"
+        f"Endpoint: {payload.get('method')} {payload.get('path')}\n"
+        f"Window: {max(1, window_sec // 60)}m\n"
+        f"{rate_label}: {rate_pct:.1f}% ({payload.get('errors')}/{payload.get('total')})\n"
+        f"Threshold: {threshold_pct:.1f}%\n"
+        f"Codes: {codes_line}\n"
+        f"Time: {payload.get('at_utc')}"
+    )
+    try:
+        await _send_bot_message_with_token(
+            token=SUPPORT_INBOX_BOT_TOKEN,
+            chat_id=int(SUPPORT_INBOX_CHAT_ID),
+            text=text,
+        )
+    except Exception as exc:
+        log.warning("API alert notify failed: %s", repr(exc))
+
+
+@app.middleware("http")
+async def _api_alert_middleware(request: Request, call_next):
+    method = str(request.method or "").upper()
+    path = str(request.url.path or "")
+    response = None
+    try:
+        response = await call_next(request)
+        return response
+    except Exception:
+        payload = _api_alert_record(method=method, path=path, status_code=500)
+        if payload:
+            asyncio.create_task(_api_alert_notify(payload))
+        auth_payload = _api_alert_record_auth_401_403(method=method, path=path, status_code=500)
+        if auth_payload:
+            asyncio.create_task(_api_alert_notify(auth_payload))
+        raise
+    finally:
+        if response is not None:
+            payload = _api_alert_record(method=method, path=path, status_code=int(response.status_code or 0))
+            if payload:
+                asyncio.create_task(_api_alert_notify(payload))
+            auth_payload = _api_alert_record_auth_401_403(
+                method=method,
+                path=path,
+                status_code=int(response.status_code or 0),
+            )
+            if auth_payload:
+                asyncio.create_task(_api_alert_notify(auth_payload))
 
 # ============================ TELEGRAM BOT AUTOSTART ============================
 import threading
@@ -1460,6 +1660,23 @@ async def _ensure_runtime_schema(conn) -> None:
         "CREATE INDEX IF NOT EXISTS ix_bot_pm_bootstrap_telegram_id ON bot_pm_bootstrap (telegram_id);",
         "CREATE INDEX IF NOT EXISTS ix_bot_pm_bootstrap_sent_at ON bot_pm_bootstrap (sent_at);",
         """
+        CREATE TABLE IF NOT EXISTS bot_pm_bootstrap_audit (
+            id SERIAL PRIMARY KEY,
+            user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            telegram_id BIGINT NOT NULL,
+            status VARCHAR(32) NOT NULL,
+            force BOOLEAN NOT NULL DEFAULT FALSE,
+            message_id BIGINT NULL,
+            detail TEXT NULL,
+            response_json JSON NULL,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+        """,
+        "CREATE INDEX IF NOT EXISTS ix_bot_pm_bootstrap_audit_user_id ON bot_pm_bootstrap_audit (user_id);",
+        "CREATE INDEX IF NOT EXISTS ix_bot_pm_bootstrap_audit_telegram_id ON bot_pm_bootstrap_audit (telegram_id);",
+        "CREATE INDEX IF NOT EXISTS ix_bot_pm_bootstrap_audit_status ON bot_pm_bootstrap_audit (status);",
+        "CREATE INDEX IF NOT EXISTS ix_bot_pm_bootstrap_audit_created_at ON bot_pm_bootstrap_audit (created_at);",
+        """
         CREATE TABLE IF NOT EXISTS user_memory_events (
             id SERIAL PRIMARY KEY,
             user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -1661,6 +1878,7 @@ async def _ensure_card_day_memory_event(
         if is_reversed_hint is not None
         else bool(getattr(row, "is_reversed", False))
     )
+    row_id = int(getattr(row, "id", 0) or 0)
     try:
         cards_payload = memory_service.build_card_of_day_cards_payload(
             card_index=int(row.card_index),
@@ -1682,7 +1900,7 @@ async def _ensure_card_day_memory_event(
             await db.commit()
     except Exception as exc:
         await db.rollback()
-        log.warning("Memory ingest failed for card_of_day id=%s: %s", row.id, repr(exc))
+        log.warning("Memory ingest failed for card_of_day id=%s: %s", row_id, repr(exc))
 
 
 def _md_excerpt(text: str, *, max_chars: int = 170) -> str:
@@ -2191,12 +2409,37 @@ async def auth_telegram(payload: dict, db: AsyncSession = Depends(get_db)):
                     app_language=detected_lang,
                 )
                 db.add(user)
+                await db.flush()
+                user_id = int(user.id)
                 await db.commit()
-                await db.refresh(user)
-            elif not str(getattr(user, "app_language", "") or "").strip():
-                user.app_language = detected_lang
-                await db.commit()
-                await db.refresh(user)
+                result = await db.execute(select(User).where(User.id == user_id))
+                user = result.scalar_one_or_none() or user
+            else:
+                profile_changed = False
+                next_username = tg_user.get("username")
+                next_first_name = tg_user.get("first_name")
+                next_last_name = tg_user.get("last_name")
+                next_photo_url = tg_user.get("photo_url")
+                if user.username != next_username:
+                    user.username = next_username
+                    profile_changed = True
+                if user.first_name != next_first_name:
+                    user.first_name = next_first_name
+                    profile_changed = True
+                if user.last_name != next_last_name:
+                    user.last_name = next_last_name
+                    profile_changed = True
+                if user.photo_url != next_photo_url:
+                    user.photo_url = next_photo_url
+                    profile_changed = True
+                if not str(getattr(user, "app_language", "") or "").strip():
+                    user.app_language = detected_lang
+                    profile_changed = True
+                if profile_changed:
+                    user_id = int(user.id)
+                    await db.commit()
+                    result = await db.execute(select(User).where(User.id == user_id))
+                    user = result.scalar_one_or_none() or user
             break
         except Exception as exc:
             last_exc = exc
@@ -2219,8 +2462,113 @@ async def auth_telegram(payload: dict, db: AsyncSession = Depends(get_db)):
         log.exception("auth_telegram user is None after retry; last_exc=%r", last_exc)
         raise HTTPException(status_code=503, detail="Auth temporarily unavailable. Try again in 10-20 seconds.")
 
+    try:
+        await _track_miniapp_open(db, user=user, mode="miniapp_auth")
+        await db.commit()
+    except Exception as track_exc:
+        try:
+            await db.rollback()
+        except Exception:
+            pass
+        log.warning(
+            "auth_telegram open-tracking failed user_id=%s tg=%s: %s",
+            int(getattr(user, "id", 0) or 0),
+            int(getattr(user, "telegram_id", 0) or 0),
+            repr(track_exc),
+        )
+
     token = create_jwt(user.id, user.telegram_id)
     return {"access_token": token}
+
+
+async def _log_bootstrap_audit(
+    *,
+    user_id: int,
+    telegram_id: int,
+    status: str,
+    force: bool,
+    message_id: Optional[int] = None,
+    detail: Optional[str] = None,
+    response_json: Optional[Dict[str, Any]] = None,
+) -> None:
+    normalized_status = str(status or "error").strip().lower()[:32] or "error"
+    safe_detail = (str(detail or "").strip() or None)
+    if safe_detail and len(safe_detail) > 4000:
+        safe_detail = safe_detail[:4000]
+
+    payload = response_json
+    if payload is not None:
+        try:
+            json.dumps(payload, ensure_ascii=False, default=str)
+        except Exception:
+            payload = {"repr": repr(payload)}
+
+    try:
+        async with SessionLocal() as audit_db:
+            audit_db.add(
+                BotPmBootstrapAudit(
+                    user_id=int(user_id),
+                    telegram_id=int(telegram_id),
+                    status=normalized_status,
+                    force=bool(force),
+                    message_id=(int(message_id) if message_id else None),
+                    detail=safe_detail,
+                    response_json=payload,
+                )
+            )
+            await audit_db.commit()
+    except Exception as exc:
+        log.exception(
+            "bot/bootstrap-chat audit failed user_id=%s tg=%s status=%s: %s",
+            int(user_id),
+            int(telegram_id),
+            normalized_status,
+            repr(exc),
+        )
+
+
+async def _track_miniapp_open(
+    db: AsyncSession,
+    *,
+    user: User,
+    mode: str = "miniapp_auth",
+) -> None:
+    tg_id = int(getattr(user, "telegram_id", 0) or 0)
+    if tg_id <= 0:
+        return
+    now_utc = datetime.now(timezone.utc)
+    username = (str(getattr(user, "username", "") or "").strip() or None)
+    first_name = (str(getattr(user, "first_name", "") or "").strip() or None)
+    last_name = (str(getattr(user, "last_name", "") or "").strip() or None)
+    safe_mode = (str(mode or "").strip().lower() or "miniapp_auth")
+
+    stmt = (
+        pg_insert(BotOpenUser)
+        .values(
+            telegram_id=tg_id,
+            username=username,
+            first_name=first_name,
+            last_name=last_name,
+            first_chat_id=None,
+            last_chat_id=None,
+            last_start_mode=safe_mode,
+            first_opened_at=now_utc,
+            last_opened_at=now_utc,
+            opens_count=1,
+        )
+        .on_conflict_do_update(
+            index_elements=[BotOpenUser.telegram_id],
+            set_={
+                "username": username,
+                "first_name": first_name,
+                "last_name": last_name,
+                "last_start_mode": safe_mode,
+                "last_opened_at": now_utc,
+                "opens_count": BotOpenUser.opens_count + 1,
+            },
+        )
+    )
+    await db.execute(stmt)
 
 
 @app.post("/bot/bootstrap-chat", response_model=BotBootstrapOut)
@@ -2235,6 +2583,14 @@ async def bot_bootstrap_chat(
     )
     existing = existing_q.scalar_one_or_none()
     if existing is not None and not force:
+        await _log_bootstrap_audit(
+            user_id=int(current_user.id),
+            telegram_id=int(current_user.telegram_id),
+            status="already_sent",
+            force=bool(force),
+            message_id=(int(existing.message_id) if existing.message_id else None),
+            detail="Bootstrap already sent and force=false.",
+        )
         return {
             "status": "already_sent",
             "message": "Bootstrap message already sent.",
@@ -2249,9 +2605,13 @@ async def bot_bootstrap_chat(
         if app_lang == "en"
         else ("🚀 Ilovani ochish" if app_lang == "uz" else "🚀 Открыть приложение")
     )
-    if app_url.startswith("https://"):
+    if app_url.startswith("https://t.me/"):
         reply_markup = {
             "inline_keyboard": [[{"text": app_button_text, "url": app_url}]]
+        }
+    elif app_url.startswith("https://"):
+        reply_markup = {
+            "inline_keyboard": [[{"text": app_button_text, "web_app": {"url": app_url}}]]
         }
 
     bootstrap_text = (
@@ -2270,32 +2630,88 @@ async def bot_bootstrap_chat(
     )
     status = str(send_result.get("status") or "error").strip().lower()
     if status == "not_configured":
+        await _log_bootstrap_audit(
+            user_id=int(current_user.id),
+            telegram_id=int(current_user.telegram_id),
+            status="error",
+            force=bool(force),
+            detail="Bot token is not configured.",
+            response_json=send_result,
+        )
         return {"status": "not_configured", "message": "Bot token is not configured."}
     if status == "forbidden":
+        await _log_bootstrap_audit(
+            user_id=int(current_user.id),
+            telegram_id=int(current_user.telegram_id),
+            status="forbidden",
+            force=bool(force),
+            detail=str(send_result.get("detail") or "Forbidden by Telegram."),
+            response_json=send_result,
+        )
         return {
             "status": "forbidden",
             "message": "Telegram не разрешил отправить сообщение в личку без /start.",
         }
     if not bool(send_result.get("ok")):
+        await _log_bootstrap_audit(
+            user_id=int(current_user.id),
+            telegram_id=int(current_user.telegram_id),
+            status="error",
+            force=bool(force),
+            detail=str(send_result.get("detail") or "Send failed"),
+            response_json=send_result,
+        )
         return {
             "status": "error",
             "message": str(send_result.get("detail") or "Send failed"),
         }
 
     message_id = int(send_result.get("message_id") or 0) or None
-    if existing is None:
-        row = BotPmBootstrap(
+    try:
+        upsert_stmt = (
+            pg_insert(BotPmBootstrap)
+            .values(
+                user_id=int(current_user.id),
+                telegram_id=int(current_user.telegram_id),
+                message_id=message_id,
+                sent_at=now_utc,
+            )
+            .on_conflict_do_update(
+                index_elements=[BotPmBootstrap.user_id],
+                set_={
+                    "telegram_id": int(current_user.telegram_id),
+                    "message_id": message_id,
+                    "sent_at": now_utc,
+                },
+            )
+        )
+        await db.execute(upsert_stmt)
+        await db.commit()
+    except Exception as exc:
+        await db.rollback()
+        log.exception("bot/bootstrap-chat tracking failed user_id=%s tg=%s: %s", int(current_user.id), int(current_user.telegram_id), repr(exc))
+        await _log_bootstrap_audit(
             user_id=int(current_user.id),
             telegram_id=int(current_user.telegram_id),
+            status="tracking_failed",
+            force=bool(force),
             message_id=message_id,
-            sent_at=now_utc,
+            detail=repr(exc),
+            response_json=send_result,
         )
-        db.add(row)
-    else:
-        existing.telegram_id = int(current_user.telegram_id)
-        existing.message_id = message_id
-        existing.sent_at = now_utc
-    await db.commit()
+        return {
+            "status": "error",
+            "message": "Message sent, but tracking failed.",
+        }
+    await _log_bootstrap_audit(
+        user_id=int(current_user.id),
+        telegram_id=int(current_user.telegram_id),
+        status="success",
+        force=bool(force),
+        message_id=message_id,
+        detail="Bootstrap message sent and tracked.",
+        response_json=send_result,
+    )
     return {
         "status": "sent",
         "message": "Message sent.",
@@ -3192,10 +3608,19 @@ async def _send_bot_message_with_result(
             if resp.status_code >= 400:
                 detail = str(data.get("description") or resp.text or "").strip()
                 lowered = detail.lower()
-                if resp.status_code == 403 and (
+                if (
+                    resp.status_code == 400
+                    and (
+                        "chat not found" in lowered
+                        or "user not found" in lowered
+                    )
+                ) or (
+                    resp.status_code == 403
+                    and (
                     "bot can't initiate conversation" in lowered
                     or "bot was blocked by the user" in lowered
                     or "forbidden" in lowered
+                    )
                 ):
                     return {"ok": False, "status": "forbidden", "detail": detail}
                 return {"ok": False, "status": "error", "detail": detail}
@@ -5668,8 +6093,13 @@ async def create_or_get_card_of_day(
         description=description,
     )
     db.add(row)
+    # Flush first to allocate PK in current transaction; avoid fragile refresh
+    # path that can fail when instance state is no longer persistent.
+    await db.flush()
+    reading_id = int(row.id)
     await db.commit()
-    await db.refresh(row)
+    result = await db.execute(select(CardOfDay).where(CardOfDay.id == reading_id))
+    row = result.scalar_one_or_none() or row
     await _ensure_card_day_memory_event(
         db,
         user=current_user,
@@ -5911,6 +6341,7 @@ async def create_reading(
     await db.refresh(row)
 
     if FEATURE_FLAGS.memory_v1 and bool(current_user.memory_opt_in):
+        row_id = int(getattr(row, "id", 0) or 0)
         try:
             await memory_service.ingest_event(
                 db,
@@ -5926,7 +6357,7 @@ async def create_reading(
             await db.commit()
         except Exception as exc:
             await db.rollback()
-            log.warning("Memory ingest failed for reading_id=%s: %s", row.id, repr(exc))
+            log.warning("Memory ingest failed for reading_id=%s: %s", row_id, repr(exc))
 
     return {
         "id": row.id,

@@ -2159,6 +2159,13 @@ class BotBootstrapOut(BaseModel):
     message: str = ""
 
 
+class AppOpenTrackOut(BaseModel):
+    status: Literal["ok"] = "ok"
+    mode: str
+    opens_count: int
+    tracked_at: datetime
+
+
 class MeOut(BaseModel):
     id: int
     telegram_id: int
@@ -2532,15 +2539,15 @@ async def _track_miniapp_open(
     *,
     user: User,
     mode: str = "miniapp_auth",
-) -> None:
+) -> int:
     tg_id = int(getattr(user, "telegram_id", 0) or 0)
     if tg_id <= 0:
-        return
+        return 0
     now_utc = datetime.now(timezone.utc)
     username = (str(getattr(user, "username", "") or "").strip() or None)
     first_name = (str(getattr(user, "first_name", "") or "").strip() or None)
     last_name = (str(getattr(user, "last_name", "") or "").strip() or None)
-    safe_mode = (str(mode or "").strip().lower() or "miniapp_auth")
+    safe_mode = (str(mode or "").strip().lower() or "miniapp_auth")[:64]
 
     stmt = (
         pg_insert(BotOpenUser)
@@ -2567,8 +2574,40 @@ async def _track_miniapp_open(
                 "opens_count": BotOpenUser.opens_count + 1,
             },
         )
+        .returning(BotOpenUser.opens_count)
     )
-    await db.execute(stmt)
+    result = await db.execute(stmt)
+    opens = result.scalar_one_or_none()
+    return int(opens or 0)
+
+
+@app.post("/app/open", response_model=AppOpenTrackOut)
+async def app_open_track(
+    mode: str = Query(default="miniapp_launch"),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    safe_mode = (str(mode or "").strip().lower() or "miniapp_launch")[:64]
+    try:
+        opens_count = await _track_miniapp_open(db, user=current_user, mode=safe_mode)
+        await db.commit()
+    except Exception as exc:
+        await db.rollback()
+        log.warning(
+            "app/open tracking failed user_id=%s tg=%s mode=%s: %s",
+            int(getattr(current_user, "id", 0) or 0),
+            int(getattr(current_user, "telegram_id", 0) or 0),
+            safe_mode,
+            repr(exc),
+        )
+        raise HTTPException(status_code=503, detail="Open tracking temporarily unavailable.")
+
+    return AppOpenTrackOut(
+        status="ok",
+        mode=safe_mode,
+        opens_count=int(opens_count or 0),
+        tracked_at=datetime.now(timezone.utc),
+    )
 
 
 @app.post("/bot/bootstrap-chat", response_model=BotBootstrapOut)

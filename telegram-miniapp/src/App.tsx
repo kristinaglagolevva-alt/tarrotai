@@ -7,6 +7,7 @@ import './App.css'
 import {
   telegramAuth,
   bootstrapBotChat,
+  trackAppOpen,
   getMe,
   updateMePreferences,
   getBillingStatus,
@@ -3734,6 +3735,8 @@ useEffect(() => {
 
   const [view, setView] = useState<View>('home')
   const lastMetrikaPathRef = useRef('')
+  const appOpenTrackedRef = useRef(false)
+  const appOpenLastTrackedAtRef = useRef(0)
   const paywallShownRef = useRef(false)
   const paidOrdersTrackedRef = useRef<Set<string>>(new Set())
   const paymentSuccessNotifiedRef = useRef<Set<string>>(new Set())
@@ -7691,8 +7694,39 @@ useEffect(() => {
   }
 
   useEffect(() => {
-    metrikaReachGoal(METRIKA_GOALS.appOpen)
-  }, [])
+    if (authStatus !== 'ready' || !token) return
+    let cancelled = false
+
+    const trackOpen = async (source: 'launch' | 'resume') => {
+      const nowMs = Date.now()
+      if (source === 'launch' && appOpenTrackedRef.current) return
+      if (source === 'resume' && nowMs - Number(appOpenLastTrackedAtRef.current || 0) < 15000) return
+
+      appOpenTrackedRef.current = true
+      appOpenLastTrackedAtRef.current = nowMs
+
+      metrikaReachGoal(METRIKA_GOALS.appOpen, { source, auth: 'ready' })
+      try {
+        await trackAppOpen(token, source === 'launch' ? 'miniapp_launch' : 'miniapp_resume')
+      } catch {
+        // fail-open: launch UX must never block on analytics tracking
+      }
+    }
+
+    trackOpen('launch')
+
+    const onVisibility = () => {
+      if (cancelled) return
+      if (document.hidden) return
+      void trackOpen('resume')
+    }
+    document.addEventListener('visibilitychange', onVisibility)
+
+    return () => {
+      cancelled = true
+      document.removeEventListener('visibilitychange', onVisibility)
+    }
+  }, [authStatus, token])
 
   useEffect(() => {
     const virtualPath = (() => {

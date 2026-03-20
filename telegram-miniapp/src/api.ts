@@ -303,6 +303,13 @@ export type BotBootstrapOutDto = {
   message?: string
 }
 
+export type AppOpenTrackOutDto = {
+  status: 'ok'
+  mode: string
+  opens_count: number
+  tracked_at: string
+}
+
 export async function bootstrapBotChat(
   token: string,
   options?: { force?: boolean }
@@ -313,6 +320,18 @@ export async function bootstrapBotChat(
     method: 'POST',
     headers: { Authorization: `Bearer ${token}` },
     timeoutMs: 12000,
+  })
+}
+
+export async function trackAppOpen(
+  token: string,
+  mode = 'miniapp_launch'
+): Promise<AppOpenTrackOutDto> {
+  const q = new URLSearchParams({ mode: String(mode || 'miniapp_launch') }).toString()
+  return apiJson(`${API_BASE}/app/open?${q}`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}` },
+    timeoutMs: 10000,
   })
 }
 

@@ -25,10 +25,13 @@ WITH active_users AS (
     ) AS sent_at
   FROM users u
   LEFT JOIN bot_open_users bo ON bo.telegram_id = u.telegram_id
-  WHERE bo.telegram_id IS NOT NULL
+  WHERE u.telegram_id > 0
+    AND (
+         bo.telegram_id IS NOT NULL
      OR EXISTS (SELECT 1 FROM readings r WHERE r.user_id = u.id)
      OR EXISTS (SELECT 1 FROM card_of_day c WHERE c.user_id = u.id)
      OR EXISTS (SELECT 1 FROM payment_transactions p WHERE p.user_id = u.id)
+    )
 )
 SELECT COUNT(*)::bigint AS missing_count
 FROM active_users a
@@ -50,10 +53,13 @@ WITH active_users AS (
     ) AS sent_at
   FROM users u
   LEFT JOIN bot_open_users bo ON bo.telegram_id = u.telegram_id
-  WHERE bo.telegram_id IS NOT NULL
+  WHERE u.telegram_id > 0
+    AND (
+         bo.telegram_id IS NOT NULL
      OR EXISTS (SELECT 1 FROM readings r WHERE r.user_id = u.id)
      OR EXISTS (SELECT 1 FROM card_of_day c WHERE c.user_id = u.id)
      OR EXISTS (SELECT 1 FROM payment_transactions p WHERE p.user_id = u.id)
+    )
 ),
 latest_success_audit AS (
   SELECT DISTINCT ON (a.user_id)
@@ -95,10 +101,13 @@ WITH active_users AS (
     ) AS sent_at
   FROM users u
   LEFT JOIN bot_open_users bo ON bo.telegram_id = u.telegram_id
-  WHERE bo.telegram_id IS NOT NULL
+  WHERE u.telegram_id > 0
+    AND (
+         bo.telegram_id IS NOT NULL
      OR EXISTS (SELECT 1 FROM readings r WHERE r.user_id = u.id)
      OR EXISTS (SELECT 1 FROM card_of_day c WHERE c.user_id = u.id)
      OR EXISTS (SELECT 1 FROM payment_transactions p WHERE p.user_id = u.id)
+    )
 )
 SELECT
   au.user_id,
@@ -167,4 +176,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

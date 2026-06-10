@@ -1,0 +1,553 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ЭТРА — живые ферменты ручной работы. Энзимы нового поколения</title>
+  <meta name="description" content="ЭТРА — источник трансформации. Уникальные энзимы, чистые продукты и суперрастительные пробиотики. Мы не меняем мир, мы возвращаем его ощущение.">
+  <link rel="preload" href="assets/img/hero-bottle.webp" as="image">
+  <link rel="stylesheet" href="assets/fonts/fonts.css">
+  <link rel="stylesheet" href="assets/css/main.css">
+</head>
+<body>
+
+  <!-- прелоадер -->
+  <div class="preloader" id="preloader">
+    <div class="preloader-logo" aria-hidden="true">
+      <span>Э</span><span>Т</span><span>Р</span><span>А</span>
+    </div>
+    <div class="preloader-sub">живые ферменты ручной работы</div>
+    <div class="preloader-line"><i></i></div>
+  </div>
+
+  <div class="grain" aria-hidden="true"></div>
+  <div class="cursor-dot" aria-hidden="true"></div>
+  <div class="cursor-ring" aria-hidden="true"></div>
+
+  <!-- анонс -->
+  <div class="announce" id="announce">
+    <span class="gift">✦ Подарок к первому заказу</span> — живой энзимный шот в каждой первой коробке
+    <button class="announce-close" aria-label="Закрыть">×</button>
+  </div>
+
+  <!-- шапка -->
+  <header class="header" id="header">
+    <a href="index.html" class="logo">ЭТРА<small>живые ферменты ручной работы</small></a>
+    <nav class="nav">
+      <div class="nav-item-mega">
+        <a class="nav-link" href="catalog.html">Каталог</a>
+        <div class="mega">
+          <a href="catalog.html#all"><b>Все напитки</b><span>коктейли, сезонные, эксклюзивы</span></a>
+          <a href="catalog.html#nabory"><b>Комплексные решения</b><span>курс смены микробиома · БАЖи</span></a>
+          <a href="catalog.html#cocktails"><b>Энзимные коктейли</b><span>каждый несёт своё состояние</span></a>
+          <a href="catalog.html#seasonal"><b>Сезонные</b><span>простой состав, на каждый день</span></a>
+          <a href="catalog.html#detox"><b>Питание и чистки</b><span>каша, порошки, антипаразитарные</span></a>
+          <a href="catalog.html#beauty"><b>Съедобная косметика</b><span>честность на вкус</span></a>
+          <a href="catalog.html#fans"><b>Для фанатов</b><span>закваска и технология для дома</span></a>
+        </div>
+      </div>
+      <a class="nav-link" href="#knowledge">База знаний</a>
+      <a class="nav-link" href="#coop">Открыть вместе</a>
+      <a class="nav-link" href="#community">Сообщество</a>
+    </nav>
+    <div class="header-actions">
+      <a href="#" class="cart-btn" aria-label="Корзина" data-cart-open>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M6 7h12l1 13a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1l1-13Z"/><path d="M9 7V6a3 3 0 0 1 6 0v1"/></svg>
+        <span class="cart-count is-empty" data-cart-count>0</span>
+      </a>
+      <button class="burger" id="burger" aria-label="Меню"><i></i><i></i><i></i></button>
+    </div>
+  </header>
+
+  <!-- мобильное меню -->
+  <div class="mobile-menu" id="mobileMenu">
+    <a href="catalog.html">Каталог <span>18 позиций</span></a>
+    <a href="#inside">Что внутри <span>энзимы</span></a>
+    <a href="start.html">С чего начать <span>тест 30 сек</span></a>
+    <a href="#knowledge">База знаний <span>википедия</span></a>
+    <a href="#coop">Открыть вместе <span>МПК</span></a>
+    <a href="#community">Сообщество <span>telegram</span></a>
+  </div>
+
+  <main>
+    <!-- ============ HERO ============ -->
+    <section class="hero" id="hero">
+      <div class="hero-content">
+        <div class="hero-kicker" data-reveal>
+          <span class="line"></span>
+          <span class="label">Знакомьтесь</span>
+        </div>
+        <h1 class="h-display" data-reveal-line>
+          <span class="rl-line"><span class="rl-inner">Живые ферменты</span></span>
+          <span class="rl-line"><span class="rl-inner"><em class="accent-italic">ручной</em> работы</span></span>
+        </h1>
+        <p class="lead hero-sub" data-reveal>Энзимы нового поколения для вашего здоровья. Чистые продукты и суперрастительные пробиотики, созданные в условиях, похожих на глубины океана.</p>
+        <p class="hero-slogan" data-reveal>Чисто · Честно · Результативно</p>
+        <div class="hero-cta" data-reveal>
+          <a href="start.html" class="btn btn-solid">С чего начать <span class="arr">→</span></a>
+          <a href="catalog.html" class="btn btn-line">В каталог</a>
+        </div>
+        <div class="hero-trust" data-reveal>
+          <div><b data-counter="25000">0</b><span>клиентов</span></div>
+          <div><b data-counter="7">0</b><span>лет на рынке</span></div>
+          <div><b data-counter="1000">0</b><span>живых отзывов</span></div>
+          <div><b>✦</b><span>депонирование в аграрном университете</span></div>
+        </div>
+      </div>
+      <div class="hero-visual" data-reveal>
+        <div class="hero-bottle-wrap" id="heroBottle">
+          <img src="assets/img/hero-bottle.webp" alt="Живой ферментированный напиток ЭТРА" fetchpriority="high">
+          <canvas class="hero-bubbles" id="bubbles"></canvas>
+          <div class="hero-card">
+            <div><b>Ферментировано 186 часов</b><br>без термообработки · 10 атм</div>
+            <span>живое</span>
+          </div>
+        </div>
+      </div>
+      <div class="scroll-hint"><span>листайте</span><i></i></div>
+    </section>
+
+    <!-- ============ МАНИФЕСТ ============ -->
+    <section class="manifesto" id="manifesto">
+      <div class="manifesto-bg" data-parallax-img><img src="assets/img/hero-dark.webp" alt="" loading="lazy"></div>
+      <div class="manifesto-inner">
+        <p class="manifesto-quote" id="manifestoQuote">Мы не меняем мир — мы возвращаем его ощущение.</p>
+        <p class="manifesto-tail" data-reveal>ЭТРА — источник трансформации. В основе — уникальные энзимы, вещества-ускорители, чистые продукты и суперрастительные пробиотики, которые в условиях, похожих на глубины океана, создают уникальные напитки.</p>
+      </div>
+    </section>
+
+    <!-- ============ ЧТО ВНУТРИ: ПЛАШКИ ============ -->
+    <section class="section s-dark inside" id="inside" data-theme="dark">
+      <div class="section-head">
+        <span class="label" data-reveal>Зачем вы тут?</span>
+        <h2 class="h-1" data-reveal-line>
+          <span class="rl-line"><span class="rl-inner">Технология, дающая мгновенный</span></span>
+          <span class="rl-line"><span class="rl-inner"><em class="accent-italic">чистый природный</em> результат</span></span>
+        </h2>
+      </div>
+      <div class="inside-grid">
+        <div class="inside-visual" data-reveal>
+          <img id="insideImg" src="assets/img/moodboard.webp" alt="Живая ферментация ЭТРА" loading="lazy">
+        </div>
+        <div class="acc" id="insideAcc">
+          <div class="acc-item is-open" data-img="assets/img/moodboard.webp">
+            <button class="acc-head"><span class="acc-num">01</span><span class="acc-title">Энзимы</span><span class="acc-icon"></span></button>
+            <div class="acc-body"><div class="acc-body-pad">
+              <p>Натуральные ферменты, запускающие все процессы организма — от строения до усвоения всех микроэлементов. Ускорители обменных процессов: в них секрет усвоения и пищеварения. Они фундамент нашей молодости, бодрости и сил — именно их сохранность и наличие определяет наше долголетие и качество жизни.</p>
+              <span class="acc-tag">фундамент молодости</span>
+            </div></div>
+          </div>
+          <div class="acc-item" data-img="assets/img/hero-dark.webp">
+            <button class="acc-head"><span class="acc-num">02</span><span class="acc-title">Бактерии</span><span class="acc-icon"></span></button>
+            <div class="acc-body"><div class="acc-body-pad">
+              <p>Главные соратники нашего организма — симбиоз 8 штаммов микробиома. Именно они строят полезные нутриенты, защищают организм от вирусов и патогенов и запускают процессы регенерации и восстановления микробиома. Источник жизни — ваш кишечник, и важно, кто его населяет и кто им управляет.</p>
+              <span class="acc-tag">8 штаммов микробиома</span>
+            </div></div>
+          </div>
+          <div class="acc-item" data-img="assets/img/production.webp">
+            <button class="acc-head"><span class="acc-num">03</span><span class="acc-title">Технология</span><span class="acc-icon"></span></button>
+            <div class="acc-body"><div class="acc-body-pad">
+              <p>Симбиоз миллиардов полезных бактерий. На нашем производстве, в процессе живой ферментации — без термической обработки продуктов — мы сохраняем и усиляем энзимы, тренируем и развиваем здоровых бактерий под давлением в 10 атмосфер и используем самые чистые продукты для питательных свойств.</p>
+              <span class="acc-tag">10 атм · без термообработки · 186 часов</span>
+            </div></div>
+          </div>
+          <div class="acc-item" data-img="assets/img/compare.webp">
+            <button class="acc-head"><span class="acc-num">04</span><span class="acc-title">Результат</span><span class="acc-icon"></span></button>
+            <div class="acc-body"><div class="acc-body-pad">
+              <p>С правильной микробиотой тело обретает здоровый и опрятный вид: уходят лишний вес и отёки, очищается кожа, крепнут зубы и кости, появляется бодрость и лёгкость, улучшается сон, пропадают вредные привычки, депрессия сменяется радостью, а витамины и микроэлементы усваиваются в полном объёме.</p>
+              <span class="acc-tag">энергия без откатов</span>
+            </div></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ С ЧЕГО НАЧАТЬ ============ -->
+    <section class="section" id="start">
+      <div class="start-formula">
+        <span class="label" data-reveal>С чего начать</span>
+        <h2 class="h-1" style="margin: 22px 0 26px" data-reveal-line>
+          <span class="rl-line"><span class="rl-inner">Формула стабильности —</span></span>
+          <span class="rl-line"><span class="rl-inner"><em class="accent-italic">6–12 литров</em> в месяц</span></span>
+        </h2>
+        <p class="lead muted" data-reveal>Энзимные напитки работают на регулярности. 6–12 литров в месяц на человека — и тело начинает меняться по понятной схеме из трёх шагов.</p>
+      </div>
+      <div class="steps">
+        <div class="step-card" data-reveal>
+          <div class="step-num">I</div>
+          <h3>Чистим</h3>
+          <p>Освобождаем организм от токсинов, патогенов и паразитов. Чистый кишечник — фундамент, на котором строится всё остальное.</p>
+        </div>
+        <div class="step-card" data-reveal data-reveal-delay="0.12">
+          <div class="step-num">II</div>
+          <h3>Наполняем</h3>
+          <p>Заселяем микробиом живыми штаммами и кормим тело энзимами, витаминами и микроэлементами в биодоступной форме.</p>
+        </div>
+        <div class="step-card" data-reveal data-reveal-delay="0.24">
+          <div class="step-num">III</div>
+          <h3>Закрепляем</h3>
+          <p>Новая микрофлора становится хозяином. Привычки меняются сами, энергия становится фоном, а не событием.</p>
+        </div>
+      </div>
+      <div class="start-cta" data-reveal>
+        <a href="start.html" class="btn btn-gold">Пройти тест за 30 секунд <span class="arr">→</span></a>
+        <a href="catalog.html" class="btn btn-line">Сразу в каталог</a>
+      </div>
+    </section>
+
+    <!-- ============ КАТАЛОГ: ГОРИЗОНТАЛЬНАЯ ЛЕНТА ============ -->
+    <section class="section catstrip" id="catalog" style="padding-left: 0; padding-right: 0;">
+      <div class="section-head" style="padding: 0 var(--pad);">
+        <span class="label" data-reveal>Каталог</span>
+        <h2 class="h-1" data-reveal-line>
+          <span class="rl-line"><span class="rl-inner">Комплексные решения</span></span>
+          <span class="rl-line"><span class="rl-inner">и <em class="accent-italic">точечные</em> — под случаи жизни</span></span>
+        </h2>
+      </div>
+      <div class="catstrip-pin">
+        <div class="catstrip-track" id="catTrack">
+          <a class="cat-card" href="catalog.html#all">
+            <img src="assets/img/hero-bottle.webp" alt="Все напитки" loading="lazy">
+            <span class="cat-card-arrow">→</span>
+            <div class="cat-card-body"><span class="label">9 позиций</span><h3>Все напитки</h3><p>Коктейли, сезонные и эксклюзивы — всё живое в одном месте</p></div>
+          </a>
+          <a class="cat-card" href="catalog.html#nabory">
+            <img src="assets/img/cat-nabory.webp" alt="Комплексные решения" loading="lazy">
+            <span class="cat-card-arrow">→</span>
+            <div class="cat-card-body"><span class="label">флагман</span><h3>Комплексные решения</h3><p>Курс смены микробиома · 12 бутылок · точечные БАЖи</p></div>
+          </a>
+          <a class="cat-card" href="catalog.html#cocktails">
+            <img src="assets/img/p-oblepiha.webp" alt="Энзимные коктейли" loading="lazy">
+            <span class="cat-card-arrow">→</span>
+            <div class="cat-card-body"><span class="label">состояния</span><h3>Энзимные коктейли</h3><p>Энергетик · Родник · Тархун · Квас · Хмель · Облепиха</p></div>
+          </a>
+          <a class="cat-card" href="catalog.html#detox">
+            <img src="assets/img/cat-detox.webp" alt="Питание и чистки" loading="lazy">
+            <span class="cat-card-arrow">→</span>
+            <div class="cat-card-body"><span class="label">протоколы</span><h3>Питание и чистки</h3><p>Каша ЭТРАсУТРА · Паразитофф · пробиотические порошки</p></div>
+          </a>
+          <a class="cat-card" href="catalog.html#beauty">
+            <img src="assets/img/cat-beauty.webp" alt="Съедобная косметика" loading="lazy">
+            <span class="cat-card-arrow">→</span>
+            <div class="cat-card-body"><span class="label">июль</span><h3>Съедобная косметика</h3><p>Гомаж, крем и паста — честность, проверяемая на вкус</p></div>
+          </a>
+          <a class="cat-card" href="catalog.html#fans">
+            <img src="assets/img/cat-fans.webp" alt="Для фанатов" loading="lazy">
+            <span class="cat-card-arrow">→</span>
+            <div class="cat-card-body"><span class="label">технология</span><h3>Для фанатов</h3><p>Закваска ПРАЭнзим — ферментация у вас дома</p></div>
+          </a>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ ПОПУЛЯРНЫЕ ПРОДУКТЫ ============ -->
+    <section class="section" id="bestsellers" style="padding-top: 0;">
+      <div class="section-head">
+        <span class="label" data-reveal>Выбирают чаще всего</span>
+        <h2 class="h-2" data-reveal>Каждый коктейль несёт своё состояние</h2>
+      </div>
+      <div class="product-grid" id="featuredGrid"></div>
+    </section>
+
+    <!-- ============ КОНТРАСТЫ ============ -->
+    <section class="section s-dark" id="contrast" data-theme="dark">
+      <div class="contrast-grid">
+        <div>
+          <span class="label" data-reveal>Контраст</span>
+          <h2 class="h-1" style="margin: 22px 0 26px" data-reveal-line>
+            <span class="rl-line"><span class="rl-inner">Пили БАДы, сидели</span></span>
+            <span class="rl-line"><span class="rl-inner">на диетах — <em class="accent-italic">получали откат</em></span></span>
+          </h2>
+          <p class="lead muted" data-reveal>Ответ — натуральный живой процесс. Технология, а не таблетка. Концентрация живой ферментации делает то, что не может ни одна аптечная полка.</p>
+          <div class="compare-items">
+            <div class="compare-item" data-reveal><span class="eq">=</span><p><b>1 концентрированный капустный напиток</b> — тысячи салатов по питательной ценности</p></div>
+            <div class="compare-item" data-reveal><span class="eq">=</span><p><b>1 бутылка «Чистого Утра»</b> — курс антипаразитарных препаратов, мягко и без химии</p></div>
+            <div class="compare-item" data-reveal><span class="eq">=</span><p><b>1 месяц курса микробиома</b> — годы попыток «наладить питание» силой воли</p></div>
+          </div>
+          <div style="margin-top: 38px" data-reveal>
+            <a href="#community" class="btn btn-line-dark">Смотреть истории <span class="arr">→</span></a>
+          </div>
+        </div>
+        <div class="contrast-img" data-parallax-img data-reveal>
+          <img src="assets/img/compare.webp" alt="Тысячи овощей в одной бутылке" loading="lazy">
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ РЕЗУЛЬТАТЫ: БАРЫ ============ -->
+    <section class="section s-dark" id="results" data-theme="dark" style="margin-top: 14px;">
+      <div class="section-head" style="text-align:center; max-width: 900px;">
+        <span class="label" data-reveal>Результаты</span>
+        <h2 class="h-1" data-reveal>Что меняется у наших клиентов</h2>
+      </div>
+      <div class="bars" id="bars">
+        <div class="bar-row" data-bar="87"><div class="bar-row-top"><span class="bar-name">Стройность</span><span class="bar-val">87%</span></div><div class="bar-track"><div class="bar-fill" style="--w: 87%"></div></div></div>
+        <div class="bar-row" data-bar="92"><div class="bar-row-top"><span class="bar-name">Энергия и бодрость</span><span class="bar-val">92%</span></div><div class="bar-track"><div class="bar-fill" style="--w: 92%"></div></div></div>
+        <div class="bar-row" data-bar="89"><div class="bar-row-top"><span class="bar-name">ЖКТ и пищеварение</span><span class="bar-val">89%</span></div><div class="bar-track"><div class="bar-fill" style="--w: 89%"></div></div></div>
+        <div class="bar-row" data-bar="78"><div class="bar-row-top"><span class="bar-name">Кожа</span><span class="bar-val">78%</span></div><div class="bar-track"><div class="bar-fill" style="--w: 78%"></div></div></div>
+        <div class="bar-row" data-bar="81"><div class="bar-row-top"><span class="bar-name">Сон</span><span class="bar-val">81%</span></div><div class="bar-track"><div class="bar-fill" style="--w: 81%"></div></div></div>
+        <div class="bar-row" data-bar="64"><div class="bar-row-top"><span class="bar-name">Ушли вредные привычки</span><span class="bar-val">64%</span></div><div class="bar-track"><div class="bar-fill" style="--w: 64%"></div></div></div>
+        <div class="bar-row" data-bar="84"><div class="bar-row-top"><span class="bar-name">Настроение, гормоны, психика</span><span class="bar-val">84%</span></div><div class="bar-track"><div class="bar-fill" style="--w: 84%"></div></div></div>
+        <div class="bar-row" data-bar="96"><div class="bar-row-top"><span class="bar-name">Рекомендуют ЭТРА</span><span class="bar-val">96%</span></div><div class="bar-track"><div class="bar-fill" style="--w: 96%"></div></div></div>
+      </div>
+      <div class="results-stats">
+        <div data-reveal><b data-counter="25000">0</b><span>клиентов</span></div>
+        <div data-reveal><b data-counter="1000">0</b><span>отзывов</span></div>
+        <div data-reveal><b data-counter="100000">0</b><span>человек охват</span></div>
+      </div>
+      <p class="results-note" data-reveal>Цифры собраны из реальных отзывов клиентов. Не обещание результата.</p>
+    </section>
+
+    <!-- ============ ОТЗЫВЫ ============ -->
+    <section class="section reviews" id="community" style="padding-left: 0; padding-right: 0;">
+      <div class="section-head" style="padding: 0 var(--pad);">
+        <span class="label" data-reveal>Сообщество · не одни</span>
+        <h2 class="h-2" data-reveal>Живые истории — включая сдержанные</h2>
+      </div>
+      <div class="review-track" id="reviewTrack">
+        <div class="review-card"><span class="quote-mark">“</span><p>За месяц курса ушло 6 кг и — что важнее — тяга к сладкому. Я не боролась. Оно просто перестало быть нужным.</p><footer><span>Марина · Москва</span><span>курс микробиома</span></footer></div>
+        <div class="review-card"><span class="quote-mark">“</span><p>Скептик во мне умер на третьей неделе, когда я заметил, что просыпаюсь до будильника. Энергия ровная, без кофейных качелей.</p><footer><span>Дмитрий · Сочи</span><span>энергетик</span></footer></div>
+        <div class="review-card"><span class="quote-mark">“</span><p>Попробовал — не пошло. Вкус ферментации непривычный, бросил через неделю. Вернулся через месяц и распробовал. Теперь семья пьёт.</p><footer><span>Андрей · Казань</span><span>честный отзыв</span></footer></div>
+        <div class="review-card"><span class="quote-mark">“</span><p>После курса гастроэнтеролог спросил, что я делала. Показатели, за которые мы бились два года, пришли в норму.</p><footer><span>Ольга · Екатеринбург</span><span>ЖКТ</span></footer></div>
+        <div class="review-card"><span class="quote-mark">“</span><p>Хмель вечером вместо вина — мой новый ритуал. Расслабление есть, последствий нет. Муж перешёл следом.</p><footer><span>Анна · Санкт-Петербург</span><span>хмель</span></footer></div>
+        <div class="review-card"><span class="quote-mark">“</span><p>Беру квас и тархун ящиками на всю семью. Дети сами просят вместо лимонада — для меня это главный показатель.</p><footer><span>Сергей · Краснодар</span><span>семейный заказ</span></footer></div>
+      </div>
+    </section>
+
+    <!-- ============ ОСНОВАТЕЛЬ ============ -->
+    <section class="section" id="founder">
+      <div class="founder-grid">
+        <div class="founder-photo" data-parallax-img data-reveal>
+          <img src="assets/img/founder.webp" alt="Кирилл — основатель ЭТРА" loading="lazy">
+        </div>
+        <div>
+          <span class="label" data-reveal>Лицо бренда</span>
+          <h2 class="h-1" style="margin: 22px 0 30px" data-reveal-line>
+            <span class="rl-line"><span class="rl-inner">Кирилл —</span></span>
+            <span class="rl-line"><span class="rl-inner"><em class="accent-italic">мастер живой</em> ферментации</span></span>
+          </h2>
+          <p class="founder-quote" data-reveal>«Семь лет я собирал технологию, которой нет в Гугле. Не верьте мне на слово — проверьте на своём теле. Первая неделя всё расскажет.»</p>
+          <p class="muted" data-reveal>Человек, который в жизни всё может: лаборатория и реакторы, горы и заплывы, автоспорт и театр. Авторитет био-эко-тренда и основатель технологии ЭТРА.</p>
+          <div class="founder-tags" data-reveal>
+            <span class="founder-tag">лаборатория</span><span class="founder-tag">спорт</span><span class="founder-tag">горы</span><span class="founder-tag">автоспорт</span><span class="founder-tag">театр</span><span class="founder-tag">гитара</span><span class="founder-tag">дети</span>
+          </div>
+          <div class="founder-cta" data-reveal>
+            <a href="https://t.me/c/enzyme_trend_russia/10552" target="_blank" rel="noopener" class="btn btn-solid">Спросить Кирилла <span class="arr">→</span></a>
+            <a href="#team" class="btn btn-line">О Кирилле и команде</a>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ МПК: ОТКРЫТЬ ПРОИЗВОДСТВО ВМЕСТЕ ============ -->
+    <section class="section s-dark" id="coop" data-theme="dark">
+      <div class="wrap">
+        <div class="coop-hero" data-reveal>
+          <img src="assets/img/production.webp" alt="Производство ЭТРА" loading="lazy">
+          <div class="coop-hero-label">
+            <span class="play">▶</span>
+            <div><b style="font-family: var(--font-display); font-size: 22px;">Лайв-тур по производству</b><br><span style="font-size: 12px; opacity:.7;">реакторы · лаборатория · 3D-тур</span></div>
+          </div>
+        </div>
+        <div class="section-head" style="margin-bottom: 30px;">
+          <span class="label" data-reveal>Открыть производство вместе</span>
+          <h2 class="h-1" data-reveal-line>
+            <span class="rl-line"><span class="rl-inner">Станьте <em class="accent-italic">со-владельцем</em></span></span>
+            <span class="rl-line"><span class="rl-inner">проекта</span></span>
+          </h2>
+        </div>
+        <p class="lead muted" style="max-width: 640px;" data-reveal>МПК «Развитие Народных Хозяйств» — народный краудфандинг: мы открываем производства вместе. В Москве уже собрали 111 миллионов.</p>
+        <div class="coop-projects">
+          <div class="coop-card" data-reveal><span class="geo">Краснодар</span><h3>Производство ферментации</h3><div class="coop-progress"><i style="--w: 72%"></i></div><div class="nums"><span>собрано 72%</span><span>активен</span></div></div>
+          <div class="coop-card" data-reveal data-reveal-delay="0.1"><span class="geo">Новосибирск</span><h3>Цех живых энзимов</h3><div class="coop-progress"><i style="--w: 41%"></i></div><div class="nums"><span>собрано 41%</span><span>активен</span></div></div>
+          <div class="coop-card" data-reveal data-reveal-delay="0.2"><span class="geo">Армения</span><h3>Персики в джемах</h3><div class="coop-progress"><i style="--w: 58%"></i></div><div class="nums"><span>собрано 58%</span><span>активен</span></div></div>
+          <div class="coop-card" data-reveal data-reveal-delay="0.3"><span class="geo">Абхазия</span><h3>Ретритный центр</h3><div class="coop-progress"><i style="--w: 23%"></i></div><div class="nums"><span>собрано 23%</span><span>старт</span></div></div>
+        </div>
+        <div class="coop-banner" data-reveal>
+          <div><b>111 000 000 ₽ собрано в Москве</b><span>опыт, которому доверяют пайщики по всей стране</span></div>
+          <a href="#" class="btn btn-gold">Открыть производство вместе <span class="arr">→</span></a>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ КОМАНДА ============ -->
+    <section class="section" id="team">
+      <div class="section-head" style="text-align:center;">
+        <span class="label" data-reveal>Команда</span>
+        <h2 class="h-2" data-reveal>За продуктом — команда</h2>
+        <p class="muted" style="margin-top: 14px;" data-reveal>Три года собирали. Каждый протестирован в тяжёлых ситуациях.</p>
+      </div>
+      <div class="team-grid">
+        <div class="team-card" data-reveal><div class="team-ava">К</div><h3>Кирилл</h3><div class="role">Основатель · технолог</div><p>«Технология — это я»</p></div>
+        <div class="team-card" data-reveal data-reveal-delay="0.08"><div class="team-ava">П</div><h3>Павел</h3><div class="role">Продукт · вкус</div><p>«Ферментация — это джаз»</p></div>
+        <div class="team-card" data-reveal data-reveal-delay="0.16"><div class="team-ava">И</div><h3>Игорь</h3><div class="role">Платформа · логистика</div><p>«Заказ доедет. Проверено»</p></div>
+        <div class="team-card" data-reveal data-reveal-delay="0.24"><div class="team-ava">К</div><h3>Кристина</h3><div class="role">Клиенты · сообщество</div><p>«Каждый отзыв читаю лично»</p></div>
+        <div class="team-card" data-reveal data-reveal-delay="0.32"><div class="team-ava">Л</div><h3>Лаборатория</h3><div class="role">Контроль качества</div><p>«Каждая партия — под микроскопом»</p></div>
+      </div>
+    </section>
+
+    <!-- ============ ПАРТНЁРЫ ============ -->
+    <section class="section partners" id="partners">
+      <div class="section-head" style="text-align:center;">
+        <span class="label" data-reveal>С нами работают</span>
+      </div>
+      <div class="marquee" id="marquee">
+        <div class="marquee-inner" style="display:flex;">
+          <span class="marquee-item">Gosti Group</span>
+          <span class="marquee-item">KHome</span>
+          <span class="marquee-item">Surf Coffee</span>
+          <span class="marquee-item">Азбука Вкуса</span>
+          <span class="marquee-item">Школа Алан Мамиев</span>
+          <span class="marquee-item">Истоки Здоровья</span>
+          <span class="marquee-item">Живое Железо РФ</span>
+          <span class="marquee-item">Sun Sky Rixos</span>
+          <span class="marquee-item">Клиника Неумывакина</span>
+          <span class="marquee-item">Ассоциация народной медицины</span>
+          <span class="marquee-item">Газчай</span>
+          <span class="marquee-item">Благосфера</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ БАЗА ЗНАНИЙ ============ -->
+    <section class="section" id="knowledge" style="padding-top: 30px;">
+      <div class="section-head">
+        <span class="label" data-reveal>База знаний</span>
+        <h2 class="h-2" data-reveal>Википедия по ферментации, которой нет в Гугле</h2>
+      </div>
+      <div class="kb-grid">
+        <a class="kb-card" href="https://t.me/c/enzyme_trend_russia/2301" target="_blank" rel="noopener" data-reveal>
+          <span class="label">Интересные факты</span>
+          <h3>Белая плёнка на фермéнте: почему это хорошо</h3>
+          <span class="kb-more">Читать →</span>
+        </a>
+        <a class="kb-card" href="#" data-reveal data-reveal-delay="0.1">
+          <span class="label">Исследования</span>
+          <h3>Депонирование в аграрном университете: что подтверждают документы</h3>
+          <span class="kb-more">Читать →</span>
+        </a>
+        <a class="kb-card" href="#" data-reveal data-reveal-delay="0.2">
+          <span class="label">Эфиры и интервью</span>
+          <h3>Ефимов, Дементьев, эндокринологи: 8 млн охвата разговоров о ферментации</h3>
+          <span class="kb-more">Смотреть →</span>
+        </a>
+        <a class="kb-card" href="https://t.me/c/enzyme_trend_russia/10552" target="_blank" rel="noopener" data-reveal data-reveal-delay="0.3">
+          <span class="label">Навигатор ответов</span>
+          <h3>Короткие ответы на типовые вопросы — от дозировок до совместимости</h3>
+          <span class="kb-more">Открыть →</span>
+        </a>
+      </div>
+    </section>
+
+    <!-- ============ FAQ + ФИНАЛЬНЫЙ CTA ============ -->
+    <section class="section final-cta" id="faq">
+      <span class="label" data-reveal>Готовы попробовать?</span>
+      <h2 class="h-1" style="margin-top: 22px;" data-reveal-line>
+        <span class="rl-line"><span class="rl-inner">Самый полезный</span></span>
+        <span class="rl-line"><span class="rl-inner">напиток — <em class="accent-italic">на вашем столе</em></span></span>
+      </h2>
+      <div class="faq-wrap" style="margin-top: 60px; text-align: left;">
+        <div class="faq-item" data-reveal>
+          <button class="faq-q">Как пить энзимные напитки?<span class="acc-icon" style="position:relative; width:26px; height:26px; flex:none;"></span></button>
+          <div class="faq-a"><p>Начните с 100–150 мл утром до еды. Через неделю — стакан утром и вечером. Формула стабильности: 6–12 литров в месяц на человека. К каждому продукту приложена схема для новичка.</p></div>
+        </div>
+        <div class="faq-item" data-reveal>
+          <button class="faq-q">Можно ли с лекарствами?<span class="acc-icon" style="position:relative; width:26px; height:26px; flex:none;"></span></button>
+          <div class="faq-a"><p>В большинстве случаев — да, с интервалом 1,5–2 часа. При приёме серьёзных препаратов напишите нам в Telegram: ответим по вашей конкретной ситуации без авторизации и очередей.</p></div>
+        </div>
+        <div class="faq-item" data-reveal>
+          <button class="faq-q">Через сколько ждать эффект?<span class="acc-icon" style="position:relative; width:26px; height:26px; flex:none;"></span></button>
+          <div class="faq-a"><p>У большинства первые ощущения — лёгкость после еды — приходят на 1–3 день. Устойчивые изменения — к 2–3 неделе регулярного приёма. Мы говорим «у большинства», потому что не обещаем — мы показываем статистику.</p></div>
+        </div>
+        <div class="faq-item" data-reveal>
+          <button class="faq-q">Можно ли вернуть?<span class="acc-icon" style="position:relative; width:26px; height:26px; flex:none;"></span></button>
+          <div class="faq-a"><p>Нераспечатанный продукт — 100% возврат в течение 14 дней. Открытый — возврат при индивидуальной непереносимости по решению менеджера. Курсы — до старта 100%, после первого модуля пропорционально.</p></div>
+        </div>
+        <div class="faq-item" data-reveal>
+          <button class="faq-q">Как работает доставка?<span class="acc-icon" style="position:relative; width:26px; height:26px; flex:none;"></span></button>
+          <div class="faq-a"><p>СДЭК (пункт выдачи или до двери) и Почта России. Конкретные сроки по вашему городу видны при оформлении — не «до 30 дней», а честные даты.</p></div>
+        </div>
+      </div>
+      <div class="actions" data-reveal>
+        <a href="catalog.html" class="btn btn-solid">В каталог <span class="arr">→</span></a>
+        <a href="https://t.me/c/enzyme_trend_russia/10552" target="_blank" rel="noopener" class="btn btn-line">Спросить в Telegram</a>
+      </div>
+    </section>
+  </main>
+
+  <!-- ============ FOOTER ============ -->
+  <footer class="footer">
+    <div class="footer-top">
+      <div>
+        <div class="logo">ЭТРА<small>живые ферменты ручной работы</small></div>
+        <p class="footer-mission">Этра — наука питания на истоках древнего знания. Инструмент на всю жизнь. Мы не меняем мир, мы возвращаем его ощущение.</p>
+      </div>
+      <div class="footer-col">
+        <h4>Покупка</h4>
+        <a href="catalog.html">Каталог</a>
+        <a href="#">Как оформить заявку</a>
+        <a href="#">Доставка</a>
+        <a href="#">Возврат</a>
+      </div>
+      <div class="footer-col">
+        <h4>Бренд</h4>
+        <a href="#manifesto">Об ЭТРА</a>
+        <a href="#coop">Производство</a>
+        <a href="#founder">Кирилл</a>
+        <a href="#team">Команда</a>
+        <a href="#partners">Партнёры</a>
+      </div>
+      <div class="footer-col">
+        <h4>Документы</h4>
+        <a href="#">Сертификаты</a>
+        <a href="#">Политика ОПД</a>
+        <a href="#">Cookie</a>
+        <a href="#">Оферта</a>
+      </div>
+      <div class="footer-col">
+        <h4>Сообщество</h4>
+        <a href="https://t.me/c/enzyme_trend_russia/2301" target="_blank" rel="noopener">Telegram-канал</a>
+        <a href="https://t.me/c/enzyme_trend_russia/10552" target="_blank" rel="noopener">Чат поддержки</a>
+        <a href="#">YouTube</a>
+        <a href="#">Амбассадорам</a>
+      </div>
+    </div>
+    <div class="footer-bottom">
+      <span>© 2026 ЭТРА · живые ферменты ручной работы</span>
+      <span>Где мы стоим: Surf Coffee · Азбука Вкуса · Газгольдер · Rixos Поляна</span>
+    </div>
+    <p class="footer-disclaimer">Продукция ЭТРА не является лекарственным средством. Информация на сайте не заменяет консультацию врача. Цифры результатов собраны из отзывов клиентов и не являются обещанием результата.</p>
+  </footer>
+
+  <!-- виджет поддержки -->
+  <button class="support-fab" id="supportFab" aria-label="Поддержка">
+    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M21 11.5a8.38 8.38 0 0 1-9 8.36 8.5 8.5 0 0 1-3.4-.66L3 21l1.8-5.6A8.38 8.38 0 0 1 3.64 8 8.5 8.5 0 0 1 12 3.14 8.38 8.38 0 0 1 21 11.5Z"/></svg>
+  </button>
+  <div class="support-pop" id="supportPop">
+    <h4>Быстрая поддержка</h4>
+    <p class="sp-sub">Тепло и легко — без авторизации</p>
+    <a href="https://t.me/c/enzyme_trend_russia/10552" target="_blank" rel="noopener"><span class="ico">✈</span> Спросить в Telegram</a>
+    <a href="#"><span class="ico">✆</span> Позвонить</a>
+    <a href="#"><span class="ico">✉</span> Написать менеджеру</a>
+    <a href="#faq"><span class="ico">?</span> FAQ</a>
+  </div>
+
+  <!-- мобильная нижняя навигация -->
+  <nav class="bottom-nav">
+    <a href="index.html" class="is-active"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 10.5 12 3l9 7.5V21H3v-10.5Z"/></svg>Главная</a>
+    <a href="catalog.html"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="3" width="8" height="8" rx="2"/><rect x="13" y="3" width="8" height="8" rx="2"/><rect x="3" y="13" width="8" height="8" rx="2"/><rect x="13" y="13" width="8" height="8" rx="2"/></svg>Каталог</a>
+    <a href="start.html"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="9"/><path d="m9 12 2 2 4-5"/></svg>Старт</a>
+    <a href="#" data-cart-open><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M6 7h12l1 13a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1l1-13Z"/><path d="M9 7V6a3 3 0 0 1 6 0v1"/></svg>Корзина</a>
+    <a href="#coop"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 3v18M3 12h18"/></svg>Вместе</a>
+  </nav>
+
+  <div class="toast" id="toast"><span class="dot"></span><span id="toastMsg">Добавлено в корзину</span></div>
+
+  <script src="assets/vendor/gsap.min.js"></script>
+  <script src="assets/vendor/ScrollTrigger.min.js"></script>
+  <script src="assets/vendor/lenis.min.js"></script>
+  <script src="assets/js/data.js"></script>
+  <script src="assets/js/main.js"></script>
+  <script src="assets/js/home.js"></script>
+</body>
+</html>

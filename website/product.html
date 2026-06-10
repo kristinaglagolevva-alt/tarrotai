@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ЭТРА — карточка продукта</title>
+  <link rel="stylesheet" href="assets/fonts/fonts.css">
+  <link rel="stylesheet" href="assets/css/main.css">
+</head>
+<body>
+  <div class="grain" aria-hidden="true"></div>
+  <div class="cursor-dot" aria-hidden="true"></div>
+  <div class="cursor-ring" aria-hidden="true"></div>
+
+  <header class="header is-scrolled" id="header">
+    <a href="index.html" class="logo">ЭТРА<small>живые ферменты ручной работы</small></a>
+    <nav class="nav">
+      <a class="nav-link" href="catalog.html">Каталог</a>
+      <a class="nav-link" href="index.html#knowledge">База знаний</a>
+      <a class="nav-link" href="index.html#coop">Открыть вместе</a>
+      <a class="nav-link" href="index.html#community">Сообщество</a>
+    </nav>
+    <div class="header-actions">
+      <a href="#" class="cart-btn" aria-label="Корзина" data-cart-open>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M6 7h12l1 13a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1l1-13Z"/><path d="M9 7V6a3 3 0 0 1 6 0v1"/></svg>
+        <span class="cart-count is-empty" data-cart-count>0</span>
+      </a>
+      <button class="burger" id="burger" aria-label="Меню"><i></i><i></i><i></i></button>
+    </div>
+  </header>
+
+  <div class="mobile-menu" id="mobileMenu">
+    <a href="index.html">Главная <span>этра</span></a>
+    <a href="catalog.html">Каталог <span>18 позиций</span></a>
+    <a href="start.html">С чего начать <span>тест 30 сек</span></a>
+  </div>
+
+  <main>
+    <div class="product-page" id="productPage"><!-- рендер из JS --></div>
+
+    <section class="section" id="weeks" style="padding-top: 0;">
+      <div class="section-head">
+        <span class="label" data-reveal>Результаты по неделям</span>
+        <h2 class="h-2" data-reveal>Что вы почувствуете</h2>
+      </div>
+      <div class="weeks-grid" id="weeksGrid"></div>
+    </section>
+
+    <section class="section" id="related" style="padding-top: 0;">
+      <div class="section-head">
+        <span class="label" data-reveal>С этим выбирают</span>
+        <h2 class="h-2" data-reveal>Усильте результат</h2>
+      </div>
+      <div class="product-grid" id="relatedGrid"></div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <div class="footer-top">
+      <div>
+        <div class="logo">ЭТРА<small>живые ферменты ручной работы</small></div>
+        <p class="footer-mission">Этра — наука питания на истоках древнего знания.</p>
+      </div>
+      <div class="footer-col"><h4>Покупка</h4><a href="catalog.html">Каталог</a><a href="#">Доставка</a><a href="#">Возврат</a></div>
+      <div class="footer-col"><h4>Бренд</h4><a href="index.html#manifesto">Об ЭТРА</a><a href="index.html#team">Команда</a></div>
+      <div class="footer-col"><h4>Документы</h4><a href="#">Сертификаты</a><a href="#">Оферта</a></div>
+      <div class="footer-col"><h4>Сообщество</h4><a href="https://t.me/c/enzyme_trend_russia/10552" target="_blank" rel="noopener">Telegram</a></div>
+    </div>
+    <div class="footer-bottom"><span>© 2026 ЭТРА</span></div>
+    <p class="footer-disclaimer">Продукция ЭТРА не является лекарственным средством.</p>
+  </footer>
+
+  <nav class="bottom-nav">
+    <a href="index.html"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 10.5 12 3l9 7.5V21H3v-10.5Z"/></svg>Главная</a>
+    <a href="catalog.html"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="3" width="8" height="8" rx="2"/><rect x="13" y="3" width="8" height="8" rx="2"/><rect x="3" y="13" width="8" height="8" rx="2"/><rect x="13" y="13" width="8" height="8" rx="2"/></svg>Каталог</a>
+    <a href="start.html"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="9"/><path d="m9 12 2 2 4-5"/></svg>Старт</a>
+    <a href="#" data-cart-open><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M6 7h12l1 13a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1l1-13Z"/><path d="M9 7V6a3 3 0 0 1 6 0v1"/></svg>Корзина</a>
+    <a href="index.html#coop"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 3v18M3 12h18"/></svg>Вместе</a>
+  </nav>
+
+  <div class="toast" id="toast"><span class="dot"></span><span id="toastMsg">Добавлено в корзину</span></div>
+
+  <script src="assets/vendor/gsap.min.js"></script>
+  <script src="assets/vendor/ScrollTrigger.min.js"></script>
+  <script src="assets/vendor/lenis.min.js"></script>
+  <script src="assets/js/data.js"></script>
+  <script src="assets/js/main.js"></script>
+  <script>
+    (function () {
+      const id = new URLSearchParams(location.search).get('id') || 'oblepiha';
+      const p = ETRA_PRODUCTS.find(x => x.id === id) || ETRA_PRODUCTS[0];
+      document.title = `${p.name} — ЭТРА`;
+
+      const gallery = [p.img, 'assets/img/moodboard.webp', 'assets/img/production.webp'];
+      let qty = 1;
+
+      const page = document.getElementById('productPage');
+      page.innerHTML = `
+        <div class="pp-gallery" data-reveal>
+          <div class="pp-main"><img id="ppMain" src="${gallery[0]}" alt="${p.name}"></div>
+          <div class="pp-thumbs">
+            ${gallery.map((g, i) => `<button class="pp-thumb ${i === 0 ? 'is-active' : ''}" data-src="${g}"><img src="${g}" alt=""></button>`).join('')}
+          </div>
+        </div>
+        <div class="pp-info">
+          <div class="breadcrumbs" data-reveal><a href="index.html">Главная</a><span>→</span><a href="catalog.html#${p.cat}">${p.catName}</a><span>→</span><span>${p.name}</span></div>
+          <span class="label" data-reveal>${p.catName}</span>
+          <h1 data-reveal>${p.name}</h1>
+          <p class="pp-task" data-reveal>${p.task}</p>
+          ${p.state ? `<span class="pp-state" data-reveal>${p.state}</span>` : ''}
+          <p class="pp-desc" data-reveal>${p.desc}</p>
+          <div class="pp-price-row" data-reveal>
+            <span class="pp-price" id="ppPrice">${p.price.toLocaleString('ru-RU')} ₽</span>
+            <span class="pp-stock">В наличии</span>
+          </div>
+          <div class="pp-options" data-reveal>
+            ${p.volume.map((v, i) => `<button class="pp-opt ${i === 0 ? 'is-active' : ''}">${v}</button>`).join('')}
+          </div>
+          <div class="pp-buy-row" data-reveal>
+            <div class="pp-qty">
+              <button id="qMinus">−</button><span id="qVal">1</span><button id="qPlus">+</button>
+            </div>
+            <button class="btn btn-solid" id="ppAdd">В корзину <span class="arr">→</span></button>
+          </div>
+          <a class="pp-ask" href="https://t.me/c/enzyme_trend_russia/10552" target="_blank" rel="noopener" data-reveal>✈ Спросить о товаре — про моё состояние или препарат</a>
+
+          <div class="pp-meta">
+            <div class="pp-meta-item" data-reveal>
+              <h3>Состав</h3>
+              <p>${p.composition}</p>
+              <div class="vitamin-tags">${p.vitamins.map(v => `<span>${v}</span>`).join('')}</div>
+            </div>
+            <div class="pp-meta-item" data-reveal>
+              <h3>Эстетика производства</h3>
+              <div class="pp-craft">
+                ${p.fermented ? `<span class="craft-chip">Ферментировано ${p.fermented} ч</span>` : ''}
+                ${p.infused ? `<span class="craft-chip">Настояно ${p.infused} ч</span>` : ''}
+                <span class="craft-chip">Без термообработки</span>
+                <span class="craft-chip">10 атм</span>
+                <span class="craft-chip">Ручной труд</span>
+              </div>
+            </div>
+            <div class="pp-meta-item" data-reveal>
+              <h3>Эстетика вкуса</h3>
+              <p>${p.taste}</p>
+            </div>
+          </div>
+
+          <div class="pp-warning" data-reveal>
+            <h3>Применение и противопоказания</h3>
+            <p>Как принимать: 100–150 мл утром до еды, для новичка — схема в коробке. Когда ждать эффект: у большинства — день 1 / 3 / 7 / 14, возможные ощущения индивидуальны.</p>
+            <ul>
+              <li>Взрослые и дети с 3 лет; беременным — после консультации врача</li>
+              <li>Хранение: до открытия 6 месяцев при 4°C, после открытия — 14 дней</li>
+              <li>При приёме лекарств — интервал 1,5–2 часа, при сомнениях спросите нас</li>
+            </ul>
+            ${p.disclaimer ? `<p style="margin-top: 12px; font-style: italic;">${p.disclaimer}</p>` : ''}
+          </div>
+        </div>`;
+
+      /* галерея */
+      page.querySelectorAll('.pp-thumb').forEach(t => {
+        t.addEventListener('click', () => {
+          page.querySelectorAll('.pp-thumb').forEach(x => x.classList.remove('is-active'));
+          t.classList.add('is-active');
+          const main = document.getElementById('ppMain');
+          gsap.fromTo(main, { opacity: .4, scale: 1.02 }, { opacity: 1, scale: 1, duration: .5 });
+          main.src = t.dataset.src;
+        });
+      });
+
+      /* варианты объёма */
+      page.querySelectorAll('.pp-opt').forEach(o => {
+        o.addEventListener('click', () => {
+          page.querySelectorAll('.pp-opt').forEach(x => x.classList.remove('is-active'));
+          o.classList.add('is-active');
+        });
+      });
+
+      /* количество */
+      document.getElementById('qMinus').addEventListener('click', () => {
+        qty = Math.max(1, qty - 1);
+        document.getElementById('qVal').textContent = qty;
+      });
+      document.getElementById('qPlus').addEventListener('click', () => {
+        qty += 1;
+        document.getElementById('qVal').textContent = qty;
+      });
+      document.getElementById('ppAdd').addEventListener('click', () => {
+        ETRA_CART.add(p.id, qty);
+        ETRA_TOAST(`«${p.name}» × ${qty} — в корзине`);
+      });
+
+      /* недели */
+      const wkNames = ['Неделя 1', 'Неделя 2', 'Неделя 3', 'После курса'];
+      document.getElementById('weeksGrid').innerHTML = p.weeks.map((w, i) =>
+        `<div class="week-card" data-reveal><span class="wk">${wkNames[i]}</span><p>${w}</p></div>`).join('');
+
+      /* cross-sell */
+      document.getElementById('relatedGrid').innerHTML = (p.related || [])
+        .map(rid => ETRA_PRODUCTS.find(x => x.id === rid))
+        .filter(Boolean)
+        .map(rp => ETRA_CARD(rp))
+        .join('');
+
+      document.querySelectorAll('#productPage [data-reveal], #weeksGrid [data-reveal], #relatedGrid [data-reveal]').forEach((el, i) => {
+        ScrollTrigger.create({ trigger: el, start: 'top 92%', once: true, onEnter: () => setTimeout(() => el.classList.add('is-in'), (i % 8) * 50) });
+      });
+      ETRA_CART.refresh();
+      setTimeout(() => ScrollTrigger.refresh(), 200);
+    })();
+  </script>
+</body>
+</html>

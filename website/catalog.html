@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Каталог ЭТРА — комплексные и точечные решения</title>
+  <meta name="description" content="Каталог ЭТРА. Решения для всего тела — от смены микробиома до точечных задач. Энзимные коктейли, наборы, питание и чистки, съедобная косметика.">
+  <link rel="stylesheet" href="assets/fonts/fonts.css">
+  <link rel="stylesheet" href="assets/css/main.css">
+</head>
+<body>
+  <div class="grain" aria-hidden="true"></div>
+  <div class="cursor-dot" aria-hidden="true"></div>
+  <div class="cursor-ring" aria-hidden="true"></div>
+
+  <header class="header is-scrolled" id="header">
+    <a href="index.html" class="logo">ЭТРА<small>живые ферменты ручной работы</small></a>
+    <nav class="nav">
+      <a class="nav-link" href="catalog.html">Каталог</a>
+      <a class="nav-link" href="index.html#knowledge">База знаний</a>
+      <a class="nav-link" href="index.html#coop">Открыть вместе</a>
+      <a class="nav-link" href="index.html#community">Сообщество</a>
+    </nav>
+    <div class="header-actions">
+      <a href="#" class="cart-btn" aria-label="Корзина" data-cart-open>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M6 7h12l1 13a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1l1-13Z"/><path d="M9 7V6a3 3 0 0 1 6 0v1"/></svg>
+        <span class="cart-count is-empty" data-cart-count>0</span>
+      </a>
+      <button class="burger" id="burger" aria-label="Меню"><i></i><i></i><i></i></button>
+    </div>
+  </header>
+
+  <div class="mobile-menu" id="mobileMenu">
+    <a href="index.html">Главная <span>этра</span></a>
+    <a href="catalog.html">Каталог <span>18 позиций</span></a>
+    <a href="start.html">С чего начать <span>тест 30 сек</span></a>
+    <a href="index.html#knowledge">База знаний <span>википедия</span></a>
+    <a href="index.html#coop">Открыть вместе <span>МПК</span></a>
+  </div>
+
+  <main>
+    <div class="page-hero">
+      <div class="breadcrumbs" data-reveal><a href="index.html">Главная</a><span>→</span><span>Каталог</span></div>
+      <span class="label" data-reveal>Каталог</span>
+      <h1 class="h-1" data-reveal-line>
+        <span class="rl-line"><span class="rl-inner">Решения для всего тела —</span></span>
+        <span class="rl-line"><span class="rl-inner">от <em class="accent-italic">смены микробиома</em> до точечных задач</span></span>
+      </h1>
+    </div>
+
+    <div class="filter-bar" id="filterBar"></div>
+    <p class="catalog-count" id="catalogCount"></p>
+
+    <div class="catalog-grid-wrap">
+      <div class="product-grid" id="catalogGrid"></div>
+    </div>
+  </main>
+
+  <footer class="footer">
+    <div class="footer-top">
+      <div>
+        <div class="logo">ЭТРА<small>живые ферменты ручной работы</small></div>
+        <p class="footer-mission">Этра — наука питания на истоках древнего знания. Инструмент на всю жизнь.</p>
+      </div>
+      <div class="footer-col">
+        <h4>Покупка</h4>
+        <a href="catalog.html">Каталог</a><a href="#">Доставка</a><a href="#">Возврат</a>
+      </div>
+      <div class="footer-col">
+        <h4>Бренд</h4>
+        <a href="index.html#manifesto">Об ЭТРА</a><a href="index.html#coop">Производство</a><a href="index.html#team">Команда</a>
+      </div>
+      <div class="footer-col">
+        <h4>Документы</h4>
+        <a href="#">Сертификаты</a><a href="#">Оферта</a>
+      </div>
+      <div class="footer-col">
+        <h4>Сообщество</h4>
+        <a href="https://t.me/c/enzyme_trend_russia/2301" target="_blank" rel="noopener">Telegram-канал</a>
+        <a href="https://t.me/c/enzyme_trend_russia/10552" target="_blank" rel="noopener">Чат поддержки</a>
+      </div>
+    </div>
+    <div class="footer-bottom"><span>© 2026 ЭТРА</span><span>Не нашли своё? Спросите в Telegram — подскажем</span></div>
+    <p class="footer-disclaimer">Продукция ЭТРА не является лекарственным средством.</p>
+  </footer>
+
+  <button class="support-fab" id="supportFab" aria-label="Поддержка">
+    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M21 11.5a8.38 8.38 0 0 1-9 8.36 8.5 8.5 0 0 1-3.4-.66L3 21l1.8-5.6A8.38 8.38 0 0 1 3.64 8 8.5 8.5 0 0 1 12 3.14 8.38 8.38 0 0 1 21 11.5Z"/></svg>
+  </button>
+  <div class="support-pop" id="supportPop">
+    <h4>Быстрая поддержка</h4>
+    <p class="sp-sub">Тепло и легко — без авторизации</p>
+    <a href="https://t.me/c/enzyme_trend_russia/10552" target="_blank" rel="noopener"><span class="ico">✈</span> Спросить в Telegram</a>
+    <a href="#"><span class="ico">✆</span> Позвонить</a>
+    <a href="#"><span class="ico">✉</span> Написать менеджеру</a>
+  </div>
+
+  <nav class="bottom-nav">
+    <a href="index.html"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 10.5 12 3l9 7.5V21H3v-10.5Z"/></svg>Главная</a>
+    <a href="catalog.html" class="is-active"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="3" width="8" height="8" rx="2"/><rect x="13" y="3" width="8" height="8" rx="2"/><rect x="3" y="13" width="8" height="8" rx="2"/><rect x="13" y="13" width="8" height="8" rx="2"/></svg>Каталог</a>
+    <a href="start.html"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="9"/><path d="m9 12 2 2 4-5"/></svg>Старт</a>
+    <a href="#" data-cart-open><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M6 7h12l1 13a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1l1-13Z"/><path d="M9 7V6a3 3 0 0 1 6 0v1"/></svg>Корзина</a>
+    <a href="index.html#coop"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 3v18M3 12h18"/></svg>Вместе</a>
+  </nav>
+
+  <div class="toast" id="toast"><span class="dot"></span><span id="toastMsg">Добавлено в корзину</span></div>
+
+  <script src="assets/vendor/gsap.min.js"></script>
+  <script src="assets/vendor/ScrollTrigger.min.js"></script>
+  <script src="assets/vendor/lenis.min.js"></script>
+  <script src="assets/js/data.js"></script>
+  <script src="assets/js/main.js"></script>
+  <script>
+    (function () {
+      const bar = document.getElementById('filterBar');
+      const grid = document.getElementById('catalogGrid');
+      const count = document.getElementById('catalogCount');
+      const drinkCats = ['cocktails', 'seasonal'];
+
+      function filterProducts(cat) {
+        if (cat === 'all') return ETRA_PRODUCTS.filter(p => drinkCats.includes(p.cat));
+        return ETRA_PRODUCTS.filter(p => p.cat === cat);
+      }
+
+      function render(cat) {
+        const list = filterProducts(cat);
+        count.textContent = `Найдено ${list.length} ${plural(list.length)}`;
+        const cards = list.map(p => ETRA_CARD(p));
+        // inline-квиз в середину сетки
+        const quiz = `
+          <div class="quiz-inline" data-reveal>
+            <span class="label">Подобрать персонально</span>
+            <h3>Не определились? Тест за 30 секунд подберёт ваш напиток</h3>
+            <a href="start.html" class="btn btn-gold">Пройти тест <span class="arr">→</span></a>
+          </div>`;
+        if (cards.length > 3) cards.splice(3, 0, quiz); else cards.push(quiz);
+        grid.innerHTML = cards.join('');
+        grid.querySelectorAll('[data-reveal]').forEach((el, i) => {
+          setTimeout(() => el.classList.add('is-in'), 60 * i);
+        });
+        ETRA_CART.refresh();
+      }
+
+      function plural(n) {
+        const m10 = n % 10, m100 = n % 100;
+        if (m10 === 1 && m100 !== 11) return 'позиция';
+        if (m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14)) return 'позиции';
+        return 'позиций';
+      }
+
+      bar.innerHTML = ETRA_CATS.map(c =>
+        `<button class="filter-chip" data-cat="${c.id}">${c.name}</button>`
+      ).join('');
+
+      function activate(cat) {
+        bar.querySelectorAll('.filter-chip').forEach(ch =>
+          ch.classList.toggle('is-active', ch.dataset.cat === cat));
+        render(cat);
+      }
+      bar.addEventListener('click', e => {
+        const chip = e.target.closest('.filter-chip');
+        if (chip) { history.replaceState(null, '', '#' + chip.dataset.cat); activate(chip.dataset.cat); }
+      });
+
+      const initial = location.hash.replace('#', '');
+      activate(ETRA_CATS.some(c => c.id === initial) ? initial : 'all');
+    })();
+  </script>
+</body>
+</html>

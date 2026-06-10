@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>С чего начать — подбор за 30 секунд · ЭТРА</title>
+  <meta name="description" content="Узнайте за 30 секунд, что вам подходит: тест ЭТРА подберёт живой энзимный напиток под вашу задачу.">
+  <link rel="stylesheet" href="assets/fonts/fonts.css">
+  <link rel="stylesheet" href="assets/css/main.css">
+</head>
+<body class="theme-dark">
+  <div class="grain" aria-hidden="true"></div>
+  <div class="cursor-dot" aria-hidden="true"></div>
+  <div class="cursor-ring" aria-hidden="true"></div>
+
+  <header class="header" id="header">
+    <a href="index.html" class="logo">ЭТРА<small>живые ферменты ручной работы</small></a>
+    <nav class="nav">
+      <a class="nav-link" href="catalog.html">Каталог</a>
+      <a class="nav-link" href="index.html#knowledge">База знаний</a>
+      <a class="nav-link" href="index.html#coop">Открыть вместе</a>
+    </nav>
+    <div class="header-actions">
+      <a href="#" class="cart-btn" aria-label="Корзина" data-cart-open>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M6 7h12l1 13a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1l1-13Z"/><path d="M9 7V6a3 3 0 0 1 6 0v1"/></svg>
+        <span class="cart-count is-empty" data-cart-count>0</span>
+      </a>
+      <button class="burger" id="burger" aria-label="Меню"><i></i><i></i><i></i></button>
+    </div>
+  </header>
+
+  <div class="mobile-menu" id="mobileMenu">
+    <a href="index.html">Главная <span>этра</span></a>
+    <a href="catalog.html">Каталог <span>18 позиций</span></a>
+  </div>
+
+  <div class="quiz-page">
+    <div class="quiz-body">
+      <div class="quiz-card" id="quizCard">
+        <div class="quiz-progress" id="quizProgress"></div>
+        <div id="quizStage"></div>
+        <button class="quiz-back" id="quizBack" style="display:none;">← Назад</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast" id="toast"><span class="dot"></span><span id="toastMsg"></span></div>
+
+  <script src="assets/vendor/gsap.min.js"></script>
+  <script src="assets/vendor/ScrollTrigger.min.js"></script>
+  <script src="assets/vendor/lenis.min.js"></script>
+  <script src="assets/js/data.js"></script>
+  <script src="assets/js/main.js"></script>
+  <script>
+    (function () {
+      const questions = [
+        {
+          q: 'Что сейчас важнее всего для вашего тела?',
+          opts: [
+            { t: 'Энергия и ясная голова', score: { energetik: 3, oblepiha: 1 } },
+            { t: 'Пищеварение и лёгкость', score: { tarhun: 3, kvas: 2 } },
+            { t: 'Иммунитет и защита', score: { 'vitamin-c': 3, oblepiha: 2 } },
+            { t: 'Спокойствие и сон', score: { rodnik: 3, hmel: 2 } }
+          ]
+        },
+        {
+          q: 'Как вы относитесь к ферментированным вкусам?',
+          opts: [
+            { t: 'Обожаю — квас, комбуча, всё моё', score: { kvas: 2, tarhun: 1 } },
+            { t: 'Нейтрально, главное — результат', score: { 'nabor-microbiome': 2 } },
+            { t: 'Осторожно, хочу начать с мягкого', score: { rodnik: 2, oblepiha: 1 } },
+            { t: 'Хочу вкусно, как лимонад из детства', score: { tarhun: 2, oblepiha: 2 } }
+          ]
+        },
+        {
+          q: 'Был ли опыт чисток или курсов?',
+          opts: [
+            { t: 'Да, регулярно практикую', score: { 'nabor-microbiome': 3, parazitoff: 1 } },
+            { t: 'Пробовал(а), но без системы', score: { 'nabor-microbiome': 2 } },
+            { t: 'Нет, я только присматриваюсь', score: { oblepiha: 2, rodnik: 1 } }
+          ]
+        },
+        {
+          q: 'Сколько человек будет пить напитки?',
+          opts: [
+            { t: 'Только я', score: {} },
+            { t: 'Мы вдвоём', score: { 'nabor-microbiome': 1 } },
+            { t: 'Вся семья, включая детей', score: { kvas: 1, tarhun: 1, oblepiha: 1 } }
+          ]
+        },
+        {
+          q: 'Есть ли что-то из этого?',
+          opts: [
+            { t: 'Принимаю лекарства постоянно', flag: 'meds', score: {} },
+            { t: 'Беременность / кормление', flag: 'preg', score: {} },
+            { t: 'Ничего из перечисленного', score: {} }
+          ]
+        }
+      ];
+
+      const stage = document.getElementById('quizStage');
+      const progress = document.getElementById('quizProgress');
+      const back = document.getElementById('quizBack');
+      let step = 0;
+      const answers = [];
+      const scores = {};
+      const flags = [];
+
+      progress.innerHTML = questions.map(() => '<i></i>').join('');
+
+      function renderQ() {
+        const q = questions[step];
+        progress.querySelectorAll('i').forEach((i, idx) => i.classList.toggle('is-done', idx < step));
+        back.style.display = step > 0 ? 'inline-block' : 'none';
+        stage.innerHTML = `
+          <h1 class="quiz-q">${q.q}</h1>
+          <div class="quiz-opts">
+            ${q.opts.map((o, i) => `<button class="quiz-opt" data-i="${i}"><span class="key">${i + 1}</span>${o.t}</button>`).join('')}
+          </div>`;
+        gsap.fromTo(stage.children, { opacity: 0, y: 26 }, { opacity: 1, y: 0, duration: .6, stagger: .08, ease: 'power3.out' });
+        stage.querySelectorAll('.quiz-opt').forEach(btn => {
+          btn.addEventListener('click', () => answer(parseInt(btn.dataset.i, 10)));
+        });
+      }
+
+      function answer(i) {
+        const opt = questions[step].opts[i];
+        answers[step] = i;
+        Object.entries(opt.score).forEach(([id, v]) => scores[id] = (scores[id] || 0) + v);
+        if (opt.flag) flags.push(opt.flag);
+        step++;
+        if (step < questions.length) renderQ(); else renderResult();
+      }
+
+      back.addEventListener('click', () => {
+        if (step === 0) return;
+        step--;
+        /* пересчёт с нуля */
+        Object.keys(scores).forEach(k => delete scores[k]);
+        flags.length = 0;
+        for (let s = 0; s < step; s++) {
+          const o = questions[s].opts[answers[s]];
+          Object.entries(o.score).forEach(([id, v]) => scores[id] = (scores[id] || 0) + v);
+          if (o.flag) flags.push(o.flag);
+        }
+        renderQ();
+      });
+
+      function renderResult() {
+        progress.querySelectorAll('i').forEach(i => i.classList.add('is-done'));
+        back.style.display = 'none';
+        const bestId = Object.entries(scores).sort((a, b) => b[1] - a[1])[0]?.[0] || 'oblepiha';
+        const p = ETRA_PRODUCTS.find(x => x.id === bestId) || ETRA_PRODUCTS[0];
+        const caution = flags.length
+          ? `<p class="muted" style="margin-top: 18px; font-size: 13.5px;">Вы отметили ${flags.includes('preg') ? 'беременность/кормление' : 'постоянный приём лекарств'} — перед стартом напишите нам в Telegram, подскажем мягкую схему под вашу ситуацию.</p>`
+          : '';
+        stage.innerHTML = `
+          <div class="quiz-result">
+            <span class="label">Ваш результат</span>
+            <h1 class="quiz-q" style="margin-bottom: 10px;">Начните с «${p.name}»</h1>
+            <p class="muted">${p.desc}</p>
+            ${caution}
+            <div class="quiz-result-product">
+              <img src="${p.img}" alt="${p.name}">
+              <div>
+                <h3>${p.name}</h3>
+                <p class="p-task">${p.task}</p>
+                <span class="p-price" style="color: var(--gold-bright);">${p.price.toLocaleString('ru-RU')} ₽</span>
+              </div>
+            </div>
+            <div style="display:flex; gap: 14px; justify-content:center; flex-wrap:wrap;">
+              <button class="btn btn-gold" id="resAdd">В корзину <span class="arr">→</span></button>
+              <a class="btn btn-line-dark" href="product.html?id=${p.id}">Подробнее о продукте</a>
+              <a class="btn btn-line-dark" href="catalog.html">Весь каталог</a>
+            </div>
+          </div>`;
+        gsap.fromTo(stage.children, { opacity: 0, y: 26 }, { opacity: 1, y: 0, duration: .7, ease: 'power3.out' });
+        document.getElementById('resAdd').addEventListener('click', () => {
+          ETRA_CART.add(p.id);
+          ETRA_TOAST(`«${p.name}» — в корзине`);
+        });
+      }
+
+      renderQ();
+    })();
+  </script>
+</body>
+</html>
